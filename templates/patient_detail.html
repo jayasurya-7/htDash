@@ -194,7 +194,7 @@
               <p class="text-xs text-slate-400 font-medium mb-0.5">A2 Assessment</p>
               <p id="date-a2" class="text-sm font-semibold text-slate-800">—</p>
             </div>
-            <div>
+            <div id="date-discontinuation-row" class="hidden">
               <p class="text-xs text-slate-400 font-medium mb-0.5">Discontinuation</p>
               <p id="date-discontinuation" class="text-sm font-semibold text-slate-800">—</p>
             </div>
@@ -358,10 +358,11 @@
                 placeholder="Add any notes…"></textarea>
     </div>
     <p id="a1-error" class="text-sm text-red-500 hidden mb-3"></p>
-    <div class="flex gap-3">
+    <div class="flex gap-3 mb-2">
       <button type="button" onclick="hideModal('a1-modal')" class="flex-1 px-4 py-3 border border-slate-200 rounded-xl text-slate-600 font-medium hover:bg-slate-50">Close</button>
       <button type="button" id="a1-submit" onclick="saveA1Assessment()" class="flex-1 px-4 py-3 bg-violet-600 text-white rounded-xl font-medium hover:bg-violet-700">Record</button>
     </div>
+    <button type="button" onclick="markAssessmentMissed('a1')" class="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm text-slate-500 font-medium hover:bg-slate-50">Mark as Missed</button>
   </div>
 </div>
 
@@ -395,10 +396,11 @@
                 placeholder="Add any notes…"></textarea>
     </div>
     <p id="a2-error" class="text-sm text-red-500 hidden mb-3"></p>
-    <div class="flex gap-3">
+    <div class="flex gap-3 mb-2">
       <button type="button" onclick="hideModal('a2-modal')" class="flex-1 px-4 py-3 border border-slate-200 rounded-xl text-slate-600 font-medium hover:bg-slate-50">Close</button>
       <button type="button" id="a2-submit" onclick="saveA2Assessment()" class="flex-1 px-4 py-3 bg-green-600 text-white rounded-xl font-medium hover:bg-green-700">Record</button>
     </div>
+    <button type="button" onclick="markAssessmentMissed('a2')" class="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm text-slate-500 font-medium hover:bg-slate-50">Mark as Missed</button>
   </div>
 </div>
 
@@ -1244,11 +1246,26 @@
         <input id="followup-call-duration" type="number" min="1" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" placeholder="e.g. 20" />
       </div>
       <div>
-        <label class="block text-sm font-medium text-slate-700 mb-1">Event Notes</label>
+        <label class="block text-sm font-medium text-slate-700 mb-1">Event Notes <span class="text-red-500">*</span></label>
         <textarea id="followup-call-notes" rows="3" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 resize-none" placeholder="Summary of the call…"></textarea>
       </div>
 
       {{ attachment_section('followup-call') }}
+
+      <!-- AE discussion — shown only when an adverse_event_followup stub exists -->
+      <div id="fc-ae-section" class="hidden border border-amber-200 bg-amber-50 rounded-xl p-4 space-y-2">
+        <p class="text-sm font-semibold text-amber-800">Adverse Event Discussion</p>
+        <p class="text-xs text-amber-700">There is an ongoing adverse event follow-up. Did any AE-related discussion happen during this call?</p>
+        <input type="hidden" id="fc-ae-discussed" value="">
+        <div class="flex gap-3 pt-1">
+          <button type="button" id="fc-ae-yes-btn"
+                  onclick="_fcSelectAeDiscussed(true)"
+                  class="flex-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-600 font-medium hover:bg-slate-100 transition-colors">Yes</button>
+          <button type="button" id="fc-ae-no-btn"
+                  onclick="_fcSelectAeDiscussed(false)"
+                  class="flex-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-600 font-medium hover:bg-slate-100 transition-colors">No</button>
+        </div>
+      </div>
 
       <!-- ── Triggered events ─────────────────────────────────────────── -->
       <div class="border-t border-slate-100 pt-4">
@@ -1297,6 +1314,7 @@
           </div>
         </div>
       </div>
+
       <div class="h-1"></div>
     </div>
     <div class="px-6 pt-3 pb-6 shrink-0 border-t border-slate-100">

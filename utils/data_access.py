@@ -99,9 +99,9 @@ def derive_status(patient: dict) -> str:
     if patient.get('trainingPausedDate'):
         return 'paused'
 
-    if a2:
+    if a2 or patient.get('a2MissedDate'):
         return 'all_completed'
-    if a1:
+    if a1 or patient.get('a1MissedDate'):
         return 'a1_completed'
     if training:
         return 'training_completed'

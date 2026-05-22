@@ -296,9 +296,39 @@ function renderOverview(p) {
   set('date-a0',             fmtDate(p.a0CompletionDate));
   set('date-activation',     fmtDate(p.activationDate));
   set('date-training',       fmtDate(p.trainingCompletionDate));
-  set('date-a1',             fmtDate(p.a1CompletionDate));
-  set('date-a2',             fmtDate(p.a2CompletionDate));
+  const discRow = document.getElementById('date-discontinuation-row');
+  if (discRow) discRow.classList.toggle('hidden', !p.discontinuationDate);
   set('date-discontinuation',fmtDate(p.discontinuationDate));
+
+  // A1 key date: Missed / Delayed / normal
+  const a1DateEl = document.getElementById('date-a1');
+  if (a1DateEl) {
+    if (p.a1MissedDate) {
+      a1DateEl.innerHTML = '<span class="text-slate-400 font-normal">Missed</span>';
+    } else if (p.a1CompletionDate) {
+      const a1Win = _assessmentWindows['a1_assessment'];
+      const delayed = a1Win && p.a1CompletionDate.slice(0, 10) > a1Win.end;
+      a1DateEl.innerHTML = fmtDate(p.a1CompletionDate)
+        + (delayed ? ' <span class="inline-flex items-center gap-0.5 text-xs font-semibold bg-amber-100 text-amber-700 border border-amber-200 rounded-full px-1.5 py-0.5"><i class="fas fa-clock text-[9px]"></i>Delayed</span>' : '');
+    } else {
+      a1DateEl.textContent = '—';
+    }
+  }
+
+  // A2 key date: Missed / Delayed / normal
+  const a2DateEl = document.getElementById('date-a2');
+  if (a2DateEl) {
+    if (p.a2MissedDate) {
+      a2DateEl.innerHTML = '<span class="text-slate-400 font-normal">Missed</span>';
+    } else if (p.a2CompletionDate) {
+      const a2Win = _assessmentWindows['a2_assessment'];
+      const delayed = a2Win && p.a2CompletionDate.slice(0, 10) > a2Win.end;
+      a2DateEl.innerHTML = fmtDate(p.a2CompletionDate)
+        + (delayed ? ' <span class="inline-flex items-center gap-0.5 text-xs font-semibold bg-amber-100 text-amber-700 border border-amber-200 rounded-full px-1.5 py-0.5"><i class="fas fa-clock text-[9px]"></i>Delayed</span>' : '');
+    } else {
+      a2DateEl.textContent = '—';
+    }
+  }
 
   // Days elapsed counter
   const terminal  = new Set(['discontinued', 'all_completed', 'pre_discontinued']);
@@ -618,7 +648,18 @@ function _openAssessmentModal(which, ev) {
 }
 
 function openA1AssessmentModal(ev) { _openAssessmentModal('a1', ev); }
-function openA2AssessmentModal(ev) { _openAssessmentModal('a2', ev); }
+
+function openA2AssessmentModal(ev) {
+  // Check if A1 is still incomplete (not missed, not complete)
+  const a1Incomplete = (eventsCache || []).some(e => e.protocol_event_id === 'a1_assessment');
+  if (a1Incomplete) {
+    const ok = window.confirm(
+      'A1 assessment has not been completed.\n\nFiling A2 will automatically mark A1 as missed.\n\nContinue?'
+    );
+    if (!ok) return;
+  }
+  _openAssessmentModal('a2', ev);
+}
 
 function openScheduleA1CallModal(ev) {
   _schedA1EventId = ev ? ev.id : null;
@@ -700,11 +741,24 @@ async function _initiateDiscontinuation() {
 // ── Modal submitters ──────────────────────────────────────────────────────────
 
 
+function _isOutsideAssessmentWindow(which, dateVal) {
+  const win = _assessmentWindows[`${which}_assessment`];
+  if (!win) return false;
+  const d = dateVal.slice(0, 10);
+  return d < win.start || d > win.end;
+}
+
 async function saveA1Assessment() {
   const date  = document.getElementById('a1-date').value;
   const notes = document.getElementById('a1-notes').value.trim();
   if (!date) { setError('a1-error', 'Please select an assessment date.'); return; }
   if (_hasDateValidationErrors(['a1-error'])) return;
+  if (_isOutsideAssessmentWindow('a1', date)) {
+    const ok = window.confirm(
+      'The selected date is outside the A1 assessment window. Are you sure you want to proceed?'
+    );
+    if (!ok) return;
+  }
   const payload = { completion_date: date, notes };
   if (_a1AssessmentEventId) payload.event_id = _a1AssessmentEventId;
   const { ok, data } = await apiPost(
@@ -721,6 +775,22 @@ async function saveA2Assessment() {
   const notes = document.getElementById('a2-notes').value.trim();
   if (!date) { setError('a2-error', 'Please select an assessment date.'); return; }
   if (_hasDateValidationErrors(['a2-error'])) return;
+  if (_isOutsideAssessmentWindow('a2', date)) {
+    const ok = window.confirm(
+      'The selected date is outside the A2 assessment window. Are you sure you want to proceed?'
+    );
+    if (!ok) return;
+  }
+  // Auto-miss A1 if still open (user already confirmed in openA2AssessmentModal)
+  const a1Stub = (eventsCache || []).find(e => e.protocol_event_id === 'a1_assessment');
+  if (a1Stub) {
+    const missPayload = { assessment_type: 'a1' };
+    if (a1Stub.id) missPayload.event_id = a1Stub.id;
+    const { ok: missOk, data: missData } = await apiPost(
+      `/api/patients/${PATIENT_HOMER_ID}/complete-event/miss-assessment`, missPayload
+    );
+    if (!missOk) { setError('a2-error', missData.error || 'Failed to auto-miss A1.'); return; }
+  }
   const payload = { completion_date: date, notes };
   if (_a2AssessmentEventId) payload.event_id = _a2AssessmentEventId;
   const { ok, data } = await apiPost(
@@ -728,6 +798,28 @@ async function saveA2Assessment() {
   );
   if (!ok) { setError('a2-error', data.error || 'Failed to record A2.'); return; }
   hideModal('a2-modal');
+  await loadPatientEvents();
+  loadPatient();
+}
+
+async function markAssessmentMissed(which) {
+  const label = which.toUpperCase();
+  const ok1 = window.confirm(
+    `Mark ${label} assessment as missed?\n\nThis indicates the patient confirmed they will not attend.`
+  );
+  if (!ok1) return;
+  const ok2 = window.confirm(
+    `Are you sure? Marking ${label} as missed cannot be undone.`
+  );
+  if (!ok2) return;
+  const eventId = which === 'a1' ? _a1AssessmentEventId : _a2AssessmentEventId;
+  const payload = { assessment_type: which };
+  if (eventId) payload.event_id = eventId;
+  const { ok, data } = await apiPost(
+    `/api/patients/${PATIENT_HOMER_ID}/complete-event/miss-assessment`, payload
+  );
+  if (!ok) { setError(`${which}-error`, data.error || `Failed to mark ${label} as missed.`); return; }
+  hideModal(`${which}-modal`);
   await loadPatientEvents();
   loadPatient();
 }
@@ -874,6 +966,9 @@ async function loadPatientEvents() {
       }
     }
     _hasDiscontinuationStub = overdue.some(e => e.protocol_event_id === 'discontinuation');
+
+    // Re-render overview now that _assessmentWindows is populated (needed for Delayed badge in key dates)
+    if (patientData) renderOverview(patientData);
 
     // Set discontinued flag and show banner if patient is discontinued
     _patientDiscontinued = !!patientData?.discontinuationDate;
@@ -1267,12 +1362,24 @@ function renderTimelineTab() {
     const dayLabel = dayNum !== null ? `Day ${dayNum}` : null;
     const isSynthetic = !!ev._synthetic;
     const isDisc      = ev.protocol_event_id === 'discontinuation';
+    const _ASSESS_PIDS = new Set(['a1_assessment', 'a2_assessment']);
+    const isAssessmentEv = _ASSESS_PIDS.has(ev.protocol_event_id);
+    const isMissed    = isAssessmentEv && !!ev.missed;
+    const isDelayed   = isAssessmentEv && !isMissed && !!ev.completion_date && Array.isArray(ev.scheduled_date)
+                        && ev.completion_date.slice(0, 10) > ev.scheduled_date[1].slice(0, 10);
     const circleCls   = isSynthetic ? 'bg-blue-500 ring-blue-300'
                       : isDisc      ? 'bg-red-500 ring-red-300'
+                      : isMissed    ? 'bg-slate-400 ring-slate-300'
                       :               'bg-green-500 ring-green-300';
     const badge       = !isSynthetic ? _transitionBadgeHtml(transitions.get(ev.id)) : '';
     const discBadge   = isDisc
       ? `<span class="inline-flex items-center gap-1 text-xs font-semibold bg-red-100 text-red-700 border border-red-200 rounded-full px-2 py-0.5 mt-1"><i class="fas fa-ban text-[10px]"></i>Discontinued</span>`
+      : '';
+    const missedBadge = isMissed
+      ? `<span class="inline-flex items-center gap-1 text-xs font-semibold bg-slate-100 text-slate-600 border border-slate-300 rounded-full px-2 py-0.5 mt-1"><i class="fas fa-times-circle text-[10px]"></i>Missed</span>`
+      : '';
+    const delayedBadge = isDelayed
+      ? `<span class="inline-flex items-center gap-1 text-xs font-semibold bg-amber-100 text-amber-700 border border-amber-200 rounded-full px-2 py-0.5 mt-1"><i class="fas fa-clock text-[10px]"></i>Delayed</span>`
       : '';
     const rowHighlight = isDisc ? 'bg-red-50 rounded-lg' : rowBg;
     const nameCls      = isDisc ? 'text-sm font-bold text-red-700' : 'text-sm font-semibold text-slate-800';
@@ -1284,6 +1391,8 @@ function renderTimelineTab() {
           ${dayLabel ? `<p class="text-sm font-semibold text-indigo-500 mt-1">${dayLabel}</p>` : ''}
           ${badge}
           ${discBadge}
+          ${missedBadge}
+          ${delayedBadge}
         </div>
         <div class="flex flex-col items-center pt-2">
           <div class="w-3 h-3 rounded-full ${circleCls} border-2 border-white ring-1 z-10 flex-shrink-0"></div>
@@ -1506,7 +1615,11 @@ function _adverseEventCard(ev, followupEvents) {
   // Follow-up history rows
   const followupRows = related.map(fe => {
     const disc      = (fe.ae_discussions || []).find(d => d.adverse_event_id === ev.id);
-    const typeLabel = _AEF_TYPE_LABELS[fe.protocol_event_id] || fe.protocol_event_id;
+    const aeAliases = (fe.adverse_event_ids || [])
+      .map(aeId => (_completeEventsCache || []).find(e => e.id === aeId)?.alias)
+      .filter(Boolean).join(', ');
+    const typeLabel = (_AEF_TYPE_LABELS[fe.protocol_event_id] || fe.protocol_event_id)
+      + (aeAliases ? `: ${aeAliases}` : '');
     const feDate    = fe.completion_date ? _fmtDateTime(fe.completion_date) : '—';
     const feNotes   = fe.notes   ? `<p class="text-xs text-slate-500 mt-0.5">${fe.notes}</p>`        : '';
     const discNotes = disc?.notes ? `<p class="text-xs text-slate-500 mt-0.5 italic">${disc.notes}</p>` : '';
@@ -2435,6 +2548,10 @@ function openAdverseEventFollowupModal(ev) {
          </div>` : '';
     return `<div class="p-3 rounded-xl border border-slate-200 bg-slate-50 space-y-2">
       <div class="text-sm font-medium text-slate-700">${ae.alias || 'Adverse Event'} — ${dateStr}</div>
+      <div>
+        <label class="block text-xs font-medium text-slate-600 mb-1">Discussion notes</label>
+        <textarea id="aef-disc-${i}" rows="2" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-blue-300 resize-none" placeholder="What was discussed for this AE…"></textarea>
+      </div>
       <label class="flex items-center gap-2 cursor-pointer select-none">
         <input type="checkbox" id="aef-resolved-${i}" onchange="_aefToggleResume(${i})" class="w-4 h-4 rounded border-slate-300">
         <span class="text-sm text-slate-700">Resolved</span>
@@ -2453,12 +2570,37 @@ function openAdverseEventFollowupModal(ev) {
   showModal('adverse-event-followup-modal');
 }
 
+function _aeAllResolved(prefix, count) {
+  for (let i = 0; i < count; i++) {
+    if (!document.getElementById(`${prefix}-resolved-${i}`)?.checked) return false;
+  }
+  return true;
+}
+
+function _aeUpdateSchedulingOnResolve(prefix, count) {
+  const allResolved = _aeAllResolved(prefix, count);
+  ['visit', 'clinical'].forEach(kind => {
+    const cb       = document.getElementById(`${prefix}-schedule-${kind}`);
+    const dateWrap = document.getElementById(`${prefix}-${kind}-date-wrap`);
+    const dateInput = document.getElementById(`${prefix}-${kind}-date`);
+    if (!cb) return;
+    cb.disabled = allResolved;
+    if (allResolved && cb.checked) {
+      cb.checked = false;
+      if (dateWrap)  dateWrap.classList.add('hidden');
+      if (dateInput) dateInput.value = '';
+    }
+  });
+}
+
 function _aefToggleResume(i) {
-  const wrap = document.getElementById(`aef-resume-wrap-${i}`);
-  if (!wrap) return;
   const resolved = document.getElementById(`aef-resolved-${i}`).checked;
-  wrap.classList.toggle('hidden', !resolved);
-  if (!resolved) document.getElementById(`aef-resume-${i}`).value = '';
+  const wrap = document.getElementById(`aef-resume-wrap-${i}`);
+  if (wrap) {
+    wrap.classList.toggle('hidden', !resolved);
+    if (!resolved) document.getElementById(`aef-resume-${i}`).value = '';
+  }
+  _aeUpdateSchedulingOnResolve('aef', _aefAeDetails.length);
 }
 
 async function saveAdverseEventFollowup() {
@@ -2485,7 +2627,8 @@ async function saveAdverseEventFollowup() {
         return;
       }
     }
-    ae_discussions.push({ adverse_event_id: ae.id, resolved, can_resume_from });
+    const notes = document.getElementById(`aef-disc-${i}`)?.value.trim() || null;
+    ae_discussions.push({ adverse_event_id: ae.id, notes, resolved, can_resume_from });
   }
 
   const { scheduledFollowupVisit, scheduledClinicalVisit, error: schedError } = _collectAeScheduling('aef');
@@ -2542,11 +2685,14 @@ function _buildAeVisitRows(prefix, aeDetails) {
 }
 
 function _aeVisitToggleResume(prefix, i) {
-  const wrap = document.getElementById(`${prefix}-resume-wrap-${i}`);
-  if (!wrap) return;
   const resolved = document.getElementById(`${prefix}-resolved-${i}`).checked;
-  wrap.classList.toggle('hidden', !resolved);
-  if (!resolved) document.getElementById(`${prefix}-resume-${i}`).value = '';
+  const wrap = document.getElementById(`${prefix}-resume-wrap-${i}`);
+  if (wrap) {
+    wrap.classList.toggle('hidden', !resolved);
+    if (!resolved) document.getElementById(`${prefix}-resume-${i}`).value = '';
+  }
+  const count = prefix === 'aefv' ? _aefvAeDetails.length : _aecvAeDetails.length;
+  _aeUpdateSchedulingOnResolve(prefix, count);
 }
 
 function _collectAeDiscussions(prefix, aeDetails) {
@@ -3221,16 +3367,27 @@ async function saveResolveRobotIssueVisit() {
 
 
 function completedTimeline(events) {
+  const _ASSESS_PIDS_CT = new Set(['a1_assessment', 'a2_assessment']);
   const items = events.map((ev, i) => {
     const raw = ev.completion_date || ev.filed_at || '';
     const d   = raw ? new Date(raw) : null;
     const dateStr = d ? d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }) : '—';
     const isLast  = i === events.length - 1;
     const isDisc  = ev.protocol_event_id === 'discontinuation';
-    const circleCls = isDisc ? 'bg-red-500 ring-red-300' : 'bg-green-500 ring-green-300';
+    const isAssEv = _ASSESS_PIDS_CT.has(ev.protocol_event_id);
+    const isMissedCT  = isAssEv && !!ev.missed;
+    const isDelayedCT = isAssEv && !isMissedCT && !!ev.completion_date && Array.isArray(ev.scheduled_date)
+                        && ev.completion_date.slice(0, 10) > ev.scheduled_date[1].slice(0, 10);
+    const circleCls = isDisc     ? 'bg-red-500 ring-red-300'
+                    : isMissedCT ? 'bg-slate-400 ring-slate-300'
+                    :               'bg-green-500 ring-green-300';
     const nameCls   = isDisc ? 'text-sm font-bold text-red-700 leading-tight' : 'text-sm font-medium text-slate-800 leading-tight';
     const badge     = isDisc
       ? `<span class="inline-flex items-center gap-1 text-xs font-semibold bg-red-100 text-red-700 border border-red-200 rounded-full px-2 py-0.5 mt-1"><i class="fas fa-ban text-[10px]"></i>Discontinued</span>`
+      : isMissedCT
+      ? `<span class="inline-flex items-center gap-1 text-xs font-semibold bg-slate-100 text-slate-600 border border-slate-300 rounded-full px-2 py-0.5 mt-1"><i class="fas fa-times-circle text-[10px]"></i>Missed</span>`
+      : isDelayedCT
+      ? `<span class="inline-flex items-center gap-1 text-xs font-semibold bg-amber-100 text-amber-700 border border-amber-200 rounded-full px-2 py-0.5 mt-1"><i class="fas fa-clock text-[10px]"></i>Delayed</span>`
       : '';
     return `
       <div class="relative pl-7 ${isLast ? '' : 'pb-4'}">
@@ -5789,6 +5946,22 @@ function _fcToggleSubform(type) {
   document.getElementById(noteId).classList.toggle('hidden', !checked);
 }
 
+function _fcSelectAeDiscussed(discussed) {
+  document.getElementById('fc-ae-discussed').value = discussed ? 'yes' : 'no';
+  _fcStyleAeBtn(discussed);
+}
+
+function _fcStyleAeBtn(discussed) {
+  const yes = document.getElementById('fc-ae-yes-btn');
+  const no  = document.getElementById('fc-ae-no-btn');
+  if (!yes || !no) return;
+  const base     = 'flex-1 px-3 py-2 border rounded-xl text-sm font-medium transition-colors';
+  const active   = 'bg-amber-600 border-amber-600 text-white';
+  const inactive = 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100';
+  yes.className = `${base} ${discussed === true  ? active : inactive}`;
+  no.className  = `${base} ${discussed === false ? active : inactive}`;
+}
+
 function openFollowupCallModal(ev) {
   _followupCallEventId         = ev.id;
   _followupCallProtocolEventId = ev.protocol_event_id;
@@ -5818,9 +5991,17 @@ function openFollowupCallModal(ev) {
   const watchWrap = document.getElementById('fc-trigger-watch-wrap');
   if (watchWrap) watchWrap.classList.toggle('hidden', !(patientData?.agWatchRightID || patientData?.agWatchLeftID));
 
+  // Show AE discussion section only when an adverse_event_followup stub exists.
+  const hasAefStubFc = eventsCache.some(e => e.protocol_event_id === 'adverse_event_followup');
+  const fcAeSect = document.getElementById('fc-ae-section');
+  if (fcAeSect) fcAeSect.classList.toggle('hidden', !hasAefStubFc);
+  document.getElementById('fc-ae-discussed').value = '';
+  _fcStyleAeBtn(null);
+
   const err = document.getElementById('followup-call-error');
   err.textContent = '';
   err.classList.add('hidden');
+  _attachDateGuard('followup-call-date', 'followup-call-error');
   showModal('followup-call-modal');
 }
 
@@ -5841,6 +6022,14 @@ async function saveFollowupCall() {
   if (dateChanged && !dateReason)          { err.textContent = 'Please explain why the date is different.'; err.classList.remove('hidden'); return; }
   if (!notes)                              { err.textContent = 'Notes are required.';                       err.classList.remove('hidden'); return; }
   if (!_validateAttachment('followup-call', 'followup-call-error')) return;
+
+  const fcAeSectVisible = !document.getElementById('fc-ae-section')?.classList.contains('hidden');
+  const fcAeDiscussed   = document.getElementById('fc-ae-discussed').value;
+  if (fcAeSectVisible && !fcAeDiscussed) {
+    err.textContent = 'Please indicate whether any AE-related discussion happened during this call.';
+    err.classList.remove('hidden');
+    return;
+  }
 
   // Collect triggered items
   const triggered = [];
@@ -5885,6 +6074,15 @@ async function saveFollowupCall() {
   saveBtn.disabled = false;
   hideModal('followup-call-modal');
   await loadPatientEvents();
+  if (fcAeDiscussed === 'yes') {
+    const aefStub = eventsCache.find(e => e.protocol_event_id === 'adverse_event_followup');
+    if (aefStub) {
+      openAdverseEventFollowupModal(aefStub);
+      // Pre-fill call date and duration from this follow-up call.
+      document.getElementById('aef-date').value     = dateVal;
+      document.getElementById('aef-duration').value = duration;
+    }
+  }
 }
 
 // ── Patient Call modal ────────────────────────────────────────────────────────
@@ -6418,10 +6616,13 @@ async function loadPatient() {
       return;
     }
     renderOverview(patientData);
-    // Show "Log Call" button for admin/therapist on activated patients (but not if discontinued)
+    // Show "Log Call" button until patient is all_completed (A2 done/missed/delayed).
+    const _CALL_BTN_STATUSES = new Set([
+      'active', 'paused', 'post_training', 'training_completed',
+      'a1_completed', 'broken_protocol', 'discontinued',
+    ]);
     const logCallBtn = document.getElementById('log-call-btn');
-    if (logCallBtn && patientData.activationDate && !patientData.discontinuationDate &&
-        !patientData.a2CompletionDate &&
+    if (logCallBtn && _CALL_BTN_STATUSES.has(patientData.status) &&
         (userPrivilege === 'admin' || userPrivilege === 'therapist')) {
       logCallBtn.classList.remove('hidden');
       logCallBtn.classList.add('flex');
@@ -6430,11 +6631,10 @@ async function loadPatient() {
       logCallBtn.classList.remove('flex');
     }
 
-    // Show "Discontinue" button for admin when patient is not yet discontinued/completed
+    // Show "Discontinue" button for admin only when patient is inactive, active, or paused.
     const discBtn = document.getElementById('discontinue-btn');
-    const isBrokenProtocol = !!patientData.brokenProtocolDate;
-    if (discBtn && isAdmin && !patientData.discontinuationDate && !patientData.a2CompletionDate
-        && !isBrokenProtocol && !_hasDiscontinuationStub) {
+    const _DISC_BTN_STATUSES = new Set(['inactive', 'active', 'paused']);
+    if (discBtn && isAdmin && _DISC_BTN_STATUSES.has(patientData.status) && !_hasDiscontinuationStub) {
       discBtn.classList.remove('hidden');
       discBtn.classList.add('flex');
     } else if (discBtn) {

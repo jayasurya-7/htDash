@@ -243,7 +243,7 @@ def api_patient_events(homer_id):
         _dirty    = False
 
         # A1: seed schedule_a1_call when a1_assessment.appointment_date is null and no stub exists.
-        # Also clean up any orphaned schedule_a1_call stubs if a1 is already complete.
+        # Also clean up any orphaned schedule_a1_call stubs if a1 is complete or window has closed.
         _a1_complete = any(
             e.get('protocol_event_id') == 'a1_assessment'
             for e in events_data.get('complete', [])
@@ -252,7 +252,17 @@ def api_patient_events(homer_id):
             e.get('protocol_event_id') == 'schedule_a1_call'
             for e in events_data.get('incomplete', [])
         )
-        if _a1_complete and _a1_stub_exists:
+        # Compute A1 window end unconditionally (needed for both cleanup and seeding).
+        _a1_window_open = True
+        try:
+            _a1_def = next((e for e in protocol.get('shared', []) if e['id'] == 'a1_assessment'), None)
+            if _a1_def and _a1_def.get('window') and patient and patient.get('activationDate'):
+                _act = datetime.fromisoformat(patient['activationDate']).date()
+                _a1_end = _act + timedelta(days=_a1_def['window']['end_day'] - 1)
+                _a1_window_open = date.today() <= _a1_end
+        except Exception:
+            pass
+        if _a1_stub_exists and (_a1_complete or not _a1_window_open):
             events_data['incomplete'] = [
                 e for e in events_data['incomplete']
                 if e.get('protocol_event_id') != 'schedule_a1_call'
@@ -264,16 +274,13 @@ def api_patient_events(homer_id):
                 e for e in events_data.get('incomplete', [])
                 if e.get('protocol_event_id') == 'a1_assessment'
             ), None)
-            # Gate: only seed after training permanently ends via an explicit event
-            # (D29 completion, broken protocol, or discontinuation). post_training
-            # (Day 28 passed but D29 not yet filed) does NOT trigger seeding — the
-            # D29 modal sets the A1 appointment inline and must be filed first.
             _a1_training_ended = bool(patient and (
                 patient.get('trainingCompletionDate') or
                 patient.get('brokenProtocolDate') or
                 patient.get('discontinuationDate')
             ))
-            if _a1_inc and _a1_inc.get('appointment_date') is None and _a1_training_ended:
+            if (_a1_inc and _a1_inc.get('appointment_date') is None
+                    and _a1_training_ended and _a1_window_open):
                 events_data.setdefault('incomplete', []).insert(0, {
                     'id':                str(uuid.uuid4()),
                     'protocol_event_id': 'schedule_a1_call',
@@ -305,18 +312,21 @@ def api_patient_events(homer_id):
                     e for e in events_data.get('incomplete', [])
                     if e.get('protocol_event_id') == 'a2_assessment'
                 ), None)
+                _a2_end         = _act_date + timedelta(days=_a2_def['window']['end_day'] - 1)
                 _a2_null_date   = _a2_inc and _a2_inc.get('appointment_date') is None
                 _a2_near_window = _today >= (_a2_start - timedelta(days=7))
+                _a2_window_open = _today <= _a2_end
 
-                # Clean up orphaned stub when A2 is already complete or already scheduled.
-                if _a2_stub_exists and (_a2_complete or not _a2_null_date):
+                # Clean up orphaned stub when A2 is complete, already scheduled, or window has closed.
+                if _a2_stub_exists and (_a2_complete or not _a2_null_date or not _a2_window_open):
                     events_data['incomplete'] = [
                         e for e in events_data['incomplete']
                         if e.get('protocol_event_id') != 'schedule_a2_call'
                     ]
                     _a2_stub_exists = False
                     _dirty = True
-                if not _a2_complete and not _a2_stub_exists and _a2_null_date and _a2_near_window:
+                if (not _a2_complete and not _a2_stub_exists
+                        and _a2_null_date and _a2_near_window and _a2_window_open):
                         events_data.setdefault('incomplete', []).insert(0, {
                             'id':                str(uuid.uuid4()),
                             'protocol_event_id': 'schedule_a2_call',
@@ -2541,6 +2551,15 @@ def api_complete_adverse_event(homer_id):
             'filed_at':            filed_at,
         })
 
+    # Also update any existing follow-up visit / clinical visit stubs so they
+    # reflect all ongoing AEs (not just the ones known when the stub was created).
+    for stub in events_data.get('incomplete', []):
+        if stub.get('protocol_event_id') in (
+            'adverse_event_followup_visit', 'adverse_event_clinical_visit'
+        ):
+            if event_id not in stub.get('adverse_event_ids', []):
+                stub.setdefault('adverse_event_ids', []).append(event_id)
+
     from utils.protocol_events import write_protocol_events
     write_protocol_events(folder, homer_id, events_data)
 
@@ -2818,17 +2837,29 @@ def _clear_ae_pause_if_resolved(patient_meta, events_data, ae_discussions, free_
     write_patient_log(folder, homer_id, loginid, session_id, 'Adverse event(s) resolved — training resumed')
 
 
+def _compute_globally_unresolved_ae_ids(events_data, free_aes):
+    """Return AE IDs that have NOT been resolved in any completed follow-up event."""
+    resolved = set()
+    for ftype in ('adverse_event_followup', 'adverse_event_followup_visit',
+                  'adverse_event_clinical_visit'):
+        for entry in events_data.get('free', {}).get(ftype, []):
+            for disc in entry.get('ae_discussions', []):
+                if disc.get('resolved'):
+                    resolved.add(disc['adverse_event_id'])
+    return [ae_id for ae_id in free_aes if ae_id not in resolved]
+
+
 def _seed_next_ae_followup_or_clear(events_data, stub_ae_ids, ae_discussions, free_aes,
                                      patient_meta, filed_at, event_id,
                                      folder, homer_id, loginid, session_id, training_ended=False):
     """Seed next follow-up stub for unresolved AEs, or clear pause if all resolved.
     Only one adverse_event_followup stub may exist in incomplete at a time."""
-    resolved_ids   = {r['adverse_event_id'] for r in ae_discussions if r.get('resolved')}
-    unresolved_ids = [ae_id for ae_id in stub_ae_ids if ae_id not in resolved_ids]
+    # Derive unresolved AEs globally across all completed follow-up events so
+    # that resolving an AE in any event type correctly removes it from all stubs.
+    unresolved_ids = _compute_globally_unresolved_ae_ids(events_data, free_aes)
     today_str = date.today().strftime('%Y-%m-%dT%H:%M')
     tomorrow  = (date.today() + timedelta(days=1)).strftime('%Y-%m-%dT%H:%M')
     if unresolved_ids:
-        # Only seed if no call stub already exists (one stub at a time rule)
         existing = next(
             (e for e in events_data.get('incomplete', [])
              if e.get('protocol_event_id') == 'adverse_event_followup'),
@@ -2842,6 +2873,18 @@ def _seed_next_ae_followup_or_clear(events_data, stub_ae_ids, ae_discussions, fr
                 'scheduled_date':    [today_str, tomorrow],
                 'filed_at':          filed_at,
             })
+        else:
+            existing['adverse_event_ids'] = unresolved_ids
+        # Prune resolved AEs from any existing visit / clinical visit stubs
+        unresolved_set = set(unresolved_ids)
+        for stub in events_data.get('incomplete', []):
+            if stub.get('protocol_event_id') in (
+                'adverse_event_followup_visit', 'adverse_event_clinical_visit'
+            ):
+                stub['adverse_event_ids'] = [
+                    aid for aid in stub.get('adverse_event_ids', [])
+                    if aid in unresolved_set
+                ]
     else:
         # All AEs resolved — remove any lingering follow-up call stub
         events_data['incomplete'] = [
@@ -5535,8 +5578,10 @@ def api_complete_a2_assessment(homer_id):
     if not patient:
         return jsonify({'error': 'Patient not found'}), 404
     status = derive_status(patient)
-    if status not in ('a1_completed', 'all_completed'):
-        return jsonify({'error': 'Patient must have completed A1 assessment to record A2.'}), 409
+    # Allow A2 when A1 is completed normally OR when A1 has been marked as missed.
+    a1_done = status in ('a1_completed', 'all_completed') or bool(patient.get('a1MissedDate'))
+    if not a1_done:
+        return jsonify({'error': 'A1 assessment must be completed or marked as missed before recording A2.'}), 409
 
     events_data = read_protocol_events(folder, homer_id)
     if not events_data:
@@ -5570,6 +5615,65 @@ def api_complete_a2_assessment(homer_id):
     loginid    = flask_session.get('loginid', 'unknown')
     session_id = flask_session.get('session_id', 0)
     write_patient_log(folder, homer_id, loginid, session_id, 'A2 assessment recorded')
+    return jsonify({'ok': True})
+
+
+@bp.route('/api/patients/<homer_id>/complete-event/miss-assessment', methods=['POST'])
+def api_miss_assessment(homer_id):
+    """Mark an a1_assessment or a2_assessment as missed (patient confirmed non-attendance)."""
+    if not flask_session.get('login_place'):
+        return jsonify({'error': 'Not authenticated'}), 401
+    if flask_session.get('privilege') not in ('admin', 'therapist'):
+        return jsonify({'error': 'Forbidden'}), 403
+
+    folder = find_patient_folder(flask_session['login_place'], homer_id)
+    if not folder:
+        return jsonify({'error': 'Patient not found'}), 404
+
+    body            = request.get_json() or {}
+    assessment_type = (body.get('assessment_type') or '').strip()
+    event_id        = (body.get('event_id') or '').strip()
+
+    if assessment_type not in ('a1', 'a2'):
+        return jsonify({'error': 'assessment_type must be a1 or a2'}), 400
+
+    pid = f'{assessment_type}_assessment'
+    events_data = read_protocol_events(folder, homer_id)
+    if not events_data:
+        return jsonify({'error': 'Protocol events not found.'}), 404
+
+    stub = next(
+        (e for e in events_data.get('incomplete', [])
+         if e.get('protocol_event_id') == pid
+         and (not event_id or e.get('id') == event_id)),
+        None
+    )
+    if not stub:
+        return jsonify({'error': f'{pid} not found in incomplete.'}), 404
+
+    filed_at  = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
+    missed_at = filed_at[:16]
+
+    complete_entry = {**stub, 'missed': True, 'missed_at': missed_at, 'filed_at': filed_at}
+    events_data['incomplete'] = [
+        e for e in events_data['incomplete']
+        if e.get('id') != stub['id']
+        and e.get('protocol_event_id') != f'schedule_{assessment_type}_call'
+    ]
+    events_data.setdefault('complete', []).append(complete_entry)
+
+    from utils.protocol_events import write_protocol_events
+    write_protocol_events(folder, homer_id, events_data)
+
+    patient = read_patient_meta(folder, homer_id)
+    if patient:
+        patient[f'{assessment_type}MissedDate'] = missed_at
+        write_patient_meta(folder, homer_id, patient)
+
+    loginid    = flask_session.get('loginid', 'unknown')
+    session_id = flask_session.get('session_id', 0)
+    write_patient_log(folder, homer_id, loginid, session_id,
+                      f'{assessment_type.upper()} assessment marked as missed')
     return jsonify({'ok': True})
 
 

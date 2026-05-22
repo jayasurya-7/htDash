@@ -388,26 +388,32 @@ Each action is defined once here. Pages above reference which actions apply to t
 - Trigger: `a1_assessment` event row on patient detail — appears in overdue/upcoming panels once the patient reaches `training_completed` status. This is a windowed protocol event (window defined in `study_protocol.json`, approximately days 30–37 after activation, i.e. 2–4 weeks after D29).
 - Allowed users: `admin`, `therapist`
 - **Event row UI**: click the row to open the A1 recording modal. No inline buttons on the row.
+- **"Delayed" badge**: if the assessment is completed after `window_end`, the completed event row (in the timeline and overdue panel) shows an amber "Delayed" badge. Filed on time → no badge.
 - Modal: `a1-assessment-modal`
   - Title: "Record A1 Assessment"
-  - **Cancellation section (top)** — shown only when `scheduled_date` is not null:
+  - **Cancellation section (top)** — shown only when `appointment_date` is not null:
     - Displays the currently scheduled appointment date
     - Reason (text input, required to confirm cancel)
     - "Cancel Scheduled Assessment" button — on click: show a confirmation dialog ("Cancel the scheduled A1 assessment on \<date\>? This cannot be undone."). On confirm:
       - Append `{ cancelled_at, appointment_date, reason }` to `appointment_cancellations` on the `a1_assessment` stub
-      - Reset `scheduled_date` to `null` on the stub
+      - Reset `appointment_date` to `null` on the stub
       - Modal stays open; cancellation section disappears
-    - After cancellation, auto-seeding in `api_patient_events` will create a `schedule_a1_call` stub on next load
+    - After cancellation, auto-seeding in `api_patient_events` will create a `schedule_a1_call` stub on next load **only if the A1 window has not yet closed** (`today ≤ window_end`). If the window is already closed, no stub is seeded — the assessment is reached directly from the overdue panel.
   - Assessment Date (datetime, required; cannot be in the future)
+    - **Out-of-window confirmation**: if the chosen date falls outside `[window_start, window_end]`, a double-confirmation dialog fires before saving: "This date is outside the A1 assessment window. Are you sure?" The therapist can proceed or go back.
   - Notes (textarea, optional)
+  - **Mark as Missed** button — the therapist can mark A1 as missed if the patient confirms they will not attend. On click: double-confirmation dialog ("Mark A1 assessment as missed? This cannot be undone."). On confirm:
+    - Move `a1_assessment` stub from `incomplete` to `complete` with `missed: true`, `missed_at: <now>`, `filed_at`
+    - Update `<homer_id>.json` with `a1MissedDate = missed_at`
+    - Any open `schedule_a1_call` stub is removed from `incomplete`
   - Completion and cancellation are **independent** — the therapist can cancel only, complete only, or cancel then complete (patient arrived at a different time)
 - Server actions (completion):
   - Move `a1_assessment` entry from `incomplete` to `complete` in `protocol_events.json`, adding `completion_date`, `filed_at`
   - Update `<homer_id>.json` with `a1CompletionDate = completion_date`
 - Server actions (cancellation — separate endpoint):
   - Append cancellation record to `appointment_cancellations` on the `a1_assessment` incomplete stub
-  - Set `scheduled_date = null` on the stub
-- Log message: `A1 assessment recorded` / `A1 assessment appointment cancelled`
+  - Set `appointment_date = null` on the stub
+- Log message: `A1 assessment recorded` / `A1 assessment appointment cancelled` / `A1 assessment marked as missed`
 
 ---
 
@@ -415,13 +421,15 @@ Each action is defined once here. Pages above reference which actions apply to t
 
 - Trigger: `a2_assessment` event row on patient detail — appears in overdue/upcoming panels once the patient reaches `a1_completed` status. Windowed protocol event (window defined in `study_protocol.json`, approximately days 60–90 after activation, i.e. ~4 weeks after A1 window).
 - Allowed users: `admin`, `therapist`
-- **`schedule_a2_call` auto-seeding:** In `api_patient_events`, if `today >= a2_window_start − 7 days` AND A2 is not complete AND no `schedule_a2_call` stub exists in `incomplete`, a new `schedule_a2_call` stub is created. This gives the therapist a 1-week lead time to contact the patient before the A2 window opens.
+- **`schedule_a2_call` auto-seeding:** In `api_patient_events`, if `today >= a2_window_start − 7 days` AND `today ≤ a2_window_end` AND A2 is not complete AND no `schedule_a2_call` stub exists in `incomplete`, a new `schedule_a2_call` stub is created. Seeding stops once the window closes — after that the assessment is reached directly from the overdue panel.
+- **"Delayed" badge**: same rule as A1 — amber badge when `completion_date > window_end`.
+- **A2 before A1 confirmation**: when the therapist opens the A2 modal and `a1_assessment` is still in `incomplete` (not missed, not complete), a double-confirmation fires: "A1 has not been completed. Filing A2 will automatically mark A1 as missed. Continue?" On confirm: A1 is auto-missed (same server action as "Mark as Missed" above) before A2 proceeds.
 - **Event row UI**: click the row to open the A2 recording modal. No inline buttons on the row.
 - Modal: `a2-assessment-modal`
   - Title: "Record A2 Assessment"
-  - Same structure as A1 modal — cancellation section (top, conditional), then completion fields
-- Server actions: same as A1 but targets `a2_assessment` stub and writes `a2CompletionDate`
-- Log message: `A2 assessment recorded` / `A2 assessment appointment cancelled`
+  - Same structure as A1 modal — cancellation section (top, conditional), assessment date with out-of-window confirmation, notes, Mark as Missed button
+- Server actions: same as A1 but targets `a2_assessment` stub and writes `a2CompletionDate` / `a2MissedDate`
+- Log message: `A2 assessment recorded` / `A2 assessment appointment cancelled` / `A2 assessment marked as missed`
 
 ---
 
@@ -434,10 +442,11 @@ Two free events — one per assessment. Record a phone call made by the therapis
 #### Auto-seeding (both)
 
 A scheduling call stub is auto-seeded by `api_patient_events` (lazily, once per patient) when:
-- The corresponding assessment (`a1_assessment` / `a2_assessment`) is in `incomplete` with `scheduled_date = null`
+- The corresponding assessment (`a1_assessment` / `a2_assessment`) is in `incomplete` with `appointment_date = null`
 - AND no stub for the corresponding scheduling call already exists in `incomplete`
+- AND **`today ≤ window_end`** — once the protocol window has closed, no scheduling stub is seeded; the assessment is reached directly from the overdue panel
 
-For A2 only: also seeded 7 days before the A2 window opens (`today >= a2_window_start − 7 days`) even if `scheduled_date` is not null — to give the therapist lead time to confirm the appointment.
+For A2 only: also requires `today >= a2_window_start − 7 days` to give the therapist a 1-week lead time before the window opens.
 
 Only one stub may exist in `incomplete` at a time.
 
@@ -469,8 +478,10 @@ Only one stub may exist in `incomplete` at a time.
 
 **Common notes:**
 - Missing an A1 or A2 assessment is not a broken protocol event and does not trigger discontinuation. The study continues with whatever assessments were completed.
+- A delayed assessment (completed after `window_end`) is valid and recorded normally — the `completion_date` captures when it actually happened. An amber "Delayed" badge is shown on the event row.
 - History: all past scheduling calls are visible in the Timeline tab (as completed free events in `free.schedule_a1_call` / `free.schedule_a2_call`).
 - Appointment cancellation history is stored on the assessment stub's `appointment_cancellations` list (see data_schemas.md).
+- Missed assessments are stored in `complete` with `missed: true` and `missed_at`. `a1MissedDate` / `a2MissedDate` are written to `<homer_id>.json`.
 
 ---
 
@@ -683,20 +694,23 @@ Discontinuing a patient is a two-step process: (1) a `discontinuation` stub is c
   - Training log PDF (file upload, required; `.pdf` only) — photos of the patient's weekly training log, sent by the patient before the call
   - Notes (textarea, required)
   - **Triggered events section** — user can optionally flag an adverse event, robot issue (exp only), and/or watch record as a consequence of this call. Each toggle shows an info note only — no sub-form fields. Watch Record toggle only shown if at least one watch is currently assigned.
+  - **AE Discussion** (Yes/No, required when an `adverse_event_followup` stub exists in `incomplete`; hidden otherwise) — "Did any AE-related discussion happen during this call?" If Yes, the AE follow-up modal opens automatically after the call saves, with **call date and duration pre-filled** from this call. If No, the call saves normally and the stub remains accessible from the overdue panel.
 - Server actions:
   - Save uploaded PDF to `attachments/followup_call_d07.pdf` (or `d21`) in the patient folder, overwriting if exists
   - Move entry from `incomplete` to `complete` in `protocol_events.json`, adding `completion_date`, `filed_at`, `duration_minutes`, `attachment`, `notes`, `triggered: [...]`; if date differs from scheduled, also adds `date_change_reason`
   - For triggered `adverse_event`: append a stub to `incomplete` with `protocol_event_id = "adverse_event"`, `scheduled_date = [now, now]`, `triggered_by: {type: "<followup_call_event_id>", id: <entry_id>}` — stub is completed later via the standalone modal
   - For triggered robot issue: append a `robot_issue_call` stub to `incomplete` with `triggered_by: {type: "<followup_call_event_id>", id: <entry_id>}`, `scheduled_date: [now, now]` — no intermediate `robot_issue` event
   - For triggered `watch_record`: stamp `triggered_by` and update `scheduled_date = [now, now]` on the open `watch_record` chain entry
+- **Post-save AE follow-up (client-side):** if `ae_discussion = "yes"` and an `adverse_event_followup` stub exists, the AE follow-up modal opens automatically with `call_date` pre-filled from `completion_date` and `duration_minutes` pre-filled from the call duration (both remain editable). The stub always persists in `incomplete` regardless of the answer.
 - Log message: `Follow-up call recorded — Day <N>`
 
 ---
 
 ### Patient Call
 
-- Trigger: "Log Patient Call" button in the tab bar on patient detail (active patients)
+- Trigger: "Log Patient Call" button in the tab bar on patient detail
 - Allowed users: `admin`, `therapist`
+- **Visible when:** patient status is `active`, `paused`, `post_training`, `training_completed`, `a1_completed`, `broken_protocol`, or `discontinued`. Hidden once `all_completed` (A2 done/delayed/missed — no further contact needed), and also hidden for `inactive`, `unassigned`, `pre_discontinued`.
 - Modal: `patient-call-modal`
   - Title: "Log Patient Call"
   - Call Date/Time (datetime, required; cannot be in the future)
