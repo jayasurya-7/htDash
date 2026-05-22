@@ -32,6 +32,7 @@ HOMER Therapy Dashboard (htDash) is a Flask-based clinical dashboard for managin
 | `docs/devices.md` | Device state machine, assignment rules, clinic logic, SIM linkage, 28-day auto-reset |
 | `docs/device_data_schemas.md` | Detailed field-level schemas for all device inventory, assignment, SIM, and log files |
 | `docs/ae_ri_logic.md` | Full AE/RI logic: stub lifecycle, follow-up chain, pause mechanics, broken protocol detection, auto-shift |
+| `docs/backlog.md` | Planned features not yet designed/built (grows over time) |
 
 ---
 
