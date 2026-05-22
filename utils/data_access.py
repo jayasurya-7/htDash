@@ -61,6 +61,9 @@ def derive_status(patient: dict) -> str:
 
     if not group:
         return 'pre_discontinued' if discontinue else 'unassigned'
+    # all_completed supersedes discontinued and broken_protocol.
+    if a2 or patient.get('a2MissedDate'):
+        return 'all_completed'
     if discontinue:
         return 'discontinued'
     if patient.get('brokenProtocolDate'):
@@ -99,8 +102,6 @@ def derive_status(patient: dict) -> str:
     if patient.get('trainingPausedDate'):
         return 'paused'
 
-    if a2 or patient.get('a2MissedDate'):
-        return 'all_completed'
     if a1 or patient.get('a1MissedDate'):
         return 'a1_completed'
     if training:

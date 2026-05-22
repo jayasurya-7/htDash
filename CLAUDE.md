@@ -185,10 +185,10 @@ The script shifts the patient's entire timeline by N days (positive or negative)
   - `completion_date` is set to `session_start` — there is no separate event date input.
   - These represent the clock times of the therapy session conducted during that home visit.
   - **D02 and D03 date lock (training completed path):** the date portion of `session_start`/`session_end` is pre-filled and read-only, locked to `activationDate + 1` (D02) or `activationDate + 2` (D03). Therapist selects time only. Server validates and rejects mismatched dates. D15 is not locked.
-- **AG Watch timing session bounds (hard validation):** the `adl_agwatch_timing_d03` / `vcg_agwatch_timing_d03` modals enforce that every non-null exercise `start`/`end` falls within the `session_start`/`session_end` from `home_visit_d03`. The `adl_agwatch_timing_d15` / `vcg_agwatch_timing_d15` modals apply the same hard constraint using `home_visit_d15`. The form cannot be saved if any timing falls outside the session window.
+- **AG Watch timing validation (client-side, real-time):** the combined `agwatch_timing_d*` modal enforces four rules across all exercise rows (VCG + ADL): (1) Start < End per row; (2) Start and End within `session_start`/`session_end` from the associated home visit; (3) no overlap across all rows; (4) if only one of Start/End is filled, the row is flagged as incomplete. If both Start and End are empty, Notes is required. All validation is client-side only — the server trusts the submitted data.
 - **Event display ordering** — two mechanisms control the order in which events appear in the overdue/upcoming lists (both patient detail and dashboard):
   - **`depends_on` (hard blocking):** enforces a prerequisite gate. Events with unmet dependencies appear with a lock icon and amber "Needs: X" badge, and are non-clickable. Also used by `_topo_sort` to order events within the same date group — parents always appear before dependents.
-  - **`comes_after` (soft ordering hint):** defined in `study_protocol.json` alongside `depends_on`. Used by `_topo_sort` for display order only — no badge, no blocking, no clickability change. When event B lists event A in `comes_after`, A is placed before B in the list even if A's scheduled date would normally come later. Currently set on `adl_agwatch_timing_d01` and `vcg_agwatch_timing_d01` (both list `watch_record`) so the watch record task appears first on activation day.
+  - **`comes_after` (soft ordering hint):** defined in `study_protocol.json` alongside `depends_on`. Used by `_topo_sort` for display order only — no badge, no blocking, no clickability change. When event B lists event A in `comes_after`, A is placed before B in the list even if A's scheduled date would normally come later. Currently set on `agwatch_timing_d01` (lists `watch_record`) so the watch record task appears first on activation day.
   - **Code-level ordering rules (not in protocol JSON):** `schedule_a1_call` is always placed before `a1_assessment`, and `schedule_a2_call` before `a2_assessment`, when both appear in the same list. Hard-coded in `_topo_sort` because scheduling calls are free events with no protocol definition entry.
   - `_topo_sort` is defined in both `routes/dashboard.py` and `routes/user_management.py` and must be kept in sync.
 - Status is never stored — always derived by `derive_status()` in `utils/data_access.py`
@@ -215,14 +215,15 @@ The script shifts the patient's entire timeline by N days (positive or negative)
 - **Assessment scheduling calls (`schedule_a1_call`, `schedule_a2_call`):**
   - Free events that record a phone call to schedule or reschedule an assessment appointment. Display names: "Schedule A1 Assessment" / "Schedule A2 Assessment". Each captures `call_date`, `duration_minutes`, `notes`, and `new_appointment_date`. On completion the corresponding `a1_assessment` / `a2_assessment` stub's **`appointment_date`** is set to `new_appointment_date + "T09:00"`. (`scheduled_date` is **never touched** — it holds the protocol window and is immutable after activation.)
   - **Only one stub may exist in `incomplete` at a time** — never create a second one if one already exists.
-  - **Auto-seeding — A1:** `api_patient_events` lazily seeds a `schedule_a1_call` stub when ALL of the following hold: (1) `a1_assessment` is in `incomplete`, (2) `appointment_date` is null, (3) no `schedule_a1_call` stub exists, (4) **`today ≤ a1_window_end`** — no stub is seeded once the window closes, AND **(5) D29 has been filed or training ended without D29** — i.e. `trainingCompletionDate` is set, OR `brokenProtocolDate` is set, OR `discontinuationDate` is set. `post_training` status (Day 28 passed but D29 not yet filed) does **not** trigger seeding.
+  - **Auto-seeding — A1:** `api_patient_events` lazily seeds a `schedule_a1_call` stub when ALL of the following hold: (1) `a1_assessment` is in `incomplete`, (2) `appointment_date` is null, (3) no `schedule_a1_call` stub exists, (4) **`today >= a1_window_start − 7 days`** — gives therapist a 1-week lead time before the window opens; prevents premature seeding when broken protocol or discontinuation is set early in training, (5) **`today ≤ a1_window_end`** — no stub is seeded once the window closes, AND **(6) D29 has been filed or training ended without D29** — i.e. `trainingCompletionDate` is set, OR `brokenProtocolDate` is set, OR `discontinuationDate` is set. `post_training` status (Day 28 passed but D29 not yet filed) does **not** trigger seeding. For normal patients D29 sets `appointment_date` directly, so condition (2) fails and no stub is ever seeded via this path.
   - **Auto-seeding — A2:** `api_patient_events` lazily seeds a `schedule_a2_call` stub when: (1) `a2_assessment` is in `incomplete`, (2) `appointment_date` is null, (3) no stub exists, (4) `today >= a2_window_start − 7 days`, AND **(5) `today ≤ a2_window_end`**. Once the window closes, no stub is seeded — the assessment is reached directly from the overdue panel. No "Schedule Call" button on event rows — stubs are always server-seeded.
   - **A1 first scheduling:** done via the D29 modal (therapist picks `a1_appointment_date` inline; sets `a1_assessment.appointment_date` directly). No `schedule_a1_call` is created at D29.
   - **Appointment cancellation:** in the A1/A2 assessment modal, a "Cancel Scheduled Assessment" section appears at the top when `appointment_date` is not null. On confirm: appends `{ cancelled_at, appointment_date, reason }` to `appointment_cancellations` on the stub and resets **`appointment_date` to null**. Auto-seeding picks up on next load **only if the window is still open** (`today ≤ window_end`). Cancellation and completion are independent actions in the same modal.
   - **Mark as Missed:** the A1/A2 modal has a "Mark as Missed" button. Double confirmation required. On confirm: stub moves to `complete` with `missed: true` and `missed_at`; `a1MissedDate` / `a2MissedDate` written to `<homer_id>.json`; any open scheduling call stub removed from `incomplete`.
   - **Out-of-window date confirmation:** if the therapist enters an assessment date outside `[window_start, window_end]`, a double-confirmation dialog fires before saving. Proceeding records it as a delayed or early assessment.
   - **"Delayed" badge:** completed assessments where `completion_date > window_end` show an amber "Delayed" badge on the event row (client-side, derived from `scheduled_date[1]`).
-  - **A2 before A1 auto-miss:** when the A2 modal is opened and `a1_assessment` is still in `incomplete` (not missed, not complete), a double-confirmation fires: "A1 has not been completed. Filing A2 will mark A1 as missed. Continue?" On confirm, A1 is auto-missed server-side before A2 is filed.
+  - **A2 before A1 auto-miss:** when the A2 modal is opened and `a1_assessment` is still in `incomplete` (not missed, not complete), a double-confirmation fires: "A1 has not been completed. Filing A2 will mark A1 as missed. Continue?" On confirm, the OK-press time is captured client-side (`_a2A1MissOkAt`) but **nothing is filed yet**. A1 is auto-missed **only if** A2 is subsequently committed — whether A2 is **filed** (`saveA2Assessment` → `api_complete_a2_assessment`) or **marked missed** (`markAssessmentMissed('a2')` → `api_miss_assessment`). Abandoning the A2 action (cancel, validation failure, navigate away) files nothing. Both actions are atomic single requests that write A1 and A2 together.
+    - **Ordering guarantee (no fixed offset):** the client sends `a1_miss_gap_seconds = (action_time − ok_press_time)` measured on the **browser clock**. The server keeps A2 authoritative (`A2.filed_at = now()`) and back-dates A1 by the measured gap: `A1.filed_at = A2.filed_at − a1_miss_gap_seconds` (`A1.missed_at = A1.filed_at[:16]`). Because OK is pressed before the action, A1 always sorts before A2 in the timeline (newest-first by `filed_at`), without any `-1s` ducktape and immune to client/server clock skew (both sides of the subtraction use the server's A2 stamp; only the *gap* is client-measured). If `a1_miss_gap_seconds` is absent, the server treats the gap as 0.
   - **Visibility in `_BROKEN_PROTOCOL_INTERACTIVE` and `_DISCONTINUED_VISIBLE`:** both scheduling call types are included so they remain actionable after broken protocol or discontinuation.
   - **Window expiry:** if the A1 or A2 assessment window expires without completion, the stub remains in `incomplete` and is completable as a delayed assessment. No broken protocol, no discontinuation trigger.
 - **Watch record chain:** seeded at activation with `scheduled_date = [activationDate, activationDate]` and `triggered_by = {type: "activation", id: <activation_entry_id>}`. On each completion, a new open chain entry is seeded with `scheduled_date = [completion_date + next_followup_days, completion_date + next_followup_days]`.
@@ -310,10 +311,10 @@ Fill in ✅ / ⬜. Caption is always included when attachment is ✅.
 | `followup_call_d07` | ✅ |
 | `followup_call_d21` | ✅ |
 | `training_completion_d29` | ✅ |
-| `adl_agwatch_timing_d03` | ✅ |
-| `adl_agwatch_timing_d15` | ✅ |
-| `vcg_agwatch_timing_d03` | ✅ |
-| `vcg_agwatch_timing_d15` | ✅ |
+| `agwatch_timing_d01` | ✅ |
+| `agwatch_timing_d02` | ✅ |
+| `agwatch_timing_d03` | ✅ |
+| `agwatch_timing_d15` | ✅ |
 | `watch_record` | ✅ |
 | `a1_assessment` | ⬜ |
 | `a2_assessment` | ⬜ |
@@ -368,7 +369,7 @@ Both event APIs must compute `blocked_by` using the same logic (depends_on entri
 | `routes/dashboard.py` | `GET /api/dashboard/events` | Cross-patient events |
 
 ### Protocol event openers (patient detail page)
-Every protocol event that has a modal must be listed in `EVENT_OPENERS` in `patient_detail.js`. When a new modal is implemented, add the entry. Currently registered: `exp_device_install`, `activation`, `discontinuation_reminder`, `adl_prescription_d01/d15`, `vcg_prescription_d01/d15`, `prescription_printout_d01/d15`, `home_visit_d02/d03/d15`, `followup_call_d07/d21`, `training_completion_d29`, `adl_agwatch_timing_d03/d15`, `vcg_agwatch_timing_d03/d15`, `watch_record`, `adverse_event`, `robot_issue_call`, `robot_issue_visit`, `adverse_event_followup`, `adverse_event_followup_visit`, `adverse_event_clinical_visit`, `resolve_robot_issue_visit`. Pending registration (item 19): `a1_assessment`, `a2_assessment`, `schedule_a1_call`, `schedule_a2_call`.
+Every protocol event that has a modal must be listed in `EVENT_OPENERS` in `patient_detail.js`. When a new modal is implemented, add the entry. Currently registered: `exp_device_install`, `activation`, `discontinuation_reminder`, `adl_prescription_d01/d15`, `vcg_prescription_d01/d15`, `prescription_printout_d01/d15`, `home_visit_d02/d03/d15`, `followup_call_d07/d21`, `training_completion_d29`, `agwatch_timing_d01/d02/d03/d15`, `watch_record`, `adverse_event`, `robot_issue_call`, `robot_issue_visit`, `adverse_event_followup`, `adverse_event_followup_visit`, `adverse_event_clinical_visit`, `resolve_robot_issue_visit`, `a1_assessment`, `a2_assessment`, `schedule_a1_call`, `schedule_a2_call`.
 
 ### Synthetic events
 Some events are not stored in `protocol_events.json` but injected at query time by both event APIs. These require matching `EVENT_OPENERS` entries in `patient_detail.js`.
@@ -640,31 +641,23 @@ npm install puppeteer  # Install in project root
 
 ### Enhancements Implemented ✅ (April 2026)
 
-#### 1. ADL AGWatch Timing Day 01 & 02
-**Status:** ✅ Complete
+#### 1. Combined AG Watch Timing Modal
+**Status:** ⬜ Pending implementation
 
-Added Day 1 and Day 2 timing events alongside existing Day 3. Therapists can now record exercise start/end times for all 3 home visit days.
-- `adl_agwatch_timing_d01`: Records timing from activation event
-- `adl_agwatch_timing_d02`: Records timing from home_visit_d02 event
-- ADL tab displays all 3 days of timing per exercise row: `exercise_name | blocks/reps | D01: HH:MM → HH:MM | D02: HH:MM → HH:MM | D03: HH:MM → HH:MM`
+Replaces all 8 separate `adl_agwatch_timing_*` and `vcg_agwatch_timing_*` events with 4 combined `agwatch_timing_d01/02/03/15` events. One modal, one save, all exercises (VCG + ADL) shown together in a table.
 
-**Files Modified:**
-- `config/study_protocol.json` — Added 2 events to `shared[]`
-- `routes/user_management.py` — Added 2 entries to `_AGWATCH_TIMING_CONFIG`
-- `static/js/app/patient_detail.js` — Updated EVENT_OPENERS, session source mapping, loadAdlTab(), _prescriptionCard()
+- Both groups. Experimental: ADL rows only. Control: VCG rows first, then ADL rows.
+- Wider modal; session window shown as read-only banner at top
+- Table columns: Exercise Name | Start (HH:MM) | End (HH:MM) | Notes
+- Client-side real-time validation: Start < End, within session bounds, no cross-row overlaps, incomplete entries flagged, Notes required when both times empty
+- `agwatch_timing_d01` lists `watch_record` in `comes_after` (watch record appears first on activation day)
+- ADL/VCG tabs still display timing per exercise row for all 4 days, fetched via the same `agwatch-timing` API
 
-#### 1b. VCG AGWatch Timing Day 01 & 02
-**Status:** ✅ Complete
-
-Added Day 1 and Day 2 timing events for VCG exercises alongside existing Day 3. Control patients can now record VCG exercise start/end times for all 4 days (Day 1, 2, 3, and 15).
-- `vcg_agwatch_timing_d01`: Records timing from activation event
-- `vcg_agwatch_timing_d02`: Records timing from home_visit_d02 event
-- VCG tab displays all 4 days of timing per exercise row: `exercise_name | blocks/reps | D01: HH:MM → HH:MM | D02: HH:MM → HH:MM | D03: HH:MM → HH:MM | D15: HH:MM → HH:MM`
-
-**Files Modified:**
-- `config/study_protocol.json` — Added 2 events to `control[]` section (vcg_agwatch_timing_d01, vcg_agwatch_timing_d02)
-- `routes/user_management.py` — Added 2 entries to `_AGWATCH_TIMING_CONFIG` for VCG d01 and d02
-- `static/js/app/patient_detail.js` — Added EVENT_OPENERS entries, session source mapping for VCG d01/d02, updated loadVcgTab() to fetch all 4 timing days
+**Files to modify:**
+- `config/study_protocol.json` — Replace 8 events with 4 combined events (group-specific depends_on for d03/d15)
+- `routes/user_management.py` — Update `_AGWATCH_TIMING_CONFIG`, modal open API, complete-event handler
+- `templates/patient_detail.html` — New wider combined modal
+- `static/js/app/patient_detail.js` — New modal function, updated EVENT_OPENERS, updated ADL/VCG tab rendering
 
 #### 2. Discontinued Patient Read-Only Mode
 **Status:** ✅ Complete

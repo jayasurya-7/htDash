@@ -252,17 +252,27 @@ def api_patient_events(homer_id):
             e.get('protocol_event_id') == 'schedule_a1_call'
             for e in events_data.get('incomplete', [])
         )
-        # Compute A1 window end unconditionally (needed for both cleanup and seeding).
+        # Compute A1 window bounds unconditionally (needed for both cleanup and seeding).
         _a1_window_open = True
+        _a1_window_leadtime = False
+        _a1_seed_date = None
         try:
             _a1_def = next((e for e in protocol.get('shared', []) if e['id'] == 'a1_assessment'), None)
             if _a1_def and _a1_def.get('window') and patient and patient.get('activationDate'):
                 _act = datetime.fromisoformat(patient['activationDate']).date()
-                _a1_end = _act + timedelta(days=_a1_def['window']['end_day'] - 1)
-                _a1_window_open = date.today() <= _a1_end
+                _a1_start = _act + timedelta(days=_a1_def['window']['start_day'] - 1)
+                _a1_end   = _act + timedelta(days=_a1_def['window']['end_day']   - 1)
+                _a1_window_open     = date.today() <= _a1_end
+                _a1_window_leadtime = date.today() >= _a1_start - timedelta(days=7)
+                _a1_seed_date       = (_a1_start - timedelta(days=7)).strftime('%Y-%m-%dT%H:%M')
         except Exception:
             pass
-        if _a1_stub_exists and (_a1_complete or not _a1_window_open):
+        _a1_stub = next((e for e in events_data.get('incomplete', [])
+                         if e.get('protocol_event_id') == 'schedule_a1_call'), None)
+        # Remove stub if: complete, window closed, not yet in lead time, or scheduled_date is wrong.
+        _a1_stub_stale = (_a1_stub and _a1_seed_date and
+                          (_a1_stub.get('scheduled_date') or [None])[0] != _a1_seed_date)
+        if _a1_stub_exists and (_a1_complete or not _a1_window_open or not _a1_window_leadtime or _a1_stub_stale):
             events_data['incomplete'] = [
                 e for e in events_data['incomplete']
                 if e.get('protocol_event_id') != 'schedule_a1_call'
@@ -280,11 +290,12 @@ def api_patient_events(homer_id):
                 patient.get('discontinuationDate')
             ))
             if (_a1_inc and _a1_inc.get('appointment_date') is None
-                    and _a1_training_ended and _a1_window_open):
+                    and _a1_training_ended and _a1_window_open and _a1_window_leadtime
+                    and _a1_seed_date):
                 events_data.setdefault('incomplete', []).insert(0, {
                     'id':                str(uuid.uuid4()),
                     'protocol_event_id': 'schedule_a1_call',
-                    'scheduled_date':    [_now_str, _now_str],
+                    'scheduled_date':    [_a1_seed_date, _a1_seed_date],
                     'filed_at':          _filed_at,
                 })
                 _dirty = True
@@ -317,8 +328,13 @@ def api_patient_events(homer_id):
                 _a2_near_window = _today >= (_a2_start - timedelta(days=7))
                 _a2_window_open = _today <= _a2_end
 
-                # Clean up orphaned stub when A2 is complete, already scheduled, or window has closed.
-                if _a2_stub_exists and (_a2_complete or not _a2_null_date or not _a2_window_open):
+                _a2_seed_date = (_a2_start - timedelta(days=7)).strftime('%Y-%m-%dT%H:%M')
+                _a2_stub_obj  = next((e for e in events_data.get('incomplete', [])
+                                      if e.get('protocol_event_id') == 'schedule_a2_call'), None)
+                _a2_stub_stale = (_a2_stub_obj and
+                                  (_a2_stub_obj.get('scheduled_date') or [None])[0] != _a2_seed_date)
+                # Clean up orphaned stub when A2 is complete, already scheduled, window closed, or stale.
+                if _a2_stub_exists and (_a2_complete or not _a2_null_date or not _a2_window_open or _a2_stub_stale):
                     events_data['incomplete'] = [
                         e for e in events_data['incomplete']
                         if e.get('protocol_event_id') != 'schedule_a2_call'
@@ -330,7 +346,7 @@ def api_patient_events(homer_id):
                         events_data.setdefault('incomplete', []).insert(0, {
                             'id':                str(uuid.uuid4()),
                             'protocol_event_id': 'schedule_a2_call',
-                            'scheduled_date':    [_now_str, _now_str],
+                            'scheduled_date':    [_a2_seed_date, _a2_seed_date],
                             'filed_at':          _filed_at,
                         })
                         _dirty = True
@@ -4856,60 +4872,36 @@ _AE_FOLLOWUP_LABELS = {
 }
 
 _AGWATCH_TIMING_CONFIG = {
-    'adl_agwatch_timing_d01': {
-        'prescription_event': 'adl_prescription_d01',
-        'timing_file':        'adl/adl_agwatch_timing_d01.json',
-        'ex_type':            'adl',
+    'agwatch_timing_d01': {
+        'timing_file':        'agwatch_timing_d01.json',
         'session_source':     'activation',
+        'adl_prescription':   'adl_prescription_d01',
+        'vcg_prescription':   'vcg_prescription_d01',
     },
-    'adl_agwatch_timing_d02': {
-        'prescription_event': 'adl_prescription_d01',
-        'timing_file':        'adl/adl_agwatch_timing_d02.json',
-        'ex_type':            'adl',
+    'agwatch_timing_d02': {
+        'timing_file':        'agwatch_timing_d02.json',
         'session_source':     'home_visit_d02',
+        'adl_prescription':   'adl_prescription_d01',
+        'vcg_prescription':   'vcg_prescription_d01',
     },
-    'adl_agwatch_timing_d03': {
-        'prescription_event': 'adl_prescription_d01',
-        'timing_file':        'adl/adl_agwatch_timing_d03.json',
-        'ex_type':            'adl',
+    'agwatch_timing_d03': {
+        'timing_file':        'agwatch_timing_d03.json',
         'session_source':     'home_visit_d03',
+        'adl_prescription':   'adl_prescription_d01',
+        'vcg_prescription':   'vcg_prescription_d01',
     },
-    'adl_agwatch_timing_d15': {
-        'prescription_event': 'adl_prescription_d15',
-        'timing_file':        'adl/adl_agwatch_timing_d15.json',
-        'ex_type':            'adl',
+    'agwatch_timing_d15': {
+        'timing_file':        'agwatch_timing_d15.json',
         'session_source':     'home_visit_d15',
-    },
-    'vcg_agwatch_timing_d01': {
-        'prescription_event': 'vcg_prescription_d01',
-        'timing_file':        'vcg_exercise/vcg_agwatch_timing_d01.json',
-        'ex_type':            'vcg',
-        'session_source':     'activation',
-    },
-    'vcg_agwatch_timing_d02': {
-        'prescription_event': 'vcg_prescription_d01',
-        'timing_file':        'vcg_exercise/vcg_agwatch_timing_d02.json',
-        'ex_type':            'vcg',
-        'session_source':     'home_visit_d02',
-    },
-    'vcg_agwatch_timing_d03': {
-        'prescription_event': 'vcg_prescription_d01',
-        'timing_file':        'vcg_exercise/vcg_agwatch_timing_d03.json',
-        'ex_type':            'vcg',
-        'session_source':     'home_visit_d03',
-    },
-    'vcg_agwatch_timing_d15': {
-        'prescription_event': 'vcg_prescription_d15',
-        'timing_file':        'vcg_exercise/vcg_agwatch_timing_d15.json',
-        'ex_type':            'vcg',
-        'session_source':     'home_visit_d15',
+        'adl_prescription':   'adl_prescription_d15',
+        'vcg_prescription':   'vcg_prescription_d15',
     },
 }
 
 
 @bp.route('/api/patients/<homer_id>/agwatch-timing-exercises/<protocol_event_id>', methods=['GET'])
 def api_agwatch_timing_exercises(homer_id, protocol_event_id):
-    """Return the exercise list for an agwatch timing event (from the relevant prescription)."""
+    """Return VCG (control only) + ADL exercise lists for a combined agwatch timing event."""
     if not flask_session.get('login_place'):
         return jsonify({'error': 'Not authenticated'}), 401
     cfg = _AGWATCH_TIMING_CONFIG.get(protocol_event_id)
@@ -4920,33 +4912,61 @@ def api_agwatch_timing_exercises(homer_id, protocol_event_id):
     if not folder:
         return jsonify({'error': 'Patient not found'}), 404
 
-    presc_path = _PRESCRIPTION_FILES.get(cfg['prescription_event'])
-    if not presc_path:
-        return jsonify({'error': 'Prescription event not found in config'}), 500
+    patient   = read_patient_meta(folder, homer_id) or {}
+    group     = patient.get('group', '')
+    vcg_group = patient.get('vcgGroup', '')
+    ex_data   = _load_exercises()
 
-    presc = _read_prescription(folder, homer_id, presc_path)
-    if not presc:
-        return jsonify({'error': 'Prescription file not found — complete the prescription first'}), 404
+    # Session window from the associated home visit / activation
+    events_data = read_protocol_events(folder, homer_id)
+    session_source = cfg['session_source']
+    hv_entry = next(
+        (e for e in (events_data or {}).get('complete', []) if e.get('protocol_event_id') == session_source),
+        None
+    )
+    session_start = hv_entry.get('session_start') if hv_entry else None
+    session_end   = hv_entry.get('session_end')   if hv_entry else None
 
-    ex_data = _load_exercises()
-    if cfg['ex_type'] == 'adl':
-        ex_lookup = {e['id']: e['name'] for e in ex_data.get('adl', {}).get('exercises', [])}
-    else:
-        patient   = read_patient_meta(folder, homer_id) or {}
-        vcg_group = patient.get('vcgGroup', '')
-        ex_lookup = {e['id']: e['name']
-                     for e in ex_data.get('vcg', {}).get(vcg_group, {}).get('exercises', [])}
+    exercises = []
 
-    exercises = [
-        {
-            'exercise_id':  ex['exercise_id'],
-            'name':         ex_lookup.get(ex['exercise_id'], ex['exercise_id']),
-            'blocks':       ex.get('blocks'),
-            'repetitions':  ex.get('repetitions'),
-        }
-        for ex in presc.get('prescribed_exercises', [])
-    ]
-    return jsonify({'exercises': exercises})
+    # VCG exercises — control group only
+    if group == 'control':
+        vcg_presc_path = _PRESCRIPTION_FILES.get(cfg['vcg_prescription'])
+        vcg_presc      = _read_prescription(folder, homer_id, vcg_presc_path) if vcg_presc_path else None
+        if vcg_presc:
+            vcg_lookup = {e['id']: e['name']
+                          for e in ex_data.get('vcg', {}).get(vcg_group, {}).get('exercises', [])}
+            for ex in vcg_presc.get('prescribed_exercises', []):
+                exercises.append({
+                    'exercise_id': ex['exercise_id'],
+                    'type':        'vcg',
+                    'name':        vcg_lookup.get(ex['exercise_id'], ex['exercise_id']),
+                    'blocks':      ex.get('blocks'),
+                    'repetitions': ex.get('repetitions'),
+                })
+
+    # ADL exercises — both groups
+    adl_presc_path = _PRESCRIPTION_FILES.get(cfg['adl_prescription'])
+    adl_presc      = _read_prescription(folder, homer_id, adl_presc_path) if adl_presc_path else None
+    if adl_presc:
+        adl_lookup = {e['id']: e['name'] for e in ex_data.get('adl', {}).get('exercises', [])}
+        for ex in adl_presc.get('prescribed_exercises', []):
+            exercises.append({
+                'exercise_id': ex['exercise_id'],
+                'type':        'adl',
+                'name':        adl_lookup.get(ex['exercise_id'], ex['exercise_id']),
+                'blocks':      ex.get('blocks'),
+                'repetitions': ex.get('repetitions'),
+            })
+
+    if not exercises:
+        return jsonify({'error': 'No prescriptions found — complete the ADL prescription first'}), 404
+
+    return jsonify({
+        'exercises':     exercises,
+        'session_start': session_start,
+        'session_end':   session_end,
+    })
 
 
 @bp.route('/api/patients/<homer_id>/complete-event/agwatch-timing', methods=['POST'])
@@ -5073,10 +5093,9 @@ def api_complete_agwatch_timing(homer_id):
     write_protocol_events(folder, homer_id, events_data)
 
     session_id = flask_session.get('session_id', -1)
-    log_label  = 'ADL' if cfg['ex_type'] == 'adl' else 'VCG'
-    day_label  = 'd03' if 'd03' in protocol_event_id else 'd15'
+    day_label  = protocol_event_id.split('_')[-1]  # d01, d02, d03, d15
     write_patient_log(folder, homer_id, loginid, session_id,
-                      f'{log_label} AG watch timings recorded ({day_label})')
+                      f'AG watch timings recorded ({day_label})')
 
     return jsonify({'ok': True})
 
@@ -5511,7 +5530,7 @@ def api_complete_a1_assessment(homer_id):
     if not patient:
         return jsonify({'error': 'Patient not found'}), 404
     status = derive_status(patient)
-    if status not in ('training_completed', 'a1_completed', 'all_completed'):
+    if status not in ('training_completed', 'broken_protocol', 'discontinued', 'post_training'):
         return jsonify({'error': 'Patient must have completed training to record A1 assessment.'}), 409
 
     events_data = read_protocol_events(folder, homer_id)
@@ -5561,10 +5580,11 @@ def api_complete_a2_assessment(homer_id):
     if not folder:
         return jsonify({'error': 'Patient not found'}), 404
 
-    body       = request.get_json() or {}
-    event_id   = (body.get('event_id') or '').strip()
-    a2_date    = (body.get('completion_date') or '').strip()
-    notes      = (body.get('notes') or '').strip()
+    body         = request.get_json() or {}
+    event_id     = (body.get('event_id') or '').strip()
+    a2_date      = (body.get('completion_date') or '').strip()
+    notes        = (body.get('notes') or '').strip()
+    a1_miss_gap  = body.get('a1_miss_gap_seconds')
 
     if not a2_date:
         return jsonify({'error': 'Assessment date is required.'}), 400
@@ -5578,10 +5598,8 @@ def api_complete_a2_assessment(homer_id):
     if not patient:
         return jsonify({'error': 'Patient not found'}), 404
     status = derive_status(patient)
-    # Allow A2 when A1 is completed normally OR when A1 has been marked as missed.
-    a1_done = status in ('a1_completed', 'all_completed') or bool(patient.get('a1MissedDate'))
-    if not a1_done:
-        return jsonify({'error': 'A1 assessment must be completed or marked as missed before recording A2.'}), 409
+    if status not in ('training_completed', 'broken_protocol', 'discontinued', 'post_training', 'a1_completed'):
+        return jsonify({'error': 'Patient must have completed training to record A2 assessment.'}), 409
 
     events_data = read_protocol_events(folder, homer_id)
     if not events_data:
@@ -5598,13 +5616,34 @@ def api_complete_a2_assessment(homer_id):
 
     filed_at = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
     complete_entry = {**entry, 'completion_date': a2_date, 'filed_at': filed_at, 'notes': notes}
-    # Remove the assessment entry and any orphaned schedule-call stubs.
+
+    # Auto-miss A1 if still incomplete.
+    a1_entry = next(
+        (e for e in events_data.get('incomplete', [])
+         if e.get('protocol_event_id') == 'a1_assessment'),
+        None
+    )
+    if a1_entry:
+        # Back-date A1 by the OK-press gap so it sorts before A2 (no fixed offset). A2 stays
+        # server-authoritative; only the gap is client-measured, so this is skew-immune.
+        try:
+            _gap = max(0.0, float(a1_miss_gap)) if a1_miss_gap is not None else 0.0
+        except (TypeError, ValueError):
+            _gap = 0.0
+        a1_filed_at = (datetime.strptime(filed_at, '%Y-%m-%dT%H:%M:%S') - timedelta(seconds=_gap)).strftime('%Y-%m-%dT%H:%M:%S')
+        a1_missed = {**a1_entry, 'missed': True, 'missed_at': a1_filed_at[:16], 'filed_at': a1_filed_at}
+        patient['a1MissedDate'] = a1_filed_at
+
+    # Remove A2, A1 (if being auto-missed), and any orphaned schedule-call stubs.
     events_data['incomplete'] = [
         e for e in events_data['incomplete']
         if e.get('id') != entry['id']
-        and e.get('protocol_event_id') != 'schedule_a2_call'
+        and e.get('protocol_event_id') not in ('schedule_a2_call', 'schedule_a1_call')
+        and (not a1_entry or e.get('id') != a1_entry['id'])
     ]
     events_data.setdefault('complete', []).append(complete_entry)
+    if a1_entry:
+        events_data['complete'].append(a1_missed)
 
     from utils.protocol_events import write_protocol_events
     write_protocol_events(folder, homer_id, events_data)
@@ -5633,6 +5672,7 @@ def api_miss_assessment(homer_id):
     body            = request.get_json() or {}
     assessment_type = (body.get('assessment_type') or '').strip()
     event_id        = (body.get('event_id') or '').strip()
+    a1_miss_gap     = body.get('a1_miss_gap_seconds')
 
     if assessment_type not in ('a1', 'a2'):
         return jsonify({'error': 'assessment_type must be a1 or a2'}), 400
@@ -5655,12 +5695,38 @@ def api_miss_assessment(homer_id):
     missed_at = filed_at[:16]
 
     complete_entry = {**stub, 'missed': True, 'missed_at': missed_at, 'filed_at': filed_at}
+
+    # When marking A2 as missed, auto-miss A1 if still incomplete.
+    a1_auto_missed = None
+    if assessment_type == 'a2':
+        a1_stub = next(
+            (e for e in events_data.get('incomplete', [])
+             if e.get('protocol_event_id') == 'a1_assessment'),
+            None
+        )
+        if a1_stub:
+            # Back-date A1 by the OK-press gap so it sorts before A2 (no fixed offset).
+            try:
+                _gap = max(0.0, float(a1_miss_gap)) if a1_miss_gap is not None else 0.0
+            except (TypeError, ValueError):
+                _gap = 0.0
+            a1_filed_at = (datetime.strptime(filed_at, '%Y-%m-%dT%H:%M:%S') - timedelta(seconds=_gap)).strftime('%Y-%m-%dT%H:%M:%S')
+            a1_auto_missed = {**a1_stub, 'missed': True, 'missed_at': a1_filed_at[:16], 'filed_at': a1_filed_at}
+
     events_data['incomplete'] = [
         e for e in events_data['incomplete']
         if e.get('id') != stub['id']
         and e.get('protocol_event_id') != f'schedule_{assessment_type}_call'
+        and (not a1_auto_missed or e.get('id') != a1_auto_missed['id'])
     ]
+    if a1_auto_missed:
+        events_data['incomplete'] = [
+            e for e in events_data['incomplete']
+            if e.get('protocol_event_id') != 'schedule_a1_call'
+        ]
     events_data.setdefault('complete', []).append(complete_entry)
+    if a1_auto_missed:
+        events_data['complete'].append(a1_auto_missed)
 
     from utils.protocol_events import write_protocol_events
     write_protocol_events(folder, homer_id, events_data)
@@ -5668,6 +5734,8 @@ def api_miss_assessment(homer_id):
     patient = read_patient_meta(folder, homer_id)
     if patient:
         patient[f'{assessment_type}MissedDate'] = missed_at
+        if a1_auto_missed:
+            patient['a1MissedDate'] = a1_auto_missed['filed_at']
         write_patient_meta(folder, homer_id, patient)
 
     loginid    = flask_session.get('loginid', 'unknown')

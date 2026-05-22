@@ -398,7 +398,7 @@ Each action is defined once here. Pages above reference which actions apply to t
       - Append `{ cancelled_at, appointment_date, reason }` to `appointment_cancellations` on the `a1_assessment` stub
       - Reset `appointment_date` to `null` on the stub
       - Modal stays open; cancellation section disappears
-    - After cancellation, auto-seeding in `api_patient_events` will create a `schedule_a1_call` stub on next load **only if the A1 window has not yet closed** (`today ≤ window_end`). If the window is already closed, no stub is seeded — the assessment is reached directly from the overdue panel.
+    - After cancellation, auto-seeding in `api_patient_events` will create a `schedule_a1_call` stub on next load if all seeding conditions are met (see [Auto-seeding](#auto-seeding-both)). In practice: by the time an appointment is cancelled, `today >= window_start − 7 days` is already satisfied, so the stub seeds immediately as long as the window has not yet closed.
   - Assessment Date (datetime, required; cannot be in the future)
     - **Out-of-window confirmation**: if the chosen date falls outside `[window_start, window_end]`, a double-confirmation dialog fires before saving: "This date is outside the A1 assessment window. Are you sure?" The therapist can proceed or go back.
   - Notes (textarea, optional)
@@ -441,12 +441,14 @@ Two free events — one per assessment. Record a phone call made by the therapis
 
 #### Auto-seeding (both)
 
-A scheduling call stub is auto-seeded by `api_patient_events` (lazily, once per patient) when:
+A scheduling call stub is auto-seeded by `api_patient_events` (lazily, once per patient) when ALL of the following hold:
 - The corresponding assessment (`a1_assessment` / `a2_assessment`) is in `incomplete` with `appointment_date = null`
 - AND no stub for the corresponding scheduling call already exists in `incomplete`
+- AND **`today >= window_start − 7 days`** — gives therapist a 1-week lead time; prevents premature seeding when training ends early (broken protocol / discontinuation set on Day 3 should not immediately show the scheduling stub)
 - AND **`today ≤ window_end`** — once the protocol window has closed, no scheduling stub is seeded; the assessment is reached directly from the overdue panel
+- AND **training has permanently ended** — `trainingCompletionDate` OR `brokenProtocolDate` OR `discontinuationDate` is set. `post_training` (Day 28 passed but D29 not filed) does **not** trigger seeding.
 
-For A2 only: also requires `today >= a2_window_start − 7 days` to give the therapist a 1-week lead time before the window opens.
+For normal patients, D29 sets `appointment_date` directly in the modal, so the `appointment_date = null` condition is never met via this path — no stub seeds at D29. The stub only appears if that appointment is later cancelled.
 
 Only one stub may exist in `incomplete` at a time.
 
@@ -768,36 +770,45 @@ Discontinuing a patient is a two-step process: (1) a `discontinuation` stub is c
 
 ---
 
-### AG Watch Timings (`adl_agwatch_timing_d03`, `adl_agwatch_timing_d15`, `vcg_agwatch_timing_d03`, `vcg_agwatch_timing_d15`)
+### AG Watch Timings (`agwatch_timing_d01`, `agwatch_timing_d02`, `agwatch_timing_d03`, `agwatch_timing_d15`)
 
 - Trigger: respective event row on patient detail
-- `adl_agwatch_timing_d03` / `adl_agwatch_timing_d15` — both groups; `vcg_agwatch_timing_d03` / `vcg_agwatch_timing_d15` — control only
+- Both groups. Experimental: ADL exercises only. Control: VCG exercises first, then ADL exercises.
 - Allowed users: `admin`, `therapist`
-- `depends_on`:
-  - `adl_agwatch_timing_d03`: `home_visit_d03`
-  - `adl_agwatch_timing_d15`: `home_visit_d15`, `adl_prescription_d15`
-  - `vcg_agwatch_timing_d03`: `home_visit_d03`, `vcg_prescription_d01`
-  - `vcg_agwatch_timing_d15`: `home_visit_d15`, `vcg_prescription_d15`
-- Modal: `agwatch-timing-modal`
-  - Title: event name (e.g. "Add ADL AG Watch Timings Day 03")
-  - **Session date** (read-only — auto-populated from the home visit event's `scheduled_date[0]`; fixed, not editable)
-  - One row per prescribed exercise (exercise list loaded from the associated prescription file at modal open):
-    - Exercise name + block/rep summary (read-only)
-    - **Start time** (`HH:MM:SS`, optional) + **✕ clear button**
-    - **End time** (`HH:MM:SS`, optional) + **✕ clear button**
-    - **Notes** (text input, optional if both times are filled; **required if either time is missing**)
-  - Global Notes (textarea, optional)
-  - **Save** button — combines session date + each time to produce `YYYY-MM-DDTHH:MM:SS`; non-editable after submission
-- Associated prescription files:
-  - `adl_agwatch_timing_d03` → exercises from `adl/adl_prescription_d01.json`
-  - `adl_agwatch_timing_d15` → exercises from `adl/adl_prescription_d15.json`
-  - `vcg_agwatch_timing_d03` → exercises from `vcg_exercise/vcg_prescription_d01.json`
-  - `vcg_agwatch_timing_d15` → exercises from `vcg_exercise/vcg_prescription_d15.json`
+- `depends_on` (group-specific entries in `study_protocol.json`):
+  - `agwatch_timing_d01`: `activation`
+  - `agwatch_timing_d02`: `home_visit_d02`
+  - `agwatch_timing_d03` (experimental): `home_visit_d03`
+  - `agwatch_timing_d03` (control): `home_visit_d03`, `vcg_prescription_d01`
+  - `agwatch_timing_d15` (experimental): `home_visit_d15`, `adl_prescription_d15`
+  - `agwatch_timing_d15` (control): `home_visit_d15`, `adl_prescription_d15`, `vcg_prescription_d15`
+- `comes_after`: `agwatch_timing_d01` lists `watch_record` (so watch record task appears first on activation day)
+- Modal: wider `agwatch-timing-modal`
+  - Title: "AG Watch Timings — Day 01 / 02 / 03 / 15"
+  - **Session window** (read-only banner at top): `session_start → session_end` from the associated home visit. All exercise times must fall within this window.
+  - Exercise table — VCG rows first (control only), then ADL rows (both groups):
+
+    | Exercise Name (+ block/rep summary, read-only) | Start (`HH:MM`) | End (`HH:MM`) | Notes |
+    |---|---|---|---|
+
+  - Per-row rules:
+    - Both Start and End filled → Notes optional
+    - Both Start and End empty → Notes **required** (explanation of why timing was not recorded)
+    - Only one of Start/End filled → error (incomplete entry, cannot save)
+  - Attachment (optional PDF)
+- **Client-side validation (real-time)**:
+  1. Start < End per row (flagged immediately on input)
+  2. Start and End within `session_start`/`session_end` bounds
+  3. No overlap across all rows (VCG + ADL combined) — both conflicting rows highlighted
+  4. Incomplete entry (one of Start/End missing) flagged per row
+  5. Missing Notes when both times empty flagged on blur
 - Server actions:
-  - On modal open — `GET /api/patients/<homer_id>/agwatch-timing-exercises/<protocol_event_id>` — returns exercise list from the associated prescription file
-  - On save — `POST /api/patients/<homer_id>/complete-event/agwatch-timing` — validates per-entry notes, writes timing JSON file, moves event to `complete`
-  - For tab display — `GET /api/patients/<homer_id>/agwatch-timing/<protocol_event_id>` — returns the saved timing file for rendering inline in the ADL/VCG tab
-- Log message: `<ADL|VCG> AG watch timings recorded (d03|d15)`
+  - On modal open — `GET /api/patients/<homer_id>/agwatch-timing-exercises/<protocol_event_id>` — returns VCG + ADL exercise lists with group info and session window from the associated home visit
+  - On save — `POST /api/patients/<homer_id>/complete-event/agwatch-timing` — writes timing JSON file, moves event to `complete`
+  - For tab display — `GET /api/patients/<homer_id>/agwatch-timing/<protocol_event_id>` — returns saved timing for rendering inline in the ADL/VCG tab
+- Log message: `AG watch timings recorded (d01|d02|d03|d15)`
+
+> **Replaces** the previous 8 separate events (`adl_agwatch_timing_d01/02/03/15` and `vcg_agwatch_timing_d01/02/03/15`).
 
 ---
 

@@ -612,6 +612,7 @@ function renderActions(p) {
 
 let _a1AssessmentEventId = null;
 let _a2AssessmentEventId = null;
+let _a2A1MissOkAt = null;   // epoch ms when user confirmed A2-auto-misses-A1; null if A1 not pending
 let _schedA1EventId = null;
 let _schedA2EventId = null;
 let _a1ScheduledDate = null;
@@ -652,11 +653,15 @@ function openA1AssessmentModal(ev) { _openAssessmentModal('a1', ev); }
 function openA2AssessmentModal(ev) {
   // Check if A1 is still incomplete (not missed, not complete)
   const a1Incomplete = (eventsCache || []).some(e => e.protocol_event_id === 'a1_assessment');
+  _a2A1MissOkAt = null;
   if (a1Incomplete) {
     const ok = window.confirm(
       'A1 assessment has not been completed.\n\nFiling A2 will automatically mark A1 as missed.\n\nContinue?'
     );
     if (!ok) return;
+    // Log OK-press time; A1 is missed only if A2 is committed (filed or marked missed).
+    // The gap to the eventual action back-dates A1's filed_at server-side so it sorts before A2.
+    _a2A1MissOkAt = Date.now();
   }
   _openAssessmentModal('a2', ev);
 }
@@ -781,22 +786,16 @@ async function saveA2Assessment() {
     );
     if (!ok) return;
   }
-  // Auto-miss A1 if still open (user already confirmed in openA2AssessmentModal)
-  const a1Stub = (eventsCache || []).find(e => e.protocol_event_id === 'a1_assessment');
-  if (a1Stub) {
-    const missPayload = { assessment_type: 'a1' };
-    if (a1Stub.id) missPayload.event_id = a1Stub.id;
-    const { ok: missOk, data: missData } = await apiPost(
-      `/api/patients/${PATIENT_HOMER_ID}/complete-event/miss-assessment`, missPayload
-    );
-    if (!missOk) { setError('a2-error', missData.error || 'Failed to auto-miss A1.'); return; }
-  }
+  // A1 is auto-missed atomically by the server (only if A2 is actually filed).
+  // Send the measured gap from OK-press so the server back-dates A1's filed_at before A2's.
   const payload = { completion_date: date, notes };
   if (_a2AssessmentEventId) payload.event_id = _a2AssessmentEventId;
+  if (_a2A1MissOkAt != null) payload.a1_miss_gap_seconds = (Date.now() - _a2A1MissOkAt) / 1000;
   const { ok, data } = await apiPost(
     `/api/patients/${PATIENT_HOMER_ID}/complete-event/a2-assessment`, payload
   );
   if (!ok) { setError('a2-error', data.error || 'Failed to record A2.'); return; }
+  _a2A1MissOkAt = null;
   hideModal('a2-modal');
   await loadPatientEvents();
   loadPatient();
@@ -815,10 +814,13 @@ async function markAssessmentMissed(which) {
   const eventId = which === 'a1' ? _a1AssessmentEventId : _a2AssessmentEventId;
   const payload = { assessment_type: which };
   if (eventId) payload.event_id = eventId;
+  // Marking A2 missed also auto-misses a pending A1; back-date A1 by the OK-press gap.
+  if (which === 'a2' && _a2A1MissOkAt != null) payload.a1_miss_gap_seconds = (Date.now() - _a2A1MissOkAt) / 1000;
   const { ok, data } = await apiPost(
     `/api/patients/${PATIENT_HOMER_ID}/complete-event/miss-assessment`, payload
   );
   if (!ok) { setError(`${which}-error`, data.error || `Failed to mark ${label} as missed.`); return; }
+  _a2A1MissOkAt = null;
   hideModal(`${which}-modal`);
   await loadPatientEvents();
   loadPatient();
@@ -3419,14 +3421,10 @@ const EVENT_OPENERS = {
   followup_call_d07:         (ev) => openFollowupCallModal(ev),
   followup_call_d21:         (ev) => openFollowupCallModal(ev),
   training_completion_d29:   (ev) => openD29Modal(ev),
-  adl_agwatch_timing_d01:    (ev) => openAgwatchTimingModal(ev),
-  adl_agwatch_timing_d02:    (ev) => openAgwatchTimingModal(ev),
-  adl_agwatch_timing_d03:    (ev) => openAgwatchTimingModal(ev),
-  adl_agwatch_timing_d15:    (ev) => openAgwatchTimingModal(ev),
-  vcg_agwatch_timing_d01:    (ev) => openAgwatchTimingModal(ev),
-  vcg_agwatch_timing_d02:    (ev) => openAgwatchTimingModal(ev),
-  vcg_agwatch_timing_d03:    (ev) => openAgwatchTimingModal(ev),
-  vcg_agwatch_timing_d15:    (ev) => openAgwatchTimingModal(ev),
+  agwatch_timing_d01:        (ev) => openAgwatchTimingModal(ev),
+  agwatch_timing_d02:        (ev) => openAgwatchTimingModal(ev),
+  agwatch_timing_d03:        (ev) => openAgwatchTimingModal(ev),
+  agwatch_timing_d15:        (ev) => openAgwatchTimingModal(ev),
   watch_record:              (ev) => openWatchRecordModal(ev),
   adverse_event:                (ev) => openAdverseEventModal(ev),
   robot_issue_call:             (ev) => openRobotIssueCallModal(ev),
@@ -4781,18 +4779,19 @@ async function loadAdlTab() {
       fetch('/api/exercises?type=adl'),
       fetch(`/api/patients/${PATIENT_HOMER_ID}/prescription/adl_prescription_d01`),
       fetch(`/api/patients/${PATIENT_HOMER_ID}/prescription/adl_prescription_d15`),
-      fetch(`/api/patients/${PATIENT_HOMER_ID}/agwatch-timing/adl_agwatch_timing_d01`),
-      fetch(`/api/patients/${PATIENT_HOMER_ID}/agwatch-timing/adl_agwatch_timing_d02`),
-      fetch(`/api/patients/${PATIENT_HOMER_ID}/agwatch-timing/adl_agwatch_timing_d03`),
-      fetch(`/api/patients/${PATIENT_HOMER_ID}/agwatch-timing/adl_agwatch_timing_d15`),
+      fetch(`/api/patients/${PATIENT_HOMER_ID}/agwatch-timing/agwatch_timing_d01`),
+      fetch(`/api/patients/${PATIENT_HOMER_ID}/agwatch-timing/agwatch_timing_d02`),
+      fetch(`/api/patients/${PATIENT_HOMER_ID}/agwatch-timing/agwatch_timing_d03`),
+      fetch(`/api/patients/${PATIENT_HOMER_ID}/agwatch-timing/agwatch_timing_d15`),
     ]);
     const exercises = exRes.ok  ? await exRes.json()  : [];
     const d1        = d1Res.ok  ? await d1Res.json()  : null;
     const d15       = d15Res.ok ? await d15Res.json() : null;
-    const t01       = t01Res.ok ? await t01Res.json() : null;
-    const t02       = t02Res.ok ? await t02Res.json() : null;
-    const t03       = t03Res.ok ? await t03Res.json() : null;
-    const t15       = t15Res.ok ? await t15Res.json() : null;
+    const _filterAdl = td => td ? { ...td, timings: (td.timings || []).filter(t => t.type === 'adl') } : null;
+    const t01       = _filterAdl(t01Res.ok ? await t01Res.json() : null);
+    const t02       = _filterAdl(t02Res.ok ? await t02Res.json() : null);
+    const t03       = _filterAdl(t03Res.ok ? await t03Res.json() : null);
+    const t15       = _filterAdl(t15Res.ok ? await t15Res.json() : null);
 
     if (!d1 && !d15) {
       container.innerHTML = `
@@ -4827,18 +4826,19 @@ async function loadVcgTab() {
       fetch(`/api/exercises?type=vcg&group=${vcgGroup}`),
       fetch(`/api/patients/${PATIENT_HOMER_ID}/prescription/vcg_prescription_d01`),
       fetch(`/api/patients/${PATIENT_HOMER_ID}/prescription/vcg_prescription_d15`),
-      fetch(`/api/patients/${PATIENT_HOMER_ID}/agwatch-timing/vcg_agwatch_timing_d01`),
-      fetch(`/api/patients/${PATIENT_HOMER_ID}/agwatch-timing/vcg_agwatch_timing_d02`),
-      fetch(`/api/patients/${PATIENT_HOMER_ID}/agwatch-timing/vcg_agwatch_timing_d03`),
-      fetch(`/api/patients/${PATIENT_HOMER_ID}/agwatch-timing/vcg_agwatch_timing_d15`),
+      fetch(`/api/patients/${PATIENT_HOMER_ID}/agwatch-timing/agwatch_timing_d01`),
+      fetch(`/api/patients/${PATIENT_HOMER_ID}/agwatch-timing/agwatch_timing_d02`),
+      fetch(`/api/patients/${PATIENT_HOMER_ID}/agwatch-timing/agwatch_timing_d03`),
+      fetch(`/api/patients/${PATIENT_HOMER_ID}/agwatch-timing/agwatch_timing_d15`),
     ]);
     const exercises = exRes.ok  ? await exRes.json()  : [];
     const d1        = d1Res.ok  ? await d1Res.json()  : null;
     const d15       = d15Res.ok ? await d15Res.json() : null;
-    const t01       = t01Res.ok ? await t01Res.json() : null;
-    const t02       = t02Res.ok ? await t02Res.json() : null;
-    const t03       = t03Res.ok ? await t03Res.json() : null;
-    const t15       = t15Res.ok ? await t15Res.json() : null;
+    const _filterVcg = td => td ? { ...td, timings: (td.timings || []).filter(t => t.type === 'vcg') } : null;
+    const t01       = _filterVcg(t01Res.ok ? await t01Res.json() : null);
+    const t02       = _filterVcg(t02Res.ok ? await t02Res.json() : null);
+    const t03       = _filterVcg(t03Res.ok ? await t03Res.json() : null);
+    const t15       = _filterVcg(t15Res.ok ? await t15Res.json() : null);
 
     if (!d1 && !d15) {
       container.innerHTML = `
@@ -6427,6 +6427,7 @@ let _agwatchEventId         = null;
 let _agwatchProtocolEventId = null;
 let _agwatchSessionStart    = null;
 let _agwatchSessionEnd      = null;
+let _agwatchSessionDate     = null;
 
 async function openAgwatchTimingModal(ev) {
   _agwatchEventId         = ev.id;
@@ -6439,87 +6440,103 @@ async function openAgwatchTimingModal(ev) {
   errEl.textContent = '';
   errEl.classList.add('hidden');
 
-  // Pre-fill session date from scheduled_date[0], fallback to today.
-  // Will be overridden below once _agwatchSessionStart is resolved from the home visit entry.
-  const schedDate = Array.isArray(ev.scheduled_date) ? ev.scheduled_date[0] : ev.scheduled_date;
-  const dateOnly  = schedDate ? schedDate.split('T')[0] : new Date().toISOString().split('T')[0];
-  document.getElementById('agwatch-session-date').value = dateOnly;
-
-  // Load session bounds from the corresponding home visit or activation complete entry
-  const _AGWATCH_SESSION_SOURCE = {
-    adl_agwatch_timing_d01: 'activation',
-    adl_agwatch_timing_d02: 'home_visit_d02',
-    adl_agwatch_timing_d03: 'home_visit_d03',
-    vcg_agwatch_timing_d01: 'activation',
-    vcg_agwatch_timing_d02: 'home_visit_d02',
-    vcg_agwatch_timing_d03: 'home_visit_d03',
-    adl_agwatch_timing_d15: 'home_visit_d15',
-    vcg_agwatch_timing_d15: 'home_visit_d15',
-  };
-  const hvId    = _AGWATCH_SESSION_SOURCE[ev.protocol_event_id];
-  const hvEntry = hvId ? (_completeEventsCache || []).find(e => e.protocol_event_id === hvId) : null;
-  _agwatchSessionStart = hvEntry?.session_start || null;
-  _agwatchSessionEnd   = hvEntry?.session_end   || null;
-  // Override session date with the actual home visit date so exercise timestamps
-  // and session bounds share the same date in string comparisons.
-  if (_agwatchSessionStart) {
-    document.getElementById('agwatch-session-date').value = _agwatchSessionStart.split('T')[0];
-  }
-  const windowWrap = document.getElementById('agwatch-session-window-wrap');
-  const windowEl   = document.getElementById('agwatch-session-window');
-  if (_agwatchSessionStart && _agwatchSessionEnd) {
-    windowEl.textContent = `${_agwatchSessionStart.split('T')[1]} – ${_agwatchSessionEnd.split('T')[1]}`;
-    windowWrap.classList.remove('hidden');
-  } else {
-    windowWrap.classList.add('hidden');
-  }
+  _agwatchSessionStart = null;
+  _agwatchSessionEnd   = null;
+  document.getElementById('agwatch-session-window-wrap').classList.add('hidden');
 
   const bodyEl = document.getElementById('agwatch-timing-body');
-  bodyEl.innerHTML = '<p class="text-sm text-slate-500">Loading exercises…</p>';
+  bodyEl.innerHTML = '<p class="text-sm text-slate-500 px-3 py-4">Loading exercises…</p>';
   showModal('agwatch-timing-modal');
 
   try {
-    const res = await fetch(
+    const res  = await fetch(
       `/api/patients/${PATIENT_HOMER_ID}/agwatch-timing-exercises/${ev.protocol_event_id}`
     );
     const data = await res.json();
     if (!res.ok) {
-      bodyEl.innerHTML = `<p class="text-sm text-red-500">${data.error || 'Failed to load exercises.'}</p>`;
+      bodyEl.innerHTML = `<p class="text-sm text-red-500 px-3">${data.error || 'Failed to load exercises.'}</p>`;
       return;
     }
-    bodyEl.innerHTML = data.exercises.map((ex, i) => `
-      <div class="border border-slate-200 rounded-xl p-4 space-y-3">
-        <div class="flex items-center gap-2">
-          <span class="text-xs font-semibold text-slate-400 uppercase tracking-wide w-6">${i + 1}</span>
-          <span class="text-sm font-medium text-slate-800">${ex.name}</span>
-          <span class="ml-auto text-xs text-slate-400">${ex.blocks} blocks · ${ex.repetitions} reps</span>
-        </div>
-        <input type="hidden" class="agwatch-ex-id" value="${ex.exercise_id}">
-        <div class="grid grid-cols-2 gap-3">
+
+    // Session window banner
+    _agwatchSessionStart = data.session_start || null;
+    _agwatchSessionEnd   = data.session_end   || null;
+    const windowWrap = document.getElementById('agwatch-session-window-wrap');
+    const windowEl   = document.getElementById('agwatch-session-window');
+    if (_agwatchSessionStart && _agwatchSessionEnd) {
+      windowEl.textContent = `Session window: ${_agwatchSessionStart.split('T')[1].slice(0,5)} – ${_agwatchSessionEnd.split('T')[1].slice(0,5)}  (all exercise times must fall within this range)`;
+      windowWrap.classList.remove('hidden');
+    }
+
+    // Derive session date from session_start, fallback to scheduled_date
+    _agwatchSessionDate = _agwatchSessionStart
+      ? _agwatchSessionStart.split('T')[0]
+      : (Array.isArray(ev.scheduled_date) ? ev.scheduled_date[0] : ev.scheduled_date || '').split('T')[0];
+
+    // Build table rows
+    bodyEl.innerHTML = data.exercises.map((ex, i) => {
+      const typeTag = ex.type === 'vcg'
+        ? '<span class="text-[10px] font-bold uppercase tracking-wide text-teal-600 bg-teal-50 border border-teal-200 rounded px-1">VCG</span>'
+        : '<span class="text-[10px] font-bold uppercase tracking-wide text-blue-600 bg-blue-50 border border-blue-200 rounded px-1">ADL</span>';
+      const dosage = (ex.blocks && ex.repetitions) ? `${ex.blocks}×${ex.repetitions}` : '';
+      return `
+        <div class="grid grid-cols-[2fr_1fr_1fr_2fr] gap-3 items-center px-3 py-2 rounded-xl border border-slate-100 hover:border-slate-200" data-ex-idx="${i}">
+          <div class="flex items-center gap-2 min-w-0">
+            ${typeTag}
+            <span class="text-sm font-medium text-slate-800 truncate">${ex.name}</span>
+            ${dosage ? `<span class="text-xs text-slate-400 flex-shrink-0">${dosage}</span>` : ''}
+          </div>
+          <input type="hidden" class="agwatch-ex-id" value="${ex.exercise_id}">
+          <input type="hidden" class="agwatch-ex-type" value="${ex.type}">
           <div>
-            <label class="block text-xs font-medium text-slate-600 mb-1">Start time</label>
-            <div class="flex gap-1">
-              <input type="time" class="agwatch-start grow px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" step="1">
-              <button type="button" onclick="this.previousElementSibling.value=''" class="px-2 text-slate-400 hover:text-slate-600 border border-slate-200 rounded-xl text-xs">✕</button>
-            </div>
+            <input type="time" class="agwatch-start w-full px-2 py-1.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+              placeholder="HH:MM" oninput="_agwatchValidateRow(${i})" onchange="_agwatchValidateRow(${i})">
           </div>
           <div>
-            <label class="block text-xs font-medium text-slate-600 mb-1">End time</label>
-            <div class="flex gap-1">
-              <input type="time" class="agwatch-end grow px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" step="1">
-              <button type="button" onclick="this.previousElementSibling.value=''" class="px-2 text-slate-400 hover:text-slate-600 border border-slate-200 rounded-xl text-xs">✕</button>
-            </div>
+            <input type="time" class="agwatch-end w-full px-2 py-1.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+              placeholder="HH:MM" oninput="_agwatchValidateRow(${i})" onchange="_agwatchValidateRow(${i})">
           </div>
-        </div>
-        <div>
-          <label class="block text-xs font-medium text-slate-600 mb-1">Notes <span class="text-slate-400 font-normal">(required if timing is incomplete)</span></label>
-          <input type="text" class="agwatch-notes w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" placeholder="e.g. patient unable to perform">
-        </div>
-      </div>
-    `).join('');
+          <div>
+            <input type="text" class="agwatch-notes w-full px-2 py-1.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+              placeholder="Required if no times">
+            <p class="agwatch-row-error text-xs text-red-500 mt-0.5 hidden"></p>
+          </div>
+        </div>`;
+    }).join('');
+
   } catch (e) {
-    bodyEl.innerHTML = '<p class="text-sm text-red-500">Network error loading exercises.</p>';
+    bodyEl.innerHTML = '<p class="text-sm text-red-500 px-3">Network error loading exercises.</p>';
   }
+}
+
+function _agwatchValidateRow(idx) {
+  const rows = document.querySelectorAll('#agwatch-timing-body > div[data-ex-idx]');
+  const row  = rows[idx];
+  if (!row) return;
+  const startEl = row.querySelector('.agwatch-start');
+  const endEl   = row.querySelector('.agwatch-end');
+  const errEl   = row.querySelector('.agwatch-row-error');
+  const start   = startEl.value;
+  const end     = endEl.value;
+
+  const clearRowErr = () => { errEl.textContent = ''; errEl.classList.add('hidden'); startEl.classList.remove('border-red-400'); endEl.classList.remove('border-red-400'); };
+  const setRowErr = (msg, els = []) => {
+    errEl.textContent = msg; errEl.classList.remove('hidden');
+    els.forEach(el => el.classList.add('border-red-400'));
+  };
+  clearRowErr();
+  if (!start && !end) return;
+
+  if (start && end) {
+    if (start >= end) { setRowErr('Start must be before end.', [startEl, endEl]); return; }
+    // Within session bounds
+    if (_agwatchSessionStart && start < _agwatchSessionStart.split('T')[1].slice(0,5))
+      { setRowErr(`Start is before session start (${_agwatchSessionStart.split('T')[1].slice(0,5)}).`, [startEl]); return; }
+    if (_agwatchSessionEnd && end > _agwatchSessionEnd.split('T')[1].slice(0,5))
+      { setRowErr(`End is after session end (${_agwatchSessionEnd.split('T')[1].slice(0,5)}).`, [endEl]); return; }
+  }
+  if ((start && !end) || (!start && end))
+    setRowErr('Both start and end are required.', [startEl, endEl]);
 }
 
 async function saveAgwatchTiming() {
@@ -6527,60 +6544,65 @@ async function saveAgwatchTiming() {
   errEl.textContent = '';
   errEl.classList.add('hidden');
 
-  const sessionDate = document.getElementById('agwatch-session-date').value;
-  if (!sessionDate) {
-    errEl.textContent = 'Session date is required.';
-    errEl.classList.remove('hidden');
-    return;
-  }
+  const rows    = document.querySelectorAll('#agwatch-timing-body > div[data-ex-idx]');
+  const timings = [];
 
   function toDatetime(timeVal) {
-    if (!timeVal) return null;
-    // time input with step=1 gives HH:MM:SS; pad if browser gives HH:MM
-    const t = timeVal.length === 5 ? timeVal + ':00' : timeVal;
-    return `${sessionDate}T${t}`;
+    if (!timeVal || !_agwatchSessionDate) return null;
+    return `${_agwatchSessionDate}T${timeVal}`;
   }
 
-  const rows    = document.querySelectorAll('#agwatch-timing-body > div');
-  const timings = [];
   for (let i = 0; i < rows.length; i++) {
     const row   = rows[i];
     const exId  = row.querySelector('.agwatch-ex-id').value;
+    const exType = row.querySelector('.agwatch-ex-type').value;
     const start = row.querySelector('.agwatch-start').value;
     const end   = row.querySelector('.agwatch-end').value;
     const notes = row.querySelector('.agwatch-notes').value.trim();
-    if ((!start || !end) && !notes) {
-      errEl.textContent = `Notes are required for exercise ${i + 1} when timing is incomplete.`;
-      errEl.classList.remove('hidden');
-      return;
+
+    // Incomplete entry
+    if ((start && !end) || (!start && end)) {
+      errEl.textContent = `Exercise ${i + 1}: both start and end are required, or leave both empty.`;
+      errEl.classList.remove('hidden'); return;
     }
-    timings.push({ exercise_id: exId, start: toDatetime(start), end: toDatetime(end), notes });
+    // Start < end
+    if (start && end && start >= end) {
+      errEl.textContent = `Exercise ${i + 1}: start time must be before end time.`;
+      errEl.classList.remove('hidden'); return;
+    }
+    // Within session bounds
+    if (_agwatchSessionStart && start && start < _agwatchSessionStart.split('T')[1].slice(0,5)) {
+      errEl.textContent = `Exercise ${i + 1}: start is before session start (${_agwatchSessionStart.split('T')[1].slice(0,5)}).`;
+      errEl.classList.remove('hidden'); return;
+    }
+    if (_agwatchSessionEnd && end && end > _agwatchSessionEnd.split('T')[1].slice(0,5)) {
+      errEl.textContent = `Exercise ${i + 1}: end is after session end (${_agwatchSessionEnd.split('T')[1].slice(0,5)}).`;
+      errEl.classList.remove('hidden'); return;
+    }
+    // Notes required when both empty
+    if (!start && !end && !notes) {
+      errEl.textContent = `Exercise ${i + 1}: notes are required when no timing is recorded.`;
+      errEl.classList.remove('hidden'); return;
+    }
+    timings.push({ exercise_id: exId, type: exType, start: toDatetime(start), end: toDatetime(end), notes });
   }
 
-  const globalNotes = document.getElementById('agwatch-timing-notes').value.trim();
-
-  // Hard validation: all non-null timings must fall within the home visit session window
-  if (_agwatchSessionStart && _agwatchSessionEnd) {
-    const padSec = (dt) => dt.length === 16 ? dt + ':00' : dt;
-    const sesStart = padSec(_agwatchSessionStart);
-    const sesEnd   = padSec(_agwatchSessionEnd);
-    for (let i = 0; i < timings.length; i++) {
-      const t = timings[i];
-      if (t.start && t.start < sesStart) {
-        errEl.textContent = `Exercise ${i + 1}: start time is before the session start (${_agwatchSessionStart.split('T')[1]}).`;
-        errEl.classList.remove('hidden');
-        return;
-      }
-      if (t.end && t.end > sesEnd) {
-        errEl.textContent = `Exercise ${i + 1}: end time is after the session end (${_agwatchSessionEnd.split('T')[1]}).`;
-        errEl.classList.remove('hidden');
-        return;
+  // Overlap check across all rows
+  const timed = timings.filter(t => t.start && t.end);
+  for (let a = 0; a < timed.length; a++) {
+    for (let b = a + 1; b < timed.length; b++) {
+      if (timed[a].start < timed[b].end && timed[b].start < timed[a].end) {
+        const aIdx = timings.indexOf(timed[a]) + 1;
+        const bIdx = timings.indexOf(timed[b]) + 1;
+        errEl.textContent = `Exercises ${aIdx} and ${bIdx} have overlapping times.`;
+        errEl.classList.remove('hidden'); return;
       }
     }
   }
 
   if (!_validateAttachment('agwatch', 'agwatch-timing-error')) return;
 
+  const globalNotes = document.getElementById('agwatch-timing-notes').value.trim();
   const { ok, data } = await apiPost(`/api/patients/${PATIENT_HOMER_ID}/complete-event/agwatch-timing`, {
     event_id:          _agwatchEventId,
     protocol_event_id: _agwatchProtocolEventId,
@@ -6589,8 +6611,7 @@ async function saveAgwatchTiming() {
   });
   if (!ok) {
     errEl.textContent = data.error || 'Failed to save.';
-    errEl.classList.remove('hidden');
-    return;
+    errEl.classList.remove('hidden'); return;
   }
 
   const { file: awFile, caption: awCaption } = _readAttachment('agwatch');
@@ -6600,8 +6621,8 @@ async function saveAgwatchTiming() {
   }
 
   hideModal('agwatch-timing-modal');
-  if (_agwatchProtocolEventId?.startsWith('adl_')) _adlTabLoaded = false;
-  if (_agwatchProtocolEventId?.startsWith('vcg_')) _vcgTabLoaded = false;
+  _adlTabLoaded = false;
+  _vcgTabLoaded = false;
   await loadPatientEvents();
 }
 
