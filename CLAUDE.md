@@ -109,6 +109,7 @@ The original `main` branch is a single-page app (`dashboard.html`, 39KB). Being 
 | `routes/auth.py` | Login, logout, on-login checks |
 | `routes/dashboard.py` | Dashboard stats and events API |
 | `routes/user_management.py` | Patient CRUD, group assignment, patient events API |
+| `routes/notes.py` | Patient free-text Notes tab: list / create / attachment download (role-keyed) |
 | `routes/devices.py` | Full device management: inventory, assignments, SIM cards, 28-day auto-reset, recharge |
 | `routes/sim_cards.py` | Legacy SIM blueprint (not used by the Devices page; SIMs managed via routes/devices.py) |
 | `utils/data_access.py` | Patient file I/O, hospital folder lookup, session logs |
@@ -251,7 +252,7 @@ Tabs appear left-to-right in this order. Visibility is per group.
 | Tab | Experimental | Control |
 |---|---|---|
 | Overview | ✅ | ✅ |
-| Devices | ✅ | ✅ |
+| Devices | ✅ | ⬜ hidden |
 | VCG | ⬜ hidden | ✅ |
 | ADL | ✅ | ✅ |
 | Call Logs | ✅ | ✅ |
@@ -259,6 +260,27 @@ Tabs appear left-to-right in this order. Visibility is per group.
 | Watch Records | ✅ | ✅ |
 | Robot Issues | ✅ | ⬜ hidden |
 | Timeline | ✅ | ✅ |
+| Notes | ✅ | ✅ |
+
+Notes is the last tab. It is visible to all three roles (admin, therapist, engineer) — unlike Adverse Events / Robot Issues which are role-restricted — but each role sees only its own notes bucket (admin sees all). See the Notes feature spec below.
+
+---
+
+## Patient Notes Tab
+
+Free-text clinical notes per patient, separate from protocol events. **Status:** ⬜ pending implementation (spec finalised).
+
+- **Storage:** `data/<site>/patients/<homer_id>/notes.json` — role-keyed buckets `{ "admin": [], "therapist": [], "engineer": [] }`. Not part of `protocol_events.json`. Full schema in `docs/data_schemas.md`.
+- **Immutable:** a note is never edited or deleted after saving. Corrections are made by adding a **new** note that references the earlier one by its alias (e.g. "supersedes Notes-T-0003"). This sidesteps the editing/audit-trail gap that blocks editing of protocol events.
+- **Alias:** assigned server-side at creation as `Notes-<R>-NNNN`, where `<R>` is the author's role letter (`T` therapist, `E` engineer, `A` admin) and `NNNN` is a 4-digit sequence within that role's bucket (oldest = 0001). Unique by construction because each center has exactly one therapist, one engineer, one admin (roles never change).
+- **Title required.** Rich-text body authored with **Quill** (stored as HTML in `content_html`); sanitised with **DOMPurify** on render to guard against stored XSS.
+- **Timestamps:** `created_at` = when the Create Note modal opened, `committed_at` = server save time. Captured the same way as the A1/A2 auto-miss ordering fix: the client sends the elapsed gap and the server sets `committed_at = now()`, `created_at = committed_at − gap` (both server-anchored, skew-immune).
+- **Display:** collapsible cards (same pattern as the Adverse Events tab), newest first by `created_at`. Header shows alias + title + created date + chevron; the expanded body shows the rich text, both timestamps, author (admin view), and the attachment download link.
+- **Create Note** button opens a `max-w-3xl` modal with a title input, the Quill editor, and the standard attachment widget.
+- **Visibility:** all three roles can create notes. therapist/engineer see only their own role's bucket; admin sees all three. The tab itself is visible to all roles.
+- **Attachment:** one optional PDF per note, stored at `note_attachments/<note_id>.pdf` in the patient folder (a dedicated subfolder, separate from event `attachments/`). Caption required when a file is attached.
+- **Attachment download exception:** note attachments are downloadable by the note's **author (any role, including engineer) and admin** — a deliberate, note-scoped exception to the general rule that engineers cannot download attachments.
+- **Endpoints** (in `routes/notes.py`): `GET /api/patients/<homer_id>/notes` (role-filtered, newest first), `POST /api/patients/<homer_id>/notes` (create + assign alias), `GET /api/patients/<homer_id>/notes/<note_id>/attachment` (download).
 
 ---
 
@@ -284,12 +306,13 @@ Every modal can optionally include a reusable attachment widget. The widget is a
 - **Caption textarea always present** alongside the file input. If a file is selected, the caption is **required** — the therapist must describe what the attachment is. If no file is selected, the caption is ignored.
 - **Storage:** `data/<site>/patients/<homer_id>/attachments/<event_id>.pdf` — filename is the event UUID. Relative path stored in the event JSON as `"attachment": "attachments/<event_id>.pdf"`.
 - **`attachment_caption`** always stored on events with the widget (`null` if left blank).
-- **Download access:** admin and therapist roles only. Engineers cannot download attachments.
-- **Download location:** the Timeline tab is the single place where attachment download links appear. Each completed event in the timeline that has an `attachment` field shows a download link. No other tab or page exposes attachment downloads.
+- **Download access:** admin and therapist roles only. Engineers cannot download attachments. *(Exception: note attachments — see the Notes-tab exception below.)*
+- **Download location:** the Timeline tab is the single place where **event** attachment download links appear. Each completed event in the timeline that has an `attachment` field shows a download link. No other tab or page exposes event attachment downloads. *(Exception: the Notes tab shows a download link per note attachment — see below.)*
 - **Download endpoint:** `GET /api/patients/<homer_id>/download-attachment/<event_id>` — server checks role, locates `attachments/<event_id>.pdf` in the patient folder, and serves it.
-- **Upload endpoint:** `POST /api/patients/<homer_id>/upload-attachment` — generic, shared by all modals.
+- **Upload endpoint:** `POST /api/patients/<homer_id>/upload-attachment` — generic, shared by all event modals.
 - **Template macro location:** `templates/macros/attachment_section.html` (imported per template).
 - **JS utility:** shared `saveAttachment(eventId, file)` helper in `patient_detail.js`; called by each `save*()` function that has the widget.
+- **Notes-tab exception:** the Notes feature reuses the attachment **widget** (file input + caption, same caption-required-when-file rule) but **not** the rest of this module. Note attachments are stored at `note_attachments/<note_id>.pdf` (not `attachments/`), uploaded as part of `POST /api/patients/<homer_id>/notes` (not the generic upload endpoint or the `saveAttachment` helper), downloaded via `GET /api/patients/<homer_id>/notes/<note_id>/attachment`, shown on the **Notes tab** (not the Timeline), and downloadable by the note's **author of any role — including engineers — plus admin**. The "admin/therapist only", "Timeline is the single download location", and "generic upload endpoint" rules above do **not** apply to note attachments. See the [Patient Notes Tab](#patient-notes-tab) spec.
 
 ### Per-modal attachment configuration
 
@@ -330,6 +353,7 @@ Fill in ✅ / ⬜. Caption is always included when attachment is ✅.
 | `resolve_robot_issue_visit` | ✅ |
 | `discontinuation` | ✅ |
 | `device_return` | ✅ |
+| `note` (Notes tab) | ✅ |
 
 ---
 

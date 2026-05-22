@@ -136,6 +136,9 @@ Patient detail. Shown for patients `inactive` and beyond (including `broken_prot
   | Watch Records  | All               |
   | Robot Issues   | Experimental only |
   | Timeline       | All               |
+  | Notes          | All               |
+
+  (The Notes tab is the last tab and is shown to all roles, but each role sees only its own notes — see the Notes tab description below.)
 
 - **Overview tab** (default):
   0a. **Training period expiry banner** — shown when `today > activationDate + 28 days` AND `trainingCompletionDate` is null. Amber informational strip above the events panels: "Training period has ended (Day 28 passed). Training completion (D29) can be filed when ready." Disappears once D29 is filed. See `docs/ae_ri_logic.md` Section 15.
@@ -209,9 +212,17 @@ Patient detail. Shown for patients `inactive` and beyond (including `broken_prot
   - **Color theme per card:** red border/header (training blocked + unresolved), amber border/header (unresolved, no block), green border/header (resolved).
   - Assembly: data fetched from `GET /api/patients/<homer_id>/events` (which returns all `free` arrays); assembled per-AE by filtering on `adverse_event_id` across follow-up event types — no separate endpoint required.
 
+- **Notes tab** — free-text clinical notes per patient, separate from protocol events. Visible to all roles; each role sees only its own notes (admin sees everyone's). Data from `GET /api/patients/<homer_id>/notes`. See [Create Note](#create-note-note) for the full behavioural spec.
+  - **Create Note** button (top of tab) opens a `max-w-3xl` modal: title input (required), a **Quill** rich-text editor, and the standard attachment widget (one optional PDF + required caption when attached).
+  - **Display:** collapsible cards in the same style as the Adverse Events tab, **newest first by `created_at`**.
+    - **Card header** (always visible, click to expand/collapse): alias (`Notes-T-0001`) + title on the left; created date + chevron on the right.
+    - **Expanded body:** the rich-text content (HTML, DOMPurify-sanitised on render); `Created: <created_at>` and `Committed: <committed_at>`; author (shown in the admin view, which spans all roles); attachment download link if present.
+  - **Immutable:** no edit or delete. A correction is a new note that references the earlier one by alias (e.g. "supersedes Notes-T-0003").
+  - **Stored** in `notes.json` (role-keyed buckets); see `docs/data_schemas.md`.
+
 - **Stub tabs** — Devices, Call Logs, Watch Records, Robot Issues show "Coming soon"
 
-**Actions:** [Device Setup](#device-setup-exp_device_install), [Activate](#activate), [ADL Prescription](#adl-prescription-adl_prescription_d01), [VCG Prescription](#vcg-prescription-vcg_prescription_d01), [Prescription Printout](#prescription-printout-prescription_printout_d01), [ADL Prescription Revision](#adl-prescription-revision-adl_prescription_d15), [VCG Prescription Revision](#vcg-prescription-revision-vcg_prescription_d15), [Home Visit](#home-visit), [Follow-up Call](#follow-up-call-followup_call_d07-followup_call_d21), [Patient Call](#patient-call), [Watch Record](#watch-record-watch_record), [Training Completion](#training-completion-visit-training_completion_d29), [File Adverse Event](#file-adverse-event-adverse_event), [Adverse Event Follow-up Call](#adverse-event-follow-up-call-adverse_event_followup), [Adverse Event Follow-up Visit](#adverse-event-follow-up-visit-adverse_event_followup_visit), [Adverse Event Clinical Visit](#adverse-event-clinical-visit-adverse_event_clinical_visit), [Record A1](#record-a1-assessment-a1_assessment), [Record A2](#record-a2-assessment-a2_assessment), [Assessment Scheduling Call](#assessment-scheduling-call-schedule_a1_call-schedule_a2_call), [Discontinue](#discontinue)
+**Actions:** [Device Setup](#device-setup-exp_device_install), [Activate](#activate), [ADL Prescription](#adl-prescription-adl_prescription_d01), [VCG Prescription](#vcg-prescription-vcg_prescription_d01), [Prescription Printout](#prescription-printout-prescription_printout_d01), [ADL Prescription Revision](#adl-prescription-revision-adl_prescription_d15), [VCG Prescription Revision](#vcg-prescription-revision-vcg_prescription_d15), [Home Visit](#home-visit), [Follow-up Call](#follow-up-call-followup_call_d07-followup_call_d21), [Patient Call](#patient-call), [Watch Record](#watch-record-watch_record), [Training Completion](#training-completion-visit-training_completion_d29), [File Adverse Event](#file-adverse-event-adverse_event), [Adverse Event Follow-up Call](#adverse-event-follow-up-call-adverse_event_followup), [Adverse Event Follow-up Visit](#adverse-event-follow-up-visit-adverse_event_followup_visit), [Adverse Event Clinical Visit](#adverse-event-clinical-visit-adverse_event_clinical_visit), [Record A1](#record-a1-assessment-a1_assessment), [Record A2](#record-a2-assessment-a2_assessment), [Assessment Scheduling Call](#assessment-scheduling-call-schedule_a1_call-schedule_a2_call), [Create Note](#create-note-note), [Discontinue](#discontinue)
 
 ---
 
@@ -484,6 +495,29 @@ Only one stub may exist in `incomplete` at a time.
 - History: all past scheduling calls are visible in the Timeline tab (as completed free events in `free.schedule_a1_call` / `free.schedule_a2_call`).
 - Appointment cancellation history is stored on the assessment stub's `appointment_cancellations` list (see data_schemas.md).
 - Missed assessments are stored in `complete` with `missed: true` and `missed_at`. `a1MissedDate` / `a2MissedDate` are written to `<homer_id>.json`.
+
+---
+
+### Create Note (`note`)
+
+- Trigger: "Create Note" button at the top of the **Notes** tab on patient detail
+- Allowed users: `admin`, `therapist`, `engineer` (all roles may create)
+- Notes are **immutable** — there is no edit or delete action. Corrections are filed as a new note that references the earlier one by alias.
+- Modal: `note-modal` (`max-w-3xl`)
+  - Title: "Create Note"
+  - **Note title** (text, required)
+  - **Body** — Quill rich-text editor (required); stored as HTML in `content_html`
+  - Attachment (optional PDF; caption required when a file is attached)
+  - On open, the client records the modal-open time; on save it sends the elapsed gap so the server can set `created_at = committed_at − gap` (same mechanism as the A1/A2 auto-miss ordering fix)
+- Server actions (`POST /api/patients/<homer_id>/notes`, in `routes/notes.py`):
+  - Determine the author's role bucket (`admin` / `therapist` / `engineer`); create `notes.json` lazily if absent
+  - Assign `alias = Notes-<R>-NNNN` (`<R>` = role letter, `NNNN` = next sequence in that bucket)
+  - Set `committed_at = now()`, `created_at = committed_at − gap`, `author = loginid`
+  - Save uploaded PDF to `note_attachments/<note_id>.pdf` if present; store `attachment` + `attachment_caption`
+  - Append the note object to the role bucket in `notes.json`
+- Read (`GET /api/patients/<homer_id>/notes`): returns the caller's own bucket (therapist/engineer) or all three buckets (admin), each sorted newest-first by `created_at`
+- Attachment download (`GET /api/patients/<homer_id>/notes/<note_id>/attachment`): allowed for the note's **author (any role) and admin** — a note-scoped exception to the rule that engineers cannot download attachments
+- Log message: `Note created — <alias>`
 
 ---
 
@@ -1325,19 +1359,6 @@ This ensures the device inventory accurately reflects availability for new patie
 - Requires an amendment reason (textarea, required)
 - On save: updates the record in `free.adverse_event` and appends an `amendments` list entry recording the original values, the reason, and the amendment timestamp
 - Log message: `Adverse event amended — <ae_id>`
-
-### Clinical Notes Tab (Future)
-
-**Context:** The current Adverse Events tab assembles a per-AE history for monitoring purposes. As the study grows, therapists have requested a dedicated free-form notes area per patient — not tied to a specific event.
-
-**Required feature:** A **Clinical Notes** tab on the patient detail page, available to `admin` and `therapist`, with:
-
-- A chronological list of free-text notes, each with author, date, and text
-- An "Add Note" button opening a simple modal with a textarea (required)
-- Notes stored in `free.clinical_notes` array
-- Notes are read-only after filing; amendment via admin only (same amendment pattern as AE)
-
----
 
 ## D01–D03 Broken Protocol Detection & Auto-Shift on Resume
 

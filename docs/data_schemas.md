@@ -67,7 +67,9 @@ patients/<homer_id>/
 ├── <homer_id>.json
 ├── <homer_id>.log
 ├── protocol_events.json
+├── notes.json
 ├── attachments/
+├── note_attachments/
 ├── pluto/
 ├── mars/
 ├── actigraphs/
@@ -80,7 +82,9 @@ patients/<homer_id>/
 ├── <homer_id>.json
 ├── <homer_id>.log
 ├── protocol_events.json
+├── notes.json
 ├── attachments/
+├── note_attachments/
 ├── vcg_exercise/
 ├── actigraphs/
 └── adl/
@@ -93,6 +97,8 @@ The patient folder and all subfolders are created when a new patient is enrolled
 - `vcg_exercise/`, `adl/` — populated by the therapist via htDash
 - `protocol_events.json` — created when a patient is assigned to a group
 - `attachments/` — populated whenever an attachment is added to any protocol event
+- `notes.json` — free-text Notes tab; created lazily on first note save (see `notes.json` schema below)
+- `note_attachments/` — one optional PDF per note, filename `<note_id>.pdf`; populated when a note is saved with an attachment
 
 ---
 
@@ -1181,6 +1187,42 @@ Each non-null `start` and `end` in `timings` must fall within the session window
 | `adl_agwatch_timing_d15`, `vcg_agwatch_timing_d15` | `session_start` / `session_end` from `home_visit_d15` |
 
 The modal must reject any timing entry where `start < session_start` or `end > session_end`. This is a hard error — the form cannot be saved until all timings fall within the session window.
+
+---
+
+## `notes.json`
+
+Free-text clinical notes for the patient, kept separate from `protocol_events.json` (notes are not protocol events — no schedule, no dependencies, no completion lifecycle). Created lazily on the first note save.
+
+Top level is **role-keyed buckets** — one array per role. A note lives in the bucket of its author's role:
+
+```json
+{
+  "admin":     [ <note>, … ],
+  "therapist": [ <note>, … ],
+  "engineer":  [ <note>, … ]
+}
+```
+
+Each `<note>` object:
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | string | UUID4. |
+| `alias` | string | `Notes-<R>-NNNN`. `<R>` = author role letter (`T`/`E`/`A`); `NNNN` = 4-digit sequence within that bucket (oldest = `0001`). Assigned server-side at creation; stable. Unique by construction (one therapist / engineer / admin per center). |
+| `author` | string | `loginid` of the author. |
+| `title` | string | Required, non-empty. |
+| `content_html` | string | Rich-text body as HTML (Quill output). Sanitised with DOMPurify on render. |
+| `created_at` | string | ISO 8601, seconds resolution. When the Create Note modal opened. Computed server-side as `committed_at − gap` (client sends the elapsed gap), so it is server-anchored. Ordering key (notes shown newest-first by `created_at`). |
+| `committed_at` | string | ISO 8601, seconds resolution. Server save time (`datetime.now()`). |
+| `attachment` | string \| null | Relative path `note_attachments/<id>.pdf` when a PDF is attached, else `null`. One PDF per note, optional. |
+| `attachment_caption` | string \| null | Required when `attachment` is set, else `null`. |
+
+**Immutable:** notes are never edited or deleted. Corrections are made by adding a new note that references the earlier one by alias.
+
+**Visibility:** therapist/engineer reads return only their own role's bucket; admin reads return all three. All roles may create.
+
+**Attachment download:** `note_attachments/<id>.pdf` is downloadable by the note's author (any role, including engineer) and admin — a deliberate exception to the general "engineers cannot download attachments" rule.
 
 ---
 
