@@ -34,6 +34,7 @@ from utils.data_access import (
     write_device_inventory,
     read_sims,
     write_sims,
+    write_patient_notes,
 )
 from utils.protocol_events import create_protocol_events
 
@@ -157,6 +158,7 @@ def reset_patient(defn: dict, a0_date: str) -> None:
     }
     write_patient_meta(HOSPITAL, homer_id, meta)
     create_protocol_events(HOSPITAL, homer_id, group, a0_date)
+    write_patient_notes(HOSPITAL, homer_id, {'admin': [], 'therapist': [], 'engineer': []})
 
 
 if __name__ == '__main__':

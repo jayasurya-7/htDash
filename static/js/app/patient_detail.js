@@ -77,6 +77,7 @@ function switchTab(tab) {
   if (tab === 'watch-records') renderWatchRecordsTab();
   if (tab === 'robot')         renderRobotIssuesTab();
   if (tab === 'timeline')      renderTimelineTab();
+  if (tab === 'notes')         renderNotesTab();
 }
 
 // ── Modal helpers ─────────────────────────────────────────────────────────────
@@ -6699,7 +6700,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     'device-setup-submit', 'activation-submit',
     'adl-prescription-submit', 'vcg-prescription-submit',
     'prescription-printout-save', 'prescription-printout-print',
-    'wr-save',
+    'wr-save', 'note-save',
   ].forEach(id => {
     const btn = document.getElementById(id);
     if (btn) btn.dataset.label = btn.textContent;
@@ -7338,4 +7339,154 @@ async function saveDeviceReturn() {
   setLoading('dr-save', false);
   hideModal('device-return-modal');
   loadPatientEvents();
+}
+
+// ── Notes tab ──────────────────────────────────────────────────────────────────
+// Free-text, immutable notes per patient. Role-keyed server-side (each role sees
+// only its own bucket; admin sees all). See docs/pages.md → Create Note.
+
+let _noteQuill        = null;   // lazy-initialised Quill instance
+let _noteModalOpenAt  = null;   // epoch ms when the Create Note modal opened
+let _notesCache       = [];
+let _notesIsAdmin     = false;
+
+function _ensureNoteQuill() {
+  if (_noteQuill || typeof Quill === 'undefined') return _noteQuill;
+  _noteQuill = new Quill('#note-editor', {
+    theme: 'snow',
+    placeholder: 'Write the note…',
+    modules: {
+      toolbar: [
+        [{ header: [1, 2, 3, false] }],
+        ['bold', 'italic', 'underline'],
+        [{ list: 'ordered' }, { list: 'bullet' }],
+        ['link', 'blockquote'],
+        ['clean'],
+      ],
+    },
+  });
+  return _noteQuill;
+}
+
+function openNoteModal() {
+  setError('note-error', '');
+  document.getElementById('note-title').value = '';
+  _resetAttachment('note');
+  const q = _ensureNoteQuill();
+  if (q) q.setContents([]);                          // clear body
+  else  document.getElementById('note-editor').innerHTML = '';
+  _noteModalOpenAt = Date.now();                     // for created_at = committed_at − gap
+  showModal('note-modal');
+  // Focus the title once the modal is visible.
+  setTimeout(() => document.getElementById('note-title')?.focus(), 50);
+}
+
+async function saveNote() {
+  const title = document.getElementById('note-title').value.trim();
+  const html  = _noteQuill ? _noteQuill.root.innerHTML : '';
+  const plain = _noteQuill ? _noteQuill.getText().trim() : '';
+
+  if (!title)  { setError('note-error', 'Please enter a title.'); return; }
+  if (!plain)  { setError('note-error', 'Please write the note.'); return; }
+  if (!_validateAttachment('note', 'note-error')) return;
+
+  const { file, caption } = _readAttachment('note');
+  const gap = _noteModalOpenAt != null ? (Date.now() - _noteModalOpenAt) / 1000 : 0;
+
+  const form = new FormData();
+  form.append('title', title);
+  form.append('content_html', html);
+  form.append('gap_seconds', String(gap));
+  if (file) {
+    form.append('file', file);
+    form.append('caption', caption);
+  }
+
+  setLoading('note-save', true);
+  const res  = await fetch(`/api/patients/${PATIENT_HOMER_ID}/notes`, { method: 'POST', body: form });
+  let data;
+  try { data = await res.json(); } catch { data = { error: `Server error (${res.status})` }; }
+  setLoading('note-save', false);
+  if (!res.ok) { setError('note-error', data.error || 'Failed to save note.'); return; }
+
+  _noteModalOpenAt = null;
+  hideModal('note-modal');
+  renderNotesTab();
+}
+
+async function renderNotesTab() {
+  const container = document.getElementById('notes-content');
+  if (!container) return;
+  container.innerHTML = `
+    <div class="flex items-center justify-center py-10 text-slate-400">
+      <i class="fas fa-spinner fa-spin mr-2"></i><span>Loading…</span>
+    </div>`;
+
+  const { ok, data } = await apiGet(`/api/patients/${PATIENT_HOMER_ID}/notes`);
+  if (!ok) {
+    container.innerHTML = `<p class="text-sm text-red-500 py-6 text-center">${_esc(data.error || 'Failed to load notes.')}</p>`;
+    return;
+  }
+  _notesCache   = data.notes || [];
+  _notesIsAdmin = !!data.is_admin;
+
+  if (!_notesCache.length) {
+    container.innerHTML = `
+      <div class="flex flex-col items-center justify-center py-16 text-slate-300">
+        <i class="fas fa-sticky-note text-3xl mb-3"></i>
+        <p class="text-sm">No notes yet.</p>
+      </div>`;
+    return;
+  }
+  container.innerHTML = _notesCache.map(n => _noteCard(n, _notesIsAdmin)).join('');
+}
+
+function _toggleNoteCard(cardId) {
+  const body    = document.getElementById(`note-body-${cardId}`);
+  const chevron = document.getElementById(`note-chevron-${cardId}`);
+  if (!body) return;
+  const isHidden = body.classList.toggle('hidden');
+  if (chevron) chevron.style.transform = isHidden ? '' : 'rotate(180deg)';
+}
+
+function _noteCard(note, isAdmin) {
+  const cardId    = note.id;
+  const createdStr = note.created_at ? _fmtDateTime(note.created_at) : '—';
+  const committedStr = note.committed_at ? _fmtDateTime(note.committed_at) : '—';
+  const safeBody  = (typeof DOMPurify !== 'undefined')
+    ? DOMPurify.sanitize(note.content_html || '')
+    : (note.content_html || '');
+  const authorRow = isAdmin
+    ? `<div class="text-xs text-slate-500"><span class="text-slate-400">Author:</span> ${_esc(note.author || '—')}</div>`
+    : '';
+  const attachRow = note.attachment
+    ? `<a href="/api/patients/${PATIENT_HOMER_ID}/notes/${cardId}/attachment" target="_blank"
+          class="inline-flex items-center gap-1.5 text-xs text-blue-600 hover:text-blue-700 hover:underline">
+         <i class="fas fa-file-pdf"></i> ${_esc(note.attachment_caption || 'Attachment')}
+       </a>`
+    : '';
+
+  return `
+    <div class="border border-slate-200 rounded-xl mb-3 overflow-hidden">
+      <div class="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-slate-50 select-none"
+           onclick="_toggleNoteCard('${cardId}')">
+        <div class="flex items-center gap-3 min-w-0">
+          <span class="text-xs font-semibold text-blue-700 bg-blue-50 border border-blue-200 rounded-full px-2 py-0.5 shrink-0">${_esc(note.alias || 'Note')}</span>
+          <span class="text-sm font-medium text-slate-800 truncate">${_esc(note.title || '')}</span>
+        </div>
+        <div class="flex items-center gap-3 shrink-0">
+          <span class="text-xs text-slate-400">${createdStr}</span>
+          <i id="note-chevron-${cardId}" class="fas fa-chevron-down text-slate-400 text-xs transition-transform"></i>
+        </div>
+      </div>
+      <div id="note-body-${cardId}" class="hidden px-4 pb-4 pt-1 border-t border-slate-100 space-y-3">
+        <div class="note-rich text-sm text-slate-700">${safeBody}</div>
+        <div class="flex flex-wrap items-center gap-x-4 gap-y-1 pt-1">
+          <div class="text-xs text-slate-500"><span class="text-slate-400">Created:</span> ${createdStr}</div>
+          <div class="text-xs text-slate-500"><span class="text-slate-400">Committed:</span> ${committedStr}</div>
+          ${authorRow}
+        </div>
+        ${attachRow}
+      </div>
+    </div>`;
 }

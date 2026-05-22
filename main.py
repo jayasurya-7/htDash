@@ -13,8 +13,9 @@ from routes.adl_exercises import bp as adl_bp
 from routes.exercise_timing import bp as timing_bp 
 from routes.exit_questionnaire import bp as exit_bp  
 from routes.call_logs import bp as call_logs_bp
-from routes.patient_events import bp as patient_events_bp  
-from routes.devices import bp as devices_bp  
+from routes.patient_events import bp as patient_events_bp
+from routes.notes import bp as notes_bp
+from routes.devices import bp as devices_bp
 from routes.sim_cards import bp as sim_cards_bp 
 from routes.time_records import bp as time_records_bp
 
@@ -36,6 +37,7 @@ app.register_blueprint(timing_bp, url_prefix='/timing')
 app.register_blueprint(exit_bp, url_prefix='/exit') 
 app.register_blueprint(call_logs_bp)
 app.register_blueprint(patient_events_bp, url_prefix='/patient_events')
+app.register_blueprint(notes_bp)
 app.register_blueprint(devices_bp, url_prefix='/devices')
 app.register_blueprint(sim_cards_bp, url_prefix='/sim_cards')
 app.register_blueprint(time_records_bp, url_prefix='/time_records')

@@ -673,7 +673,7 @@ def create_patient_folders(hospital_folder: str, patient_id: str, group: str) ->
     if Config.USE_S3:
         return
     base = get_patients_path(hospital_folder) / patient_id
-    common = ['actigraphs', 'adl', 'attachments']
+    common = ['actigraphs', 'adl', 'attachments', 'note_attachments']
     experimental_only = ['pluto', 'mars']
     control_only = ['vcg_exercise']
 
@@ -685,3 +685,45 @@ def create_patient_folders(hospital_folder: str, patient_id: str, group: str) ->
 
     for folder in folders:
         (base / folder).mkdir(parents=True, exist_ok=True)
+
+
+# ── Patient notes (free-text Notes tab) ────────────────────────────────────────
+
+_NOTES_BUCKETS = ('admin', 'therapist', 'engineer')
+
+
+def _empty_notes() -> dict:
+    return {b: [] for b in _NOTES_BUCKETS}
+
+
+def read_patient_notes(hospital_folder: str, patient_id: str) -> dict:
+    """Read notes.json for a patient. Returns role-keyed buckets; empty buckets if absent."""
+    if Config.USE_S3:
+        data = s3_read_json(f"{hospital_folder}/patients/{patient_id}/notes.json")
+    else:
+        path = get_patients_path(hospital_folder) / patient_id / 'notes.json'
+        if not path.exists():
+            return _empty_notes()
+        try:
+            with open(path, encoding='utf-8') as f:
+                data = json.load(f)
+        except Exception:
+            return _empty_notes()
+    if not isinstance(data, dict):
+        return _empty_notes()
+    # Ensure all buckets are present and are lists.
+    return {b: (data.get(b) if isinstance(data.get(b), list) else []) for b in _NOTES_BUCKETS}
+
+
+def write_patient_notes(hospital_folder: str, patient_id: str, data: dict) -> None:
+    """Write (create or update) notes.json for a patient atomically."""
+    if Config.USE_S3:
+        s3_write_json(f"{hospital_folder}/patients/{patient_id}/notes.json", data)
+        return
+    patient_dir = get_patients_path(hospital_folder) / patient_id
+    patient_dir.mkdir(parents=True, exist_ok=True)
+    path = patient_dir / 'notes.json'
+    tmp = path.with_suffix('.tmp')
+    with open(tmp, 'w', encoding='utf-8') as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+    os.replace(tmp, path)
