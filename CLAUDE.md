@@ -269,7 +269,7 @@ Notes is the last tab. It is visible to all three roles (admin, therapist, engin
 
 ## Patient Notes Tab
 
-Free-text clinical notes per patient, separate from protocol events. **Status:** ⬜ pending implementation (spec finalised).
+Free-text clinical notes per patient, separate from protocol events. **Status:** ✅ implemented.
 
 - **Storage:** `data/<site>/patients/<homer_id>/notes.json` — role-keyed buckets `{ "admin": [], "therapist": [], "engineer": [] }`. Not part of `protocol_events.json`. Full schema in `docs/data_schemas.md`.
 - **Immutable:** a note is never edited or deleted after saving. Corrections are made by adding a **new** note that references the earlier one by its alias (e.g. "supersedes Notes-T-0003"). This sidesteps the editing/audit-trail gap that blocks editing of protocol events.
@@ -282,6 +282,18 @@ Free-text clinical notes per patient, separate from protocol events. **Status:**
 - **Attachment:** one optional PDF per note, stored at `note_attachments/<note_id>.pdf` in the patient folder (a dedicated subfolder, separate from event `attachments/`). Caption required when a file is attached.
 - **Attachment download exception:** note attachments are downloadable by the note's **author (any role, including engineer) and admin** — a deliberate, note-scoped exception to the general rule that engineers cannot download attachments.
 - **Endpoints** (in `routes/notes.py`): `GET /api/patients/<homer_id>/notes` (role-filtered, newest first), `POST /api/patients/<homer_id>/notes` (create + assign alias), `GET /api/patients/<homer_id>/notes/<note_id>/attachment` (download).
+
+### Retrospective event notes (Timeline)
+
+Notes attached to an already-completed event, after the fact. Same shape and mechanics as free notes, but stored **on the event entry** and reachable **only from the Timeline tab**. **Status:** ⬜ pending implementation (spec finalised).
+
+- **Storage:** an `event_notes` object on the event entry in `protocol_events.json` (works for both `complete[]` and completed `free.*[]` entries) — role-keyed buckets `{ admin, therapist, engineer }`, lazily created. Full schema in `docs/data_schemas.md`.
+- **Note shape:** identical to a free note (title required, Quill `content_html`, DOMPurify on render, `created_at = committed_at − gap`, one optional PDF), **except the alias** is `EvtNote-<R>-NNNN` — a distinct prefix sequenced **patient-wide per role** (counts that role's event-notes across all events). Distinct prefix avoids collision/ambiguity with free-note aliases in correction references.
+- **Immutable**; corrections are a new event-note referencing the earlier alias.
+- **UI:** Timeline event rows are expandable (accordion). Expanding lazy-loads the event's role-filtered notes and shows an **Add Note** button → reuses the `note-modal`. Synthetic rows (Enrolled, A0) have no stored entry and are not expandable.
+- **Leak prevention:** `event_notes` is **stripped** from the `GET /api/patients/<homer_id>/events` response; notes reach the client only via the dedicated role-filtered read endpoint.
+- **Attachment:** one optional PDF at `note_attachments/<note_id>.pdf` (shared folder; UUID filenames never collide). Downloadable by the note's author (any role) or admin — shown in the expanded Timeline row.
+- **Endpoints** (in `routes/notes.py`): `GET /api/patients/<homer_id>/events/<event_id>/notes` (role-filtered list), `POST /api/patients/<homer_id>/events/<event_id>/notes` (create), `GET /api/patients/<homer_id>/event-notes/<note_id>/attachment` (download).
 
 ---
 
@@ -313,7 +325,7 @@ Every modal can optionally include a reusable attachment widget. The widget is a
 - **Upload endpoint:** `POST /api/patients/<homer_id>/upload-attachment` — generic, shared by all event modals.
 - **Template macro location:** `templates/macros/attachment_section.html` (imported per template).
 - **JS utility:** shared `saveAttachment(eventId, file)` helper in `patient_detail.js`; called by each `save*()` function that has the widget.
-- **Notes-tab exception:** the Notes feature reuses the attachment **widget** (file input + caption, same caption-required-when-file rule) but **not** the rest of this module. Note attachments are stored at `note_attachments/<note_id>.pdf` (not `attachments/`), uploaded as part of `POST /api/patients/<homer_id>/notes` (not the generic upload endpoint or the `saveAttachment` helper), downloaded via `GET /api/patients/<homer_id>/notes/<note_id>/attachment`, shown on the **Notes tab** (not the Timeline), and downloadable by the note's **author of any role — including engineers — plus admin**. The "admin/therapist only", "Timeline is the single download location", and "generic upload endpoint" rules above do **not** apply to note attachments. See the [Patient Notes Tab](#patient-notes-tab) spec.
+- **Note attachments exception (free notes + retrospective event notes):** both note types reuse the attachment **widget** (file input + caption, same caption-required-when-file rule) but **not** the rest of this module. Note PDFs are stored at `note_attachments/<note_id>.pdf` (not `attachments/`), uploaded as part of the note's own `POST` (not the generic upload endpoint or the `saveAttachment` helper), and downloadable by the note's **author of any role — including engineers — plus admin**. The "admin/therapist only" and "generic upload endpoint" rules do **not** apply. Free-note attachments are downloaded via `GET …/notes/<note_id>/attachment` and shown on the **Notes tab**; event-note attachments are downloaded via `GET …/event-notes/<note_id>/attachment` and shown in the expanded **Timeline** row (the "Timeline is the single download location" rule still holds for *event* attachments, and event-note attachments live there too). See the [Patient Notes Tab](#patient-notes-tab) spec.
 
 ### Per-modal attachment configuration
 

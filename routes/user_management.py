@@ -647,6 +647,11 @@ def api_patient_events(homer_id):
 
     complete_list.sort(key=lambda x: x.get('filed_at') or x.get('completion_date') or '', reverse=True)
 
+    # Retrospective event notes are role-private — never expose them here. They are
+    # served, role-filtered, only by routes/notes.py event-note endpoints.
+    for item in complete_list:
+        item.pop('event_notes', None)
+
     return jsonify({'overdue': overdue, 'upcoming': upcoming, 'complete': complete_list})
 
 

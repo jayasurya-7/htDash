@@ -184,7 +184,9 @@ Patient detail. Shown for patients `inactive` and beyond (including `broken_prot
 
   `_deriveTransitions(patient, events)` returns a `Map<event_id, badge>` built once when the timeline renders. Synthetic events (Enrolled, A0) never carry badges.
 
-  Data from the `complete` array in `GET /api/patients/<homer_id>/events` (all fields except `id` are returned). This includes both protocol events from `protocol_events.json`'s `complete[]` array and completed free events. The `free.discontinuation` singleton is also included (as `protocol_event_id: "discontinuation"`, `event_name: "Patient Discontinued"`) so the discontinuation entry appears in the timeline.
+  Data from the `complete` array in `GET /api/patients/<homer_id>/events` (all fields are returned, including `id`; only `event_notes` is stripped — see retrospective event notes below). This includes both protocol events from `protocol_events.json`'s `complete[]` array and completed free events. The `free.discontinuation` singleton is also included (as `protocol_event_id: "discontinuation"`, `event_name: "Patient Discontinued"`) so the discontinuation entry appears in the timeline.
+
+  **Retrospective event notes** — each real (non-synthetic) timeline row is expandable (accordion). Expanding lazy-loads that event's role-filtered notes from `GET /api/patients/<homer_id>/events/<event_id>/notes` and shows an **Add Note** button. This is the **only** place event notes can be added or viewed. See [Retrospective Event Notes](#retrospective-event-notes-event_notes) for the full spec. Synthetic rows (Patient Enrolled, A0) are not expandable.
 
 - **ADL tab** — shows the ADL prescription history for the patient. Each prescription is a card with a coloured header (day 01 = blue-400, day 15 = blue-600). Each exercise row shows: numbered circle badge · exercise name · blocks × reps (right-aligned). If the corresponding AG watch timing event is complete, the recorded `HH:MM:SS → HH:MM:SS` window appears below blocks × reps in the same row. Data is fetched in parallel via:
   - `GET /api/patients/<homer_id>/prescription/adl_prescription_d01` (or `d15`)
@@ -518,6 +520,27 @@ Only one stub may exist in `incomplete` at a time.
 - Read (`GET /api/patients/<homer_id>/notes`): returns the caller's own bucket (therapist/engineer) or all three buckets (admin), each sorted newest-first by `created_at`
 - Attachment download (`GET /api/patients/<homer_id>/notes/<note_id>/attachment`): allowed for the note's **author (any role) and admin** — a note-scoped exception to the rule that engineers cannot download attachments
 - Log message: `Note created — <alias>`
+
+---
+
+### Retrospective Event Notes (`event_notes`)
+
+Notes attached to an already-completed event, after the fact. **Only** accessible from the **Timeline** tab (expand an event row). Stored on the event entry in `protocol_events.json` as `event_notes` (role-keyed buckets); see `docs/data_schemas.md`.
+
+- Trigger: **Add Note** button inside an expanded Timeline event row
+- Allowed users: `admin`, `therapist`, `engineer` (all roles may create). Synthetic rows (Patient Enrolled, A0) cannot take notes.
+- **Immutable** — no edit/delete; corrections are a new note referencing the earlier one by alias.
+- Modal: reuses the `note-modal` (`max-w-3xl`) — title (required), Quill body (required), optional PDF (caption required when attached). On open the client records the modal-open time; on save it sends the elapsed gap.
+- Create (`POST /api/patients/<homer_id>/events/<event_id>/notes`, in `routes/notes.py`):
+  - Locate the event (search `complete[]` then `free.*[]` by `id`); create its `event_notes` bucket object lazily
+  - Assign `alias = EvtNote-<R>-NNNN` (`<R>` = role letter; `NNNN` = next sequence for that role **patient-wide** across all events)
+  - Set `committed_at = now()`, `created_at = committed_at − gap`, `author = loginid`
+  - Save uploaded PDF to `note_attachments/<note_id>.pdf`; store `attachment` + `attachment_caption`
+  - Append to `event_notes[<role>]` on the event entry; write `protocol_events.json`
+- Read (`GET /api/patients/<homer_id>/events/<event_id>/notes`): returns the caller's own bucket (therapist/engineer) or all three (admin), newest-first by `created_at`, plus `is_admin`
+- Attachment download (`GET /api/patients/<homer_id>/event-notes/<note_id>/attachment`): allowed for the note's **author (any role) and admin** — same note-scoped exception as free notes
+- **Leak prevention:** `GET /api/patients/<homer_id>/events` strips `event_notes` from every entry, so notes reach the client only through the role-filtered read endpoint above
+- Log message: `Event note created — <alias>`
 
 ---
 

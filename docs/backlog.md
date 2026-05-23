@@ -8,13 +8,16 @@ _Captured: 2026-05-22._
 
 ---
 
-## 1. Retrospective event-notes for all events
+## 1. Retrospective event-notes for all events ✅ Implemented
 Allow a note to be attached to **any completed event**, after the fact
 (retrospectively), across all event types. Distinct from the per-event `notes`
 field captured at filing time — these are added later for clarification or
 correction context.
 
-**Status:** planned — needs design (storage, audit trail, who can add).
+**Status:** ✅ implemented. Added/viewed from the **Timeline** tab (expand a row);
+role-keyed `event_notes` on each event entry; immutable; `EvtNote-<R>-NNNN`
+aliases. See `docs/pages.md` → Retrospective Event Notes and CLAUDE.md →
+Patient Notes Tab → Retrospective event notes.
 
 ## 2. Retrospective admin comments on all events and free notes
 Admin can add comments, after the fact, on **any event** and on **free notes**

@@ -1323,6 +1323,8 @@ function renderTimelineTab() {
   const container = document.getElementById('timeline-tab-content');
   if (!container) return;
 
+  _evtNotesLoaded = {};   // panels are rebuilt empty on each render; clear stale load flags
+
   // Merge protocol events with synthetic patient milestones, sort most-recent first
   const all = [...(_completeEventsCache || []), ..._syntheticPatientEvents()];
   all.sort((a, b) => {
@@ -1386,26 +1388,39 @@ function renderTimelineTab() {
       : '';
     const rowHighlight = isDisc ? 'bg-red-50 rounded-lg' : rowBg;
     const nameCls      = isDisc ? 'text-sm font-bold text-red-700' : 'text-sm font-semibold text-slate-800';
+    // Retrospective event notes: only real (non-synthetic) events with a stored id.
+    const isReal     = !isSynthetic && !!ev.id;
+    const noteToggle = isReal
+      ? `<button type="button" onclick="_toggleEventNotes('${ev.id}')"
+            class="mt-2 inline-flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-700">
+            <i id="evtnote-chevron-${ev.id}" class="fas fa-chevron-down text-[10px] transition-transform"></i> Notes
+         </button>`
+      : '';
+    const notePanel  = isReal ? `<div id="evtnote-panel-${ev.id}" class="hidden mt-1 mb-1"></div>` : '';
     return `
-      <div class="grid gap-x-4 px-2 -mx-2 ${rowHighlight}" style="grid-template-columns:1fr 20px 1fr">
-        <div class="text-right pb-${isLast ? '2' : '7'} pt-2">
-          <p class="${nameCls}">${ev.event_name}</p>
-          ${!isSynthetic && schedDate ? `<p class="text-xs text-slate-400 mt-0.5">Scheduled: ${schedStr}</p>` : ''}
-          ${dayLabel ? `<p class="text-sm font-semibold text-indigo-500 mt-1">${dayLabel}</p>` : ''}
-          ${badge}
-          ${discBadge}
-          ${missedBadge}
-          ${delayedBadge}
+      <div>
+        <div class="grid gap-x-4 px-2 -mx-2 ${rowHighlight}" style="grid-template-columns:1fr 20px 1fr">
+          <div class="text-right pb-${isLast ? '2' : '7'} pt-2">
+            <p class="${nameCls}">${ev.event_name}</p>
+            ${!isSynthetic && schedDate ? `<p class="text-xs text-slate-400 mt-0.5">Scheduled: ${schedStr}</p>` : ''}
+            ${dayLabel ? `<p class="text-sm font-semibold text-indigo-500 mt-1">${dayLabel}</p>` : ''}
+            ${badge}
+            ${discBadge}
+            ${missedBadge}
+            ${delayedBadge}
+          </div>
+          <div class="flex flex-col items-center pt-2">
+            <div class="w-3 h-3 rounded-full ${circleCls} border-2 border-white ring-1 z-10 flex-shrink-0"></div>
+            ${isLast ? '' : '<div class="flex-1 w-0.5 bg-green-200 -mb-2"></div>'}
+          </div>
+          <div class="pb-${isLast ? '2' : '7'} pt-2">
+            <p class="text-xs font-medium text-slate-700">${compStr}</p>
+            ${filedStr ? `<p class="text-xs text-slate-400 mt-0.5">Filed: ${filedStr}</p>` : ''}
+            ${extra}
+            ${noteToggle}
+          </div>
         </div>
-        <div class="flex flex-col items-center pt-2">
-          <div class="w-3 h-3 rounded-full ${circleCls} border-2 border-white ring-1 z-10 flex-shrink-0"></div>
-          ${isLast ? '' : '<div class="flex-1 w-0.5 bg-green-200 -mb-2"></div>'}
-        </div>
-        <div class="pb-${isLast ? '2' : '7'} pt-2">
-          <p class="text-xs font-medium text-slate-700">${compStr}</p>
-          ${filedStr ? `<p class="text-xs text-slate-400 mt-0.5">Filed: ${filedStr}</p>` : ''}
-          ${extra}
-        </div>
+        ${notePanel}
       </div>`;
   }).join('');
   container.innerHTML = `<div>${items}</div>`;
@@ -7347,6 +7362,7 @@ async function saveDeviceReturn() {
 
 let _noteQuill        = null;   // lazy-initialised Quill instance
 let _noteModalOpenAt  = null;   // epoch ms when the Create Note modal opened
+let _noteTargetEventId = null;  // null = free note; else event id for a retrospective event note
 let _notesCache       = [];
 let _notesIsAdmin     = false;
 
@@ -7368,7 +7384,7 @@ function _ensureNoteQuill() {
   return _noteQuill;
 }
 
-function openNoteModal() {
+function _openNoteModalCommon() {
   setError('note-error', '');
   document.getElementById('note-title').value = '';
   _resetAttachment('note');
@@ -7379,6 +7395,18 @@ function openNoteModal() {
   showModal('note-modal');
   // Focus the title once the modal is visible.
   setTimeout(() => document.getElementById('note-title')?.focus(), 50);
+}
+
+// Free note (Notes tab)
+function openNoteModal() {
+  _noteTargetEventId = null;
+  _openNoteModalCommon();
+}
+
+// Retrospective note on a Timeline event
+function openEventNoteModal(eventId) {
+  _noteTargetEventId = eventId;
+  _openNoteModalCommon();
 }
 
 async function saveNote() {
@@ -7402,16 +7430,27 @@ async function saveNote() {
     form.append('caption', caption);
   }
 
+  const targetEventId = _noteTargetEventId;
+  const url = targetEventId
+    ? `/api/patients/${PATIENT_HOMER_ID}/events/${targetEventId}/notes`
+    : `/api/patients/${PATIENT_HOMER_ID}/notes`;
+
   setLoading('note-save', true);
-  const res  = await fetch(`/api/patients/${PATIENT_HOMER_ID}/notes`, { method: 'POST', body: form });
+  const res  = await fetch(url, { method: 'POST', body: form });
   let data;
   try { data = await res.json(); } catch { data = { error: `Server error (${res.status})` }; }
   setLoading('note-save', false);
   if (!res.ok) { setError('note-error', data.error || 'Failed to save note.'); return; }
 
   _noteModalOpenAt = null;
+  _noteTargetEventId = null;
   hideModal('note-modal');
-  renderNotesTab();
+  if (targetEventId) {
+    _evtNotesLoaded[targetEventId] = false;          // force reload
+    _loadEventNotes(targetEventId);
+  } else {
+    renderNotesTab();
+  }
 }
 
 async function renderNotesTab() {
@@ -7449,9 +7488,23 @@ function _toggleNoteCard(cardId) {
   if (chevron) chevron.style.transform = isHidden ? '' : 'rotate(180deg)';
 }
 
+// Free-note card (Notes tab)
 function _noteCard(note, isAdmin) {
-  const cardId    = note.id;
-  const createdStr = note.created_at ? _fmtDateTime(note.created_at) : '—';
+  const attachUrl = note.attachment ? `/api/patients/${PATIENT_HOMER_ID}/notes/${note.id}/attachment` : null;
+  return _noteCardHtml(note, isAdmin, attachUrl);
+}
+
+// Event-note card (Timeline) — same look, different attachment endpoint
+function _eventNoteCard(note, isAdmin) {
+  const attachUrl = note.attachment ? `/api/patients/${PATIENT_HOMER_ID}/event-notes/${note.id}/attachment` : null;
+  return _noteCardHtml(note, isAdmin, attachUrl);
+}
+
+// Shared collapsible card for both note kinds. cardId (note.id) is a UUID, so the
+// toggle/body element ids never collide across free notes and event notes.
+function _noteCardHtml(note, isAdmin, attachUrl) {
+  const cardId       = note.id;
+  const createdStr   = note.created_at   ? _fmtDateTime(note.created_at)   : '—';
   const committedStr = note.committed_at ? _fmtDateTime(note.committed_at) : '—';
   const safeBody  = (typeof DOMPurify !== 'undefined')
     ? DOMPurify.sanitize(note.content_html || '')
@@ -7459,15 +7512,15 @@ function _noteCard(note, isAdmin) {
   const authorRow = isAdmin
     ? `<div class="text-xs text-slate-500"><span class="text-slate-400">Author:</span> ${_esc(note.author || '—')}</div>`
     : '';
-  const attachRow = note.attachment
-    ? `<a href="/api/patients/${PATIENT_HOMER_ID}/notes/${cardId}/attachment" target="_blank"
+  const attachRow = attachUrl
+    ? `<a href="${attachUrl}" target="_blank"
           class="inline-flex items-center gap-1.5 text-xs text-blue-600 hover:text-blue-700 hover:underline">
          <i class="fas fa-file-pdf"></i> ${_esc(note.attachment_caption || 'Attachment')}
        </a>`
     : '';
 
   return `
-    <div class="border border-slate-200 rounded-xl mb-3 overflow-hidden">
+    <div class="border border-slate-200 rounded-xl mb-3 overflow-hidden bg-white">
       <div class="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-slate-50 select-none"
            onclick="_toggleNoteCard('${cardId}')">
         <div class="flex items-center gap-3 min-w-0">
@@ -7488,5 +7541,49 @@ function _noteCard(note, isAdmin) {
         </div>
         ${attachRow}
       </div>
+    </div>`;
+}
+
+// ── Retrospective event notes (Timeline accordion) ─────────────────────────────
+
+let _evtNotesLoaded = {};   // eventId → true once its notes have been fetched (reset per timeline render)
+
+async function _toggleEventNotes(eventId) {
+  const panel = document.getElementById(`evtnote-panel-${eventId}`);
+  const chev  = document.getElementById(`evtnote-chevron-${eventId}`);
+  if (!panel) return;
+  const willShow = panel.classList.contains('hidden');
+  panel.classList.toggle('hidden');
+  if (chev) chev.style.transform = willShow ? 'rotate(180deg)' : '';
+  if (willShow && !_evtNotesLoaded[eventId]) await _loadEventNotes(eventId);
+}
+
+async function _loadEventNotes(eventId) {
+  const panel = document.getElementById(`evtnote-panel-${eventId}`);
+  if (!panel) return;
+  panel.innerHTML = `<div class="text-xs text-slate-400 py-2 pl-3">Loading…</div>`;
+  const { ok, data } = await apiGet(`/api/patients/${PATIENT_HOMER_ID}/events/${eventId}/notes`);
+  if (!ok) {
+    panel.innerHTML = `<p class="text-xs text-red-500 py-2 pl-3">${_esc(data.error || 'Failed to load notes.')}</p>`;
+    return;
+  }
+  _evtNotesLoaded[eventId] = true;
+  _renderEventNotesPanel(panel, eventId, data.notes || [], !!data.is_admin);
+}
+
+function _renderEventNotesPanel(panel, eventId, notes, isAdmin) {
+  const cards = notes.length
+    ? notes.map(n => _eventNoteCard(n, isAdmin)).join('')
+    : `<p class="text-xs text-slate-400 italic mb-2">No notes on this event yet.</p>`;
+  panel.innerHTML = `
+    <div class="ml-1 mt-1 border-l-2 border-blue-100 pl-3">
+      <div class="flex items-center justify-between mb-2">
+        <span class="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Event notes</span>
+        <button type="button" onclick="openEventNoteModal('${eventId}')"
+          class="inline-flex items-center gap-1 px-2 py-1 bg-blue-600 text-white rounded-lg text-xs font-medium hover:bg-blue-700">
+          <i class="fas fa-plus text-[10px]"></i> Add Note
+        </button>
+      </div>
+      ${cards}
     </div>`;
 }

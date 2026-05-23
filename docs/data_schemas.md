@@ -377,6 +377,27 @@ Modals that include the attachment widget (see CLAUDE.md → Attachment Module) 
 - Files are stored in `data/<site>/patients/<homer_id>/attachments/`. Every file in that folder must be referenced by an event in `protocol_events.json`.
 - Download access: admin and therapist roles only. Download links appear only in the Timeline tab (`GET /api/patients/<homer_id>/download-attachment/<event_id>`).
 
+### Optional `event_notes` on event entries (retrospective notes)
+
+Any event entry — in `complete[]` or in a completed `free.*[]` entry — may carry an `event_notes` object holding retrospective notes added later from the **Timeline** tab. Lazily added on first note; absent until then.
+
+```json
+{
+  "event_notes": {
+    "admin":     [ <note>, … ],
+    "therapist": [ <note>, … ],
+    "engineer":  [ <note>, … ]
+  }
+}
+```
+
+- **Role-keyed buckets**, same structure as `notes.json`. therapist/engineer see only their own bucket; admin sees all three.
+- Each `<note>` has the **same shape as a `notes.json` note** (see [`notes.json`](#notesjson)) with one difference: the alias is **`EvtNote-<R>-NNNN`** (distinct prefix from free notes, sequenced **patient-wide per role** across all events). Fields: `id`, `alias`, `author`, `title` (required), `content_html` (Quill HTML, DOMPurify-sanitised on render), `created_at`, `committed_at` (`created_at = committed_at − gap`), `attachment`, `attachment_caption`.
+- **Immutable** — corrections are made by adding a new event-note referencing the earlier one by alias.
+- **Attachment:** one optional PDF stored at `note_attachments/<note_id>.pdf` (shared folder with free-note attachments; UUID filenames never collide). Downloadable by the note's author (any role, incl. engineer) or admin.
+- **Not exposed by the events API** — the `/api/patients/<homer_id>/events` response strips `event_notes` to avoid leaking other roles' notes. They are served, role-filtered, only by the dedicated endpoints (see `docs/pages.md` → Retrospective Event Notes).
+- Synthetic timeline rows (Patient Enrolled, A0) have no stored entry and therefore cannot carry event-notes.
+
 ### Type-specific extra fields on `complete` entries
 
 **Home visit events** (`activation`, `home_visit_d02`, `home_visit_d03`, `home_visit_d15`)
