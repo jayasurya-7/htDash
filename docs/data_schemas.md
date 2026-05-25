@@ -395,7 +395,7 @@ Any event entry — in `complete[]` or in a completed `free.*[]` entry — may c
 - Each `<note>` has the **same shape as a `notes.json` note** (see [`notes.json`](#notesjson)) with one difference: the alias is **`EvtNote-<R>-NNNN`** (distinct prefix from free notes, sequenced **patient-wide per role** across all events). Fields: `id`, `alias`, `author`, `title` (required), `content_html` (Quill HTML, DOMPurify-sanitised on render), `created_at`, `committed_at` (`created_at = committed_at − gap`), `attachment`, `attachment_caption`.
 - **Immutable** — corrections are made by adding a new event-note referencing the earlier one by alias.
 - **Attachment:** one optional PDF stored at `note_attachments/<note_id>.pdf` (shared folder with free-note attachments; UUID filenames never collide). Downloadable by the note's author (any role, incl. engineer) or admin.
-- **Not exposed by the events API** — the `/api/patients/<homer_id>/events` response strips `event_notes` to avoid leaking other roles' notes. They are served, role-filtered, only by the dedicated endpoints (see `docs/pages.md` → Retrospective Event Notes).
+- **Not exposed by the events API** — the `/api/patients/<homer_id>/events` response strips `event_notes` content to avoid leaking other roles' notes; it emits only a role-filtered `event_notes_count` per event (for the Timeline row badge). Note content is served, role-filtered, only by the dedicated endpoints (see `docs/pages.md` → Retrospective Event Notes).
 - Synthetic timeline rows (Patient Enrolled, A0) have no stored entry and therefore cannot carry event-notes.
 
 ### Type-specific extra fields on `complete` entries

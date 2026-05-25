@@ -161,19 +161,17 @@ Patient detail. Shown for patients `inactive` and beyond (including `broken_prot
      - **Blocked events** (unmet `depends_on`): rendered as a non-clickable `<div>` with an amber badge on the right reading "Needs: \<event name\>". A muted lock icon appears next to the event name. Applies only to overdue events — upcoming events use the "Available from" label regardless.
      - **On-hold events** (training paused + event is not an AE/RI follow-up + `scheduled_date[0]` ≤ today): rendered in the upcoming section even though their window has opened or passed. Gray/muted styling, non-clickable `<div>`, slate "On hold" badge on the right. Events whose window has not yet opened (`scheduled_date[0]` > today) continue to show normally with "Available from" label. The server sets `on_hold: true` on the event record; both event APIs apply this rule consistently.
 
-- **Timeline tab** — full-width vertical timeline, most recent first. Combines completed protocol events with two synthetic patient milestones injected client-side:
+- **Timeline tab** — full-width **master–detail** layout, most recent first. Combines completed protocol events with two synthetic patient milestones injected client-side:
   - **Patient Enrolled** — from `enrollDate` in `<homer_id>.json`
   - **A0 Assessment** — from `a0CompletionDate` in `<homer_id>.json`
   - Synthetic events use **blue circles**; protocol events use **green circles**.
   - All events sorted descending by `filed_at` / `completion_date`.
-  - Alternating row backgrounds for readability.
 
-  **Split layout** (3-column CSS grid: `1fr 20px 1fr`):
-  - _Left column_ (right-aligned): event name (bold), scheduled date (`start – end` for windowed, single date if `start == end`, `—` if `null`; omitted for synthetic events), **Day N** relative to `activationDate` (negative for events before activation; omitted if patient not yet activated), **transition badge** (bottom-left, see below).
-  - _Centre column_: circle marker + connecting vertical line.
-  - _Right column_: completion datetime, filed-at timestamp, then extra event-specific fields in order: Pluto Device, Mars Device, Demo Done, Right Watch, Left Watch, Prescription File, any additional fields, **Notes always last**. Empty/false fields are omitted.
+  **Two-pane layout** — the original rich timeline on the left, a notes panel on the right, as a **centered group** (margins on wide screens — not full width); each pane scrolls independently:
+  - _Left (timeline)_: the original 3-column rows are kept intact (`1fr 20px 1fr`) — event name / scheduled date / **Day N** / transition badges on the left, circle + connecting line in the centre, and completion datetime / filed-at / extra event-specific fields / **attachment download link** on the right. A **note-count badge** (sticky-note icon + N) appears with the badges when the event has retrospective notes; the count is **role-filtered** (therapist/engineer see their own bucket's count, admin sees all) and is supplied by the events API as `event_notes_count` (the API still strips note content). Real (non-synthetic) rows are clickable: **hover highlights**, **click selects** (persistent ring) and loads that event's notes on the right. Synthetic rows (Enrolled, A0) are not selectable.
+  - _Right (notes panel)_: a compact header (event name + completion date + badges) followed by the **Retrospective Event Notes** view (role-filtered list + Add Note — see below). Event details are not duplicated here; they remain inline in the row. When nothing is selected, the panel shows a placeholder.
 
-  **Transition badges** — a small pill shown at the bottom-left of the left column whenever that event caused a patient state transition. Derived client-side by `_deriveTransitions(patient, events)` — never stored. At most one badge per event.
+  **Transition badges** — a small pill shown on the timeline row and in the notes-panel header whenever that event caused a patient state transition. Derived client-side by `_deriveTransitions(patient, events)` — never stored. At most one badge per event.
 
   | Badge            | Colour | Condition                                                         |
   | ---------------- | ------ | ----------------------------------------------------------------- |
@@ -186,7 +184,7 @@ Patient detail. Shown for patients `inactive` and beyond (including `broken_prot
 
   Data from the `complete` array in `GET /api/patients/<homer_id>/events` (all fields are returned, including `id`; only `event_notes` is stripped — see retrospective event notes below). This includes both protocol events from `protocol_events.json`'s `complete[]` array and completed free events. The `free.discontinuation` singleton is also included (as `protocol_event_id: "discontinuation"`, `event_name: "Patient Discontinued"`) so the discontinuation entry appears in the timeline.
 
-  **Retrospective event notes** — each real (non-synthetic) timeline row is expandable (accordion). Expanding lazy-loads that event's role-filtered notes from `GET /api/patients/<homer_id>/events/<event_id>/notes` and shows an **Add Note** button. This is the **only** place event notes can be added or viewed. See [Retrospective Event Notes](#retrospective-event-notes-event_notes) for the full spec. Synthetic rows (Patient Enrolled, A0) are not expandable.
+  **Retrospective event notes** — when a real (non-synthetic) event is selected, its detail panel lazy-loads that event's role-filtered notes from `GET /api/patients/<homer_id>/events/<event_id>/notes` and shows an **Add Note** button. This is the **only** place event notes can be added or viewed. See [Retrospective Event Notes](#retrospective-event-notes-event_notes) for the full spec. Synthetic rows (Patient Enrolled, A0) have no notes section.
 
 - **ADL tab** — shows the ADL prescription history for the patient. Each prescription is a card with a coloured header (day 01 = blue-400, day 15 = blue-600). Each exercise row shows: numbered circle badge · exercise name · blocks × reps (right-aligned). If the corresponding AG watch timing event is complete, the recorded `HH:MM:SS → HH:MM:SS` window appears below blocks × reps in the same row. Data is fetched in parallel via:
   - `GET /api/patients/<homer_id>/prescription/adl_prescription_d01` (or `d15`)
@@ -527,7 +525,7 @@ Only one stub may exist in `incomplete` at a time.
 
 Notes attached to an already-completed event, after the fact. **Only** accessible from the **Timeline** tab (expand an event row). Stored on the event entry in `protocol_events.json` as `event_notes` (role-keyed buckets); see `docs/data_schemas.md`.
 
-- Trigger: **Add Note** button inside an expanded Timeline event row
+- Trigger: **Add Note** button in the Timeline detail panel of the selected event
 - Allowed users: `admin`, `therapist`, `engineer` (all roles may create). Synthetic rows (Patient Enrolled, A0) cannot take notes.
 - **Immutable** — no edit/delete; corrections are a new note referencing the earlier one by alias.
 - Modal: reuses the `note-modal` (`max-w-3xl`) — title (required), Quill body (required), optional PDF (caption required when attached). On open the client records the modal-open time; on save it sends the elapsed gap.

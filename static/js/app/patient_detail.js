@@ -1192,7 +1192,7 @@ function _timelineExtraFields(ev) {
   }
 
   return rows.length
-    ? `<div class="mt-2 space-y-0.5 border-t border-slate-100 pt-2">${rows.join('')}</div>`
+    ? `<div class="mt-2 space-y-0.5">${rows.join('')}</div>`
     : '';
 }
 
@@ -1319,11 +1319,50 @@ function _transitionBadgeHtml(badge) {
   return `<span class="inline-block mt-2 px-2 py-0.5 rounded-full text-xs font-medium border ${cfg.cls}">${cfg.label}</span>`;
 }
 
+// ── Timeline (master–detail) ───────────────────────────────────────────────────
+
+let _timelineEvents      = [];     // sorted events backing the master list
+let _timelineTransitions = null;   // Map<event_id, badge>
+let _timelineSchedMap    = {};     // protocol_event_id → scheduled_date (for attempt fallback)
+let _timelineSelectedIdx = null;   // currently selected master-row index
+let _timelineSelectedId  = null;   // id of the selected real event (for restore across re-render)
+const _ATTEMPT_PARENT    = { d15_attempt: 'home_visit_d15', activation_attempt: 'activation' };
+
+function _eventSchedDate(ev) {
+  return ev.scheduled_date
+    || (_ATTEMPT_PARENT[ev.protocol_event_id] ? _timelineSchedMap[_ATTEMPT_PARENT[ev.protocol_event_id]] : null);
+}
+
+// Shared per-event presentation bits (circle colour, badges, flags).
+function _timelineEventMeta(ev, transitions) {
+  const isSynthetic = !!ev._synthetic;
+  const isDisc      = ev.protocol_event_id === 'discontinuation';
+  const isAssessmentEv = ev.protocol_event_id === 'a1_assessment' || ev.protocol_event_id === 'a2_assessment';
+  const isMissed    = isAssessmentEv && !!ev.missed;
+  const isDelayed   = isAssessmentEv && !isMissed && !!ev.completion_date && Array.isArray(ev.scheduled_date)
+                      && ev.completion_date.slice(0, 10) > ev.scheduled_date[1].slice(0, 10);
+  const circleCls   = isSynthetic ? 'bg-blue-500 ring-blue-300'
+                    : isDisc      ? 'bg-red-500 ring-red-300'
+                    : isMissed    ? 'bg-slate-400 ring-slate-300'
+                    :               'bg-green-500 ring-green-300';
+  const transBadge  = !isSynthetic ? _transitionBadgeHtml(transitions ? transitions.get(ev.id) : null) : '';
+  const discBadge   = isDisc
+    ? `<span class="inline-flex items-center gap-1 text-xs font-semibold bg-red-100 text-red-700 border border-red-200 rounded-full px-2 py-0.5"><i class="fas fa-ban text-[10px]"></i>Discontinued</span>` : '';
+  const missedBadge = isMissed
+    ? `<span class="inline-flex items-center gap-1 text-xs font-semibold bg-slate-100 text-slate-600 border border-slate-300 rounded-full px-2 py-0.5"><i class="fas fa-times-circle text-[10px]"></i>Missed</span>` : '';
+  const delayedBadge = isDelayed
+    ? `<span class="inline-flex items-center gap-1 text-xs font-semibold bg-amber-100 text-amber-700 border border-amber-200 rounded-full px-2 py-0.5"><i class="fas fa-clock text-[10px]"></i>Delayed</span>` : '';
+  return {
+    isSynthetic, isDisc,
+    isReal: !isSynthetic && !!ev.id,
+    circleCls,
+    badges: `${transBadge}${discBadge}${missedBadge}${delayedBadge}`,
+  };
+}
+
 function renderTimelineTab() {
   const container = document.getElementById('timeline-tab-content');
   if (!container) return;
-
-  _evtNotesLoaded = {};   // panels are rebuilt empty on each render; clear stale load flags
 
   // Merge protocol events with synthetic patient milestones, sort most-recent first
   const all = [...(_completeEventsCache || []), ..._syntheticPatientEvents()];
@@ -1332,6 +1371,7 @@ function renderTimelineTab() {
     const tb = b.filed_at || b.completion_date || '';
     return tb.localeCompare(ta);
   });
+  _timelineEvents = all;
 
   if (!all.length) {
     container.innerHTML = `
@@ -1342,88 +1382,162 @@ function renderTimelineTab() {
     return;
   }
 
-  const transitions = _deriveTransitions(patientData || {}, all);
-
-  // Build a lookup for incomplete event scheduled_dates (for fallback on attempt entries)
-  const _incompleteSchedMap = {};
+  _timelineTransitions = _deriveTransitions(patientData || {}, all);
+  _timelineSchedMap = {};
   for (const e of (eventsCache || [])) {
-    if (e.protocol_event_id && e.scheduled_date)
-      _incompleteSchedMap[e.protocol_event_id] = e.scheduled_date;
+    if (e.protocol_event_id && e.scheduled_date) _timelineSchedMap[e.protocol_event_id] = e.scheduled_date;
   }
-  const _ATTEMPT_PARENT = { d15_attempt: 'home_visit_d15', activation_attempt: 'activation' };
 
-  const items = all.map((ev, i) => {
-    const isLast   = i === all.length - 1;
-    const schedDate = ev.scheduled_date
-      || (_ATTEMPT_PARENT[ev.protocol_event_id]
-          ? _incompleteSchedMap[_ATTEMPT_PARENT[ev.protocol_event_id]]
-          : null);
-    const schedStr = _fmtDate(schedDate);
-    const compStr  = ev.completion_date ? _fmtDateTime(ev.completion_date) : '—';
-    const filedStr = ev.filed_at ? _fmtDateTime(ev.filed_at) : '';
-    const extra    = _timelineExtraFields(ev);
-    const rowBg    = i % 2 === 1 ? 'bg-slate-100 rounded-lg' : '';
-    const dayNum   = _dayNumber(ev.completion_date);
-    const dayLabel = dayNum !== null ? `Day ${dayNum}` : null;
-    const isSynthetic = !!ev._synthetic;
-    const isDisc      = ev.protocol_event_id === 'discontinuation';
-    const _ASSESS_PIDS = new Set(['a1_assessment', 'a2_assessment']);
-    const isAssessmentEv = _ASSESS_PIDS.has(ev.protocol_event_id);
-    const isMissed    = isAssessmentEv && !!ev.missed;
-    const isDelayed   = isAssessmentEv && !isMissed && !!ev.completion_date && Array.isArray(ev.scheduled_date)
-                        && ev.completion_date.slice(0, 10) > ev.scheduled_date[1].slice(0, 10);
-    const circleCls   = isSynthetic ? 'bg-blue-500 ring-blue-300'
-                      : isDisc      ? 'bg-red-500 ring-red-300'
-                      : isMissed    ? 'bg-slate-400 ring-slate-300'
-                      :               'bg-green-500 ring-green-300';
-    const badge       = !isSynthetic ? _transitionBadgeHtml(transitions.get(ev.id)) : '';
-    const discBadge   = isDisc
-      ? `<span class="inline-flex items-center gap-1 text-xs font-semibold bg-red-100 text-red-700 border border-red-200 rounded-full px-2 py-0.5 mt-1"><i class="fas fa-ban text-[10px]"></i>Discontinued</span>`
-      : '';
-    const missedBadge = isMissed
-      ? `<span class="inline-flex items-center gap-1 text-xs font-semibold bg-slate-100 text-slate-600 border border-slate-300 rounded-full px-2 py-0.5 mt-1"><i class="fas fa-times-circle text-[10px]"></i>Missed</span>`
-      : '';
-    const delayedBadge = isDelayed
-      ? `<span class="inline-flex items-center gap-1 text-xs font-semibold bg-amber-100 text-amber-700 border border-amber-200 rounded-full px-2 py-0.5 mt-1"><i class="fas fa-clock text-[10px]"></i>Delayed</span>`
-      : '';
-    const rowHighlight = isDisc ? 'bg-red-50 rounded-lg' : rowBg;
-    const nameCls      = isDisc ? 'text-sm font-bold text-red-700' : 'text-sm font-semibold text-slate-800';
-    // Retrospective event notes: only real (non-synthetic) events with a stored id.
-    const isReal     = !isSynthetic && !!ev.id;
-    const noteToggle = isReal
-      ? `<button type="button" onclick="_toggleEventNotes('${ev.id}')"
-            class="mt-2 inline-flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-700">
-            <i id="evtnote-chevron-${ev.id}" class="fas fa-chevron-down text-[10px] transition-transform"></i> Notes
-         </button>`
-      : '';
-    const notePanel  = isReal ? `<div id="evtnote-panel-${ev.id}" class="hidden mt-1 mb-1"></div>` : '';
-    return `
-      <div>
-        <div class="grid gap-x-4 px-2 -mx-2 ${rowHighlight}" style="grid-template-columns:1fr 20px 1fr">
-          <div class="text-right pb-${isLast ? '2' : '7'} pt-2">
-            <p class="${nameCls}">${ev.event_name}</p>
-            ${!isSynthetic && schedDate ? `<p class="text-xs text-slate-400 mt-0.5">Scheduled: ${schedStr}</p>` : ''}
-            ${dayLabel ? `<p class="text-sm font-semibold text-indigo-500 mt-1">${dayLabel}</p>` : ''}
-            ${badge}
-            ${discBadge}
-            ${missedBadge}
-            ${delayedBadge}
-          </div>
-          <div class="flex flex-col items-center pt-2">
-            <div class="w-3 h-3 rounded-full ${circleCls} border-2 border-white ring-1 z-10 flex-shrink-0"></div>
-            ${isLast ? '' : '<div class="flex-1 w-0.5 bg-green-200 -mb-2"></div>'}
-          </div>
-          <div class="pb-${isLast ? '2' : '7'} pt-2">
-            <p class="text-xs font-medium text-slate-700">${compStr}</p>
-            ${filedStr ? `<p class="text-xs text-slate-400 mt-0.5">Filed: ${filedStr}</p>` : ''}
-            ${extra}
-            ${noteToggle}
-          </div>
-        </div>
-        ${notePanel}
-      </div>`;
-  }).join('');
-  container.innerHTML = `<div>${items}</div>`;
+  const rows = all.map((ev, i) =>
+    _timelineMasterRow(ev, i, i === all.length - 1, _timelineEventMeta(ev, _timelineTransitions))
+  ).join('');
+
+  // Two-pane, centered group (margins on wide screens — not full width). The original
+  // rich timeline keeps its width on the left; the detailed notes view sits on the right.
+  container.innerHTML = `
+    <div class="flex h-full justify-center gap-8 px-6 py-4 overflow-x-auto">
+      <div class="flex-none w-[640px] max-w-full overflow-y-auto pr-1">${rows}</div>
+      <div id="timeline-detail" class="flex-none w-[400px] max-w-full overflow-y-auto border-l border-slate-200 pl-8">
+        ${_timelineDetailPlaceholder()}
+      </div>
+    </div>`;
+
+  // Restore the previous selection by id (index may shift); else show the placeholder.
+  let restoreIdx = null;
+  if (_timelineSelectedId != null) {
+    const i = all.findIndex(e => e.id === _timelineSelectedId);
+    if (i >= 0) restoreIdx = i;
+  }
+  if (restoreIdx != null) {
+    _selectTimelineEvent(restoreIdx);
+  } else {
+    _timelineSelectedIdx = null;
+    _timelineSelectedId  = null;
+  }
+}
+
+// Original rich 3-column row (name/scheduled/day/badges | line | completion/filed/extra),
+// made selectable: hover highlight + click → detail. Synthetic rows are not selectable.
+function _timelineMasterRow(ev, i, isLast, meta) {
+  const schedDate = _eventSchedDate(ev);
+  const schedStr  = _fmtDate(schedDate);
+  const compStr   = ev.completion_date ? _fmtDateTime(ev.completion_date) : '—';
+  const filedStr  = ev.filed_at ? _fmtDateTime(ev.filed_at) : '';
+  const extra     = _timelineExtraFields(ev);
+  const dayNum    = _dayNumber(ev.completion_date);
+  const dayLabel  = dayNum !== null ? `Day ${dayNum}` : null;
+  const rowBg     = i % 2 === 1 ? 'bg-slate-100' : '';
+  const rowHighlight = meta.isDisc ? 'bg-red-50' : rowBg;
+  const nameCls   = meta.isDisc ? 'text-sm font-bold text-red-700' : 'text-sm font-semibold text-slate-800';
+  const selectable  = meta.isReal;
+  const interactive = selectable ? 'cursor-pointer hover:bg-blue-100' : '';
+  const selCls      = (_timelineSelectedIdx === i) ? 'ring-1 ring-blue-400 ring-inset' : '';
+  const click       = selectable ? `onclick="_selectTimelineEvent(${i})"` : '';
+  const noteCount   = ev.event_notes_count || 0;
+  const noteBadge   = noteCount > 0
+    ? `<span class="inline-flex items-center gap-1 text-[11px] font-medium bg-blue-50 text-blue-700 border border-blue-200 rounded-full px-2 py-0.5" title="${noteCount} note${noteCount === 1 ? '' : 's'}"><i class="fas fa-sticky-note text-[10px]"></i>${noteCount}</span>`
+    : '';
+  const badgeRow    = (meta.badges || noteBadge)
+    ? `<div class="flex flex-wrap justify-end gap-1 mt-1">${meta.badges}${noteBadge}</div>`
+    : '';
+  return `
+    <div ${click} data-tlrow="${i}"
+         class="grid gap-x-4 px-2 -mx-2 rounded-lg transition-colors ${rowHighlight} ${interactive} ${selCls}"
+         style="grid-template-columns:1fr 20px 1fr">
+      <div class="text-right pb-${isLast ? '2' : '7'} pt-2">
+        <p class="${nameCls}">${ev.event_name}</p>
+        ${!meta.isSynthetic && schedDate ? `<p class="text-xs text-slate-400 mt-0.5">Scheduled: ${schedStr}</p>` : ''}
+        ${dayLabel ? `<p class="text-sm font-semibold text-indigo-500 mt-1">${dayLabel}</p>` : ''}
+        ${badgeRow}
+      </div>
+      <div class="flex flex-col items-center pt-2">
+        <div class="w-3 h-3 rounded-full ${meta.circleCls} border-2 border-white ring-1 z-10 flex-shrink-0"></div>
+        ${isLast ? '' : '<div class="flex-1 w-0.5 bg-green-200 -mb-2"></div>'}
+      </div>
+      <div class="pb-${isLast ? '2' : '7'} pt-2">
+        <p class="text-xs font-medium text-slate-700">${compStr}</p>
+        ${filedStr ? `<p class="text-xs text-slate-400 mt-0.5">Filed: ${filedStr}</p>` : ''}
+        ${extra}
+      </div>
+    </div>`;
+}
+
+function _timelineDetailPlaceholder() {
+  return `
+    <div class="flex flex-col items-center justify-center h-full text-slate-300 text-center px-6">
+      <i class="fas fa-hand-pointer text-3xl mb-3"></i>
+      <p class="text-sm">Select an event to see its notes.</p>
+    </div>`;
+}
+
+function _selectTimelineEvent(idx) {
+  const ev = _timelineEvents[idx];
+  if (!ev) return;
+  _timelineSelectedIdx = idx;
+  _timelineSelectedId  = ev.id || null;
+  document.querySelectorAll('[data-tlrow]').forEach(el => {
+    const on = Number(el.dataset.tlrow) === idx;
+    el.classList.toggle('ring-1', on);
+    el.classList.toggle('ring-blue-400', on);
+    el.classList.toggle('ring-inset', on);
+  });
+  _renderTimelineDetail(ev);
+}
+
+// Right pane: a compact event header + the detailed notes view. Event details stay
+// inline in the timeline rows (left), so they're not duplicated here.
+function _renderTimelineDetail(ev) {
+  const panel = document.getElementById('timeline-detail');
+  if (!panel) return;
+  const meta    = _timelineEventMeta(ev, _timelineTransitions);
+  const compStr = ev.completion_date ? _fmtDateTime(ev.completion_date)
+                : (ev.filed_at ? _fmtDateTime(ev.filed_at) : '—');
+  const nameCls = meta.isDisc ? 'text-lg font-bold text-red-700' : 'text-lg font-bold text-slate-800';
+
+  const head = `
+    <div class="flex items-start gap-2 pb-3 border-b border-slate-100">
+      <div class="w-3 h-3 rounded-full ${meta.circleCls} border-2 border-white ring-1 mt-1.5 flex-shrink-0"></div>
+      <div class="min-w-0">
+        <p class="${nameCls}">${ev.event_name}</p>
+        <p class="text-xs text-slate-400 mt-0.5">${compStr}</p>
+        ${meta.badges ? `<div class="flex flex-wrap gap-1 mt-1">${meta.badges}</div>` : ''}
+      </div>
+    </div>`;
+  const notesSection = meta.isReal
+    ? `<div id="timeline-detail-notes" class="mt-4"><div class="text-xs text-slate-400">Loading notes…</div></div>`
+    : `<p class="text-xs text-slate-400 italic mt-4">Notes can't be added to this milestone.</p>`;
+
+  panel.innerHTML = `<div class="pb-6">${head}${notesSection}</div>`;
+  if (meta.isReal) _loadTimelineDetailNotes(ev.id);
+}
+
+async function _loadTimelineDetailNotes(eventId) {
+  const box = document.getElementById('timeline-detail-notes');
+  if (!box) return;
+  const { ok, data } = await apiGet(`/api/patients/${PATIENT_HOMER_ID}/events/${eventId}/notes`);
+  if (!ok) {
+    box.innerHTML = `<p class="text-xs text-red-500">${_esc(data.error || 'Failed to load notes.')}</p>`;
+    return;
+  }
+  const notes   = data.notes || [];
+  const isAdmin = !!data.is_admin;
+  const cards = notes.length
+    ? notes.map(n => _eventNoteCard(n, isAdmin)).join('')
+    : `<p class="text-xs text-slate-400 italic">No notes on this event yet.</p>`;
+  // Distinct, tinted block so the notes stand apart from the event header/details.
+  box.innerHTML = `
+    <div class="rounded-xl border border-slate-200 bg-slate-50 p-3">
+      <div class="flex items-center justify-between mb-3">
+        <span class="inline-flex items-center gap-2 text-sm font-semibold text-slate-700">
+          <i class="fas fa-sticky-note text-blue-500"></i> Notes${notes.length ? `<span class="text-xs font-medium text-slate-400">(${notes.length})</span>` : ''}
+        </span>
+        <button type="button" onclick="openEventNoteModal('${eventId}')"
+          class="inline-flex items-center gap-1 px-2.5 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-medium hover:bg-blue-700">
+          <i class="fas fa-plus text-[10px]"></i> Add Note
+        </button>
+      </div>
+      ${cards}
+    </div>`;
 }
 
 // ── Call Logs tab ─────────────────────────────────────────────────────────────
@@ -7446,8 +7560,11 @@ async function saveNote() {
   _noteTargetEventId = null;
   hideModal('note-modal');
   if (targetEventId) {
-    _evtNotesLoaded[targetEventId] = false;          // force reload
-    _loadEventNotes(targetEventId);
+    // Bump the cached count (own bucket +1 — matches the viewer's role-filtered count),
+    // then re-render so the row badge updates; selection is restored and notes reloaded.
+    const ev = (_completeEventsCache || []).find(e => e.id === targetEventId);
+    if (ev) ev.event_notes_count = (ev.event_notes_count || 0) + 1;
+    renderTimelineTab();
   } else {
     renderNotesTab();
   }
@@ -7520,7 +7637,7 @@ function _noteCardHtml(note, isAdmin, attachUrl) {
     : '';
 
   return `
-    <div class="border border-slate-200 rounded-xl mb-3 overflow-hidden bg-white">
+    <div class="border border-slate-200 rounded-xl mb-3 last:mb-0 overflow-hidden bg-white shadow-sm">
       <div class="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-slate-50 select-none"
            onclick="_toggleNoteCard('${cardId}')">
         <div class="flex items-center gap-3 min-w-0">
@@ -7544,46 +7661,5 @@ function _noteCardHtml(note, isAdmin, attachUrl) {
     </div>`;
 }
 
-// ── Retrospective event notes (Timeline accordion) ─────────────────────────────
-
-let _evtNotesLoaded = {};   // eventId → true once its notes have been fetched (reset per timeline render)
-
-async function _toggleEventNotes(eventId) {
-  const panel = document.getElementById(`evtnote-panel-${eventId}`);
-  const chev  = document.getElementById(`evtnote-chevron-${eventId}`);
-  if (!panel) return;
-  const willShow = panel.classList.contains('hidden');
-  panel.classList.toggle('hidden');
-  if (chev) chev.style.transform = willShow ? 'rotate(180deg)' : '';
-  if (willShow && !_evtNotesLoaded[eventId]) await _loadEventNotes(eventId);
-}
-
-async function _loadEventNotes(eventId) {
-  const panel = document.getElementById(`evtnote-panel-${eventId}`);
-  if (!panel) return;
-  panel.innerHTML = `<div class="text-xs text-slate-400 py-2 pl-3">Loading…</div>`;
-  const { ok, data } = await apiGet(`/api/patients/${PATIENT_HOMER_ID}/events/${eventId}/notes`);
-  if (!ok) {
-    panel.innerHTML = `<p class="text-xs text-red-500 py-2 pl-3">${_esc(data.error || 'Failed to load notes.')}</p>`;
-    return;
-  }
-  _evtNotesLoaded[eventId] = true;
-  _renderEventNotesPanel(panel, eventId, data.notes || [], !!data.is_admin);
-}
-
-function _renderEventNotesPanel(panel, eventId, notes, isAdmin) {
-  const cards = notes.length
-    ? notes.map(n => _eventNoteCard(n, isAdmin)).join('')
-    : `<p class="text-xs text-slate-400 italic mb-2">No notes on this event yet.</p>`;
-  panel.innerHTML = `
-    <div class="ml-1 mt-1 border-l-2 border-blue-100 pl-3">
-      <div class="flex items-center justify-between mb-2">
-        <span class="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Event notes</span>
-        <button type="button" onclick="openEventNoteModal('${eventId}')"
-          class="inline-flex items-center gap-1 px-2 py-1 bg-blue-600 text-white rounded-lg text-xs font-medium hover:bg-blue-700">
-          <i class="fas fa-plus text-[10px]"></i> Add Note
-        </button>
-      </div>
-      ${cards}
-    </div>`;
-}
+// Event-note loading/rendering for the Timeline detail panel lives with the
+// Timeline (master–detail) code above: _loadTimelineDetailNotes().

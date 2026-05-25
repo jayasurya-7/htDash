@@ -647,9 +647,18 @@ def api_patient_events(homer_id):
 
     complete_list.sort(key=lambda x: x.get('filed_at') or x.get('completion_date') or '', reverse=True)
 
-    # Retrospective event notes are role-private — never expose them here. They are
-    # served, role-filtered, only by routes/notes.py event-note endpoints.
+    # Retrospective event notes are role-private — never expose their content here. Emit
+    # only a role-filtered count (therapist/engineer: own bucket; admin: all), then strip
+    # the notes. Content is served, role-filtered, by routes/notes.py event-note endpoints.
+    _priv = flask_session.get('privilege', '')
     for item in complete_list:
+        _en = item.get('event_notes') or {}
+        if _priv == 'admin':
+            item['event_notes_count'] = sum(len(v) for v in _en.values() if isinstance(v, list))
+        elif _priv in ('therapist', 'engineer'):
+            item['event_notes_count'] = len(_en.get(_priv) or [])
+        else:
+            item['event_notes_count'] = 0
         item.pop('event_notes', None)
 
     return jsonify({'overdue': overdue, 'upcoming': upcoming, 'complete': complete_list})
