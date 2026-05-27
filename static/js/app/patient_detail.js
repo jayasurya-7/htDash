@@ -85,7 +85,13 @@ function switchTab(tab) {
 
 function showModal(id) {
   const m = document.getElementById(id);
-  if (m) m.style.display = 'flex';
+  if (!m) return;
+  m.style.display = 'flex';
+  // Date Rule Framework: apply universal completion-date bounds to every date
+  // input in the modal that hasn't been constrained by the opener. The modal
+  // root's data-date-error attribute names the <p> the keyboard validator
+  // writes into.
+  _applyDateBounds(m, m.dataset.dateError || '');
 }
 
 function hideModal(id) {
@@ -208,6 +214,45 @@ function _validateDateInput(input, errorId) {
 
   setError(errorId, errorMsg);
   return !errorMsg;
+}
+
+// Date Rule Framework — Phase 1. Sweep every <input type="date"> and
+// <input type="datetime-local"> in the given modal and apply the universal
+// completion-date bounds: floor = activationDate || enrollDate, ceiling = today.
+// Inputs that carry data-date-rule="scheduling" (future/scheduling dates) are
+// skipped. Additive: only sets min/max when the opener hasn't already set a
+// (stricter) bound, so per-modal custom bounds are preserved. Hooked into
+// showModal so every modal gets covered automatically. See CLAUDE.md →
+// "Date Rule Framework".
+function _applyDateBounds(modalElOrId, errorId) {
+  const modalEl = typeof modalElOrId === 'string'
+    ? document.getElementById(modalElOrId) : modalElOrId;
+  if (!modalEl) return;
+
+  const p = patientData || {};
+  const floor = p.activationDate || p.enrollDate || null;
+  const floorDate = floor ? floor.slice(0, 10) : null;
+  const todayDate = _nowForInput().slice(0, 10);
+  const todayDT   = _nowForInput();
+
+  modalEl.querySelectorAll('input[type="date"], input[type="datetime-local"]').forEach(input => {
+    if (input.dataset.dateRule === 'scheduling') return;
+    const isDateTime = input.type === 'datetime-local';
+    // Additive — preserve any min/max the opener already set (e.g. AE modal's
+    // tighter bounds based on the AE issue date).
+    if (!input.min && floorDate) input.min = isDateTime ? `${floorDate}T00:00` : floorDate;
+    if (!input.max)              input.max = isDateTime ? todayDT : todayDate;
+
+    const errId = input.dataset.dateError || errorId;
+    if (!errId) return;
+    if (input._dateGuard) {
+      input.removeEventListener('change', input._dateGuard);
+      input.removeEventListener('input',  input._dateGuard);
+    }
+    input._dateGuard = () => { _validateDateInput(input, errId); };
+    input.addEventListener('change', input._dateGuard);
+    input.addEventListener('input',  input._dateGuard);
+  });
 }
 
 function _formatDateForDisplay(dateStr) {

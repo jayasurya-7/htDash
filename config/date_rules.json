@@ -1,0 +1,8 @@
+{
+  "$schema_version": 1,
+  "default_completion_rule": {
+    "not_before": ["activationDate", "enrollDate"],
+    "not_after":  "today"
+  },
+  "events": {}
+}

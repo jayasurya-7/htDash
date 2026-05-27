@@ -358,7 +358,7 @@
 
 
 <!-- A1 Assessment -->
-<div id="a1-modal" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" style="display:none">
+<div id="a1-modal" data-date-error="a1-error" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" style="display:none">
   <div class="bg-white rounded-2xl shadow-xl max-w-sm w-full p-6">
     <div class="flex items-center justify-between mb-4">
       <h3 class="text-xl font-bold text-slate-800">Record A1 Assessment</h3>
@@ -396,7 +396,7 @@
 </div>
 
 <!-- A2 Assessment -->
-<div id="a2-modal" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" style="display:none">
+<div id="a2-modal" data-date-error="a2-error" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" style="display:none">
   <div class="bg-white rounded-2xl shadow-xl max-w-sm w-full p-6">
     <div class="flex items-center justify-between mb-4">
       <h3 class="text-xl font-bold text-slate-800">Record A2 Assessment</h3>
@@ -434,7 +434,7 @@
 </div>
 
 <!-- Schedule A1 Call -->
-<div id="schedule-a1-call-modal" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" style="display:none">
+<div id="schedule-a1-call-modal" data-date-error="sa1-error" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" style="display:none">
   <div class="bg-white rounded-2xl shadow-xl max-w-sm w-full p-6">
     <div class="flex items-center justify-between mb-4">
       <h3 class="text-xl font-bold text-slate-800">Schedule A1 Assessment</h3>
@@ -461,7 +461,7 @@
     </div>
     <div class="mb-4">
       <label class="block text-sm font-medium text-slate-700 mb-2">New Appointment Date <span class="text-red-500">*</span></label>
-      <input type="date" id="sa1-appointment" required
+      <input type="date" id="sa1-appointment" required data-date-rule="scheduling"
              class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500">
     </div>
     <p id="sa1-error" class="text-sm text-red-500 hidden mb-3"></p>
@@ -473,7 +473,7 @@
 </div>
 
 <!-- Schedule A2 Call -->
-<div id="schedule-a2-call-modal" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" style="display:none">
+<div id="schedule-a2-call-modal" data-date-error="sa2-error" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" style="display:none">
   <div class="bg-white rounded-2xl shadow-xl max-w-sm w-full p-6">
     <div class="flex items-center justify-between mb-4">
       <h3 class="text-xl font-bold text-slate-800">Schedule A2 Assessment</h3>
@@ -500,7 +500,7 @@
     </div>
     <div class="mb-4">
       <label class="block text-sm font-medium text-slate-700 mb-2">New Appointment Date <span class="text-red-500">*</span></label>
-      <input type="date" id="sa2-appointment" required
+      <input type="date" id="sa2-appointment" required data-date-rule="scheduling"
              class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-green-500">
     </div>
     <p id="sa2-error" class="text-sm text-red-500 hidden mb-3"></p>
@@ -512,7 +512,7 @@
 </div>
 
 <!-- Device Setup -->
-<div id="device-setup-modal" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" style="display:none">
+<div id="device-setup-modal" data-date-error="device-setup-error" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" style="display:none">
   <div class="bg-white rounded-2xl shadow-xl max-w-lg w-full p-6">
     <div class="flex items-center justify-between mb-4">
       <h3 class="text-xl font-bold text-slate-800">Device Setup</h3>
@@ -585,7 +585,7 @@
 </div>
 
 <!-- Activation -->
-<div id="activation-modal" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" style="display:none">
+<div id="activation-modal" data-date-error="activation-error" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" style="display:none">
   <div class="bg-white rounded-2xl shadow-xl max-w-lg w-full p-6 overflow-y-auto max-h-[90vh]">
     <div class="flex items-center justify-between mb-4">
       <h3 class="text-xl font-bold text-slate-800">Patient Activation</h3>
@@ -754,7 +754,7 @@
 </div>
 
 <!-- Discontinue -->
-<div id="discontinue-modal" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" style="display:none">
+<div id="discontinue-modal" data-date-error="discontinue-error" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" style="display:none">
   <div class="bg-white rounded-2xl shadow-xl max-w-md w-full flex flex-col" style="max-height:90vh">
     <div class="flex items-center justify-between px-6 pt-6 pb-4 shrink-0">
       <h3 class="text-xl font-bold text-slate-800">Discontinue Patient</h3>
@@ -795,7 +795,7 @@
 </div>
 
 <!-- Device Return -->
-<div id="device-return-modal" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" style="display:none">
+<div id="device-return-modal" data-date-error="dr-error" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" style="display:none">
   <div class="bg-white rounded-2xl shadow-xl max-w-lg w-full flex flex-col" style="max-height:90vh">
     <div class="flex items-center justify-between px-6 pt-6 pb-4 shrink-0">
       <h3 class="text-xl font-bold text-slate-800">Device Return</h3>
@@ -833,7 +833,7 @@
 </div>
 
 <!-- ADL Prescription -->
-<div id="adl-prescription-modal" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" style="display:none">
+<div id="adl-prescription-modal" data-date-error="adl-prescription-error" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" style="display:none">
   <div class="bg-white rounded-2xl shadow-xl max-w-lg w-full p-6 overflow-y-auto max-h-[90vh]">
     <div class="flex items-center justify-between mb-4">
       <h3 class="text-xl font-bold text-slate-800">ADL Exercise Prescription</h3>
@@ -872,7 +872,7 @@
 </div>
 
 <!-- VCG Prescription -->
-<div id="vcg-prescription-modal" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" style="display:none">
+<div id="vcg-prescription-modal" data-date-error="vcg-prescription-error" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" style="display:none">
   <div class="bg-white rounded-2xl shadow-xl max-w-lg w-full p-6 overflow-y-auto max-h-[90vh]">
     <div class="flex items-center justify-between mb-4">
       <h3 class="text-xl font-bold text-slate-800">VCG Exercise Prescription</h3>
@@ -915,7 +915,7 @@
 </div>
 
 <!-- Prescription Printout modal -->
-<div id="prescription-printout-modal" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" style="display:none">
+<div id="prescription-printout-modal" data-date-error="prescription-printout-error" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" style="display:none">
   <div class="bg-white rounded-2xl shadow-xl max-w-3xl w-full p-6 overflow-y-auto max-h-[90vh]">
     <div class="flex items-center justify-between mb-4">
       <h3 id="prescription-printout-title" class="text-xl font-bold text-slate-800">Therapy Prescription Printout</h3>
@@ -966,7 +966,7 @@
 </div>
 
 <!-- Simple event modal (home visits, follow-up calls, training completion) -->
-<div id="simple-event-modal" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" style="display:none">
+<div id="simple-event-modal" data-date-error="simple-event-error" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" style="display:none">
   <div class="bg-white rounded-2xl shadow-xl max-w-md w-full p-6">
     <div class="flex items-center justify-between mb-4">
       <h3 id="simple-event-title" class="text-xl font-bold text-slate-800"></h3>
@@ -1004,7 +1004,7 @@
 </div>
 
 <!-- ── Training Completion D29 Modal ──────────────────────────────── -->
-<div id="d29-modal" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" style="display:none">
+<div id="d29-modal" data-date-error="d29-error" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" style="display:none">
   <div class="bg-white rounded-2xl shadow-xl max-w-lg w-full flex flex-col" style="max-height:90vh">
     <div class="flex items-center justify-between px-6 pt-6 pb-4 shrink-0">
       <h3 class="text-xl font-bold text-slate-800">Training Completion Day 29</h3>
@@ -1024,7 +1024,7 @@
       <!-- A1 appointment date -->
       <div>
         <label class="block text-sm font-medium text-slate-700 mb-1">A1 Appointment Date <span class="text-slate-400 font-normal">(optional — sets the A1 assessment date)</span></label>
-        <input id="d29-a1-appointment" type="date" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" />
+        <input id="d29-a1-appointment" type="date" data-date-rule="scheduling" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" />
       </div>
       <!-- AE discussion — shown only when an adverse_event_followup stub exists -->
       <div id="d29-ae-section" class="hidden border border-amber-200 bg-amber-50 rounded-xl p-4 space-y-2">
@@ -1094,7 +1094,7 @@
   </div>
 </div>
 
-<div id="home-visit-modal" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" style="display:none">
+<div id="home-visit-modal" data-date-error="hv-error" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" style="display:none">
   <div class="bg-white rounded-2xl shadow-xl max-w-lg w-full flex flex-col" style="max-height:90vh">
     <div class="flex items-center justify-between px-6 pt-6 pb-4 shrink-0">
       <h3 id="hv-title" class="text-xl font-bold text-slate-800"></h3>
@@ -1255,7 +1255,7 @@
   </div>
 </div>
 
-<div id="followup-call-modal" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" style="display:none">
+<div id="followup-call-modal" data-date-error="followup-call-error" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" style="display:none">
   <div class="bg-white rounded-2xl shadow-xl max-w-lg w-full flex flex-col" style="max-height:90vh">
     <div class="flex items-center justify-between px-6 pt-6 pb-4 shrink-0">
       <h3 id="followup-call-title" class="text-xl font-bold text-slate-800"></h3>
@@ -1356,7 +1356,7 @@
   </div>
 </div>
 
-<div id="patient-call-modal" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" style="display:none">
+<div id="patient-call-modal" data-date-error="pc-error" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" style="display:none">
   <div class="bg-white rounded-2xl shadow-xl max-w-lg w-full flex flex-col" style="max-height:90vh">
     <div class="flex items-center justify-between px-6 pt-6 pb-4 shrink-0">
       <h3 class="text-xl font-bold text-slate-800">Log Patient Call</h3>
@@ -1446,7 +1446,7 @@
   </div>
 </div>
 
-<div id="agwatch-timing-modal" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" style="display:none">
+<div id="agwatch-timing-modal" data-date-error="agwatch-timing-error" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" style="display:none">
   <div class="bg-white rounded-2xl shadow-xl w-full max-w-4xl flex flex-col" style="max-height:90vh">
     <div class="flex items-center justify-between p-6 pb-4 shrink-0">
       <h3 id="agwatch-timing-title" class="text-xl font-bold text-slate-800"></h3>
@@ -1479,7 +1479,7 @@
 </div>
 
 <!-- Watch Record -->
-<div id="watch-record-modal" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" style="display:none">
+<div id="watch-record-modal" data-date-error="wr-error" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" style="display:none">
   <div class="bg-white rounded-2xl shadow-xl max-w-lg w-full flex flex-col" style="max-height:90vh">
     <div class="flex items-center justify-between px-6 pt-6 pb-4 shrink-0">
       <h3 class="text-xl font-bold text-slate-800">Watch Record</h3>
@@ -1563,7 +1563,7 @@
 </div>
 
 <!-- AG Watch Data Upload modal -->
-<div id="watch-data-upload-modal" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" style="display:none">
+<div id="watch-data-upload-modal" data-date-error="wdu-error" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" style="display:none">
   <div class="bg-white rounded-2xl shadow-xl max-w-lg w-full flex flex-col" style="max-height:90vh">
     <div class="flex items-center justify-between px-6 pt-6 pb-4 shrink-0">
       <h3 class="text-xl font-bold text-slate-800">AG Watch Data Upload</h3>
@@ -1608,7 +1608,7 @@
 </div>
 
 <!-- ── Adverse Event modal ─────────────────────────────────────────────────── -->
-<div id="adverse-event-modal" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" style="display:none">
+<div id="adverse-event-modal" data-date-error="ae-error" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" style="display:none">
   <div class="bg-white rounded-2xl shadow-xl max-w-md w-full flex flex-col" style="max-height:90vh">
     <div class="flex items-center justify-between px-6 pt-6 pb-4 shrink-0">
       <h3 class="text-xl font-bold text-slate-800">File Adverse Event</h3>
@@ -1642,7 +1642,7 @@
         </label>
         <div id="ae-visit-date-wrap" class="hidden pl-6">
           <label class="block text-xs font-medium text-slate-600 mb-1">Target date/time <span class="text-red-500">*</span></label>
-          <input type="datetime-local" id="ae-visit-date" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-300">
+          <input type="datetime-local" id="ae-visit-date" data-date-rule="scheduling" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-300">
         </div>
       </div>
       <!-- Clinical visit scheduling -->
@@ -1653,7 +1653,7 @@
         </label>
         <div id="ae-clinical-date-wrap" class="hidden pl-6">
           <label class="block text-xs font-medium text-slate-600 mb-1">Target date/time <span class="text-red-500">*</span></label>
-          <input type="datetime-local" id="ae-clinical-date" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-300">
+          <input type="datetime-local" id="ae-clinical-date" data-date-rule="scheduling" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-300">
         </div>
       </div>
       {{ attachment_section('ae') }}
@@ -1669,7 +1669,7 @@
 </div>
 
 <!-- ── Robot Issue Call modal ─────────────────────────────────────────────── -->
-<div id="robot-issue-call-modal" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" style="display:none">
+<div id="robot-issue-call-modal" data-date-error="ric-error" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" style="display:none">
   <div class="bg-white rounded-2xl shadow-xl max-w-lg w-full flex flex-col" style="max-height:90vh">
     <div class="flex items-center justify-between px-6 pt-6 pb-4 shrink-0">
       <h3 class="text-xl font-bold text-slate-800">Robot Issue — Engineer Call</h3>
@@ -1710,7 +1710,7 @@
 </div>
 
 <!-- ── Robot Issue Visit modal ────────────────────────────────────────────── -->
-<div id="robot-issue-visit-modal" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" style="display:none">
+<div id="robot-issue-visit-modal" data-date-error="riv-error" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" style="display:none">
   <div class="bg-white rounded-2xl shadow-xl max-w-lg w-full flex flex-col" style="max-height:90vh">
     <div class="flex items-center justify-between px-6 pt-6 pb-4 shrink-0">
       <h3 class="text-xl font-bold text-slate-800">Robot Issue — Engineer Visit</h3>
@@ -1742,7 +1742,7 @@
 </div>
 
 <!-- ── Adverse Event Follow-up modal ────────────────────────────────────────── -->
-<div id="adverse-event-followup-modal" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" style="display:none">
+<div id="adverse-event-followup-modal" data-date-error="aef-error" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" style="display:none">
   <div class="bg-white rounded-2xl shadow-xl max-w-lg w-full flex flex-col" style="max-height:90vh">
     <div class="flex items-center justify-between px-6 pt-6 pb-4 shrink-0">
       <h3 id="aef-title" class="text-xl font-bold text-slate-800">Adverse Event Follow-up</h3>
@@ -1776,7 +1776,7 @@
         </label>
         <div id="aef-visit-date-wrap" class="hidden pl-6">
           <label class="block text-xs font-medium text-slate-600 mb-1">Target date/time <span class="text-red-500">*</span></label>
-          <input type="datetime-local" id="aef-visit-date" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-300">
+          <input type="datetime-local" id="aef-visit-date" data-date-rule="scheduling" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-300">
         </div>
       </div>
       <!-- Clinical visit scheduling -->
@@ -1787,7 +1787,7 @@
         </label>
         <div id="aef-clinical-date-wrap" class="hidden pl-6">
           <label class="block text-xs font-medium text-slate-600 mb-1">Target date/time <span class="text-red-500">*</span></label>
-          <input type="datetime-local" id="aef-clinical-date" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-300">
+          <input type="datetime-local" id="aef-clinical-date" data-date-rule="scheduling" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-300">
         </div>
       </div>
       {{ attachment_section('aef') }}
@@ -1803,7 +1803,7 @@
 </div>
 
 <!-- ── Adverse Event Follow-up Visit modal ──────────────────────────────────── -->
-<div id="ae-followup-visit-modal" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" style="display:none">
+<div id="ae-followup-visit-modal" data-date-error="aefv-error" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" style="display:none">
   <div class="bg-white rounded-2xl shadow-xl max-w-lg w-full flex flex-col" style="max-height:90vh">
     <div class="flex items-center justify-between px-6 pt-6 pb-4 shrink-0">
       <h3 id="aefv-title" class="text-xl font-bold text-slate-800">Adverse Event Follow-up Visit</h3>
@@ -1837,7 +1837,7 @@
         </label>
         <div id="aefv-visit-date-wrap" class="hidden pl-6">
           <label class="block text-xs font-medium text-slate-600 mb-1">Target date/time <span class="text-red-500">*</span></label>
-          <input type="datetime-local" id="aefv-visit-date" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-300">
+          <input type="datetime-local" id="aefv-visit-date" data-date-rule="scheduling" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-300">
         </div>
       </div>
       <!-- Clinical visit scheduling -->
@@ -1848,7 +1848,7 @@
         </label>
         <div id="aefv-clinical-date-wrap" class="hidden pl-6">
           <label class="block text-xs font-medium text-slate-600 mb-1">Target date/time <span class="text-red-500">*</span></label>
-          <input type="datetime-local" id="aefv-clinical-date" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-300">
+          <input type="datetime-local" id="aefv-clinical-date" data-date-rule="scheduling" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-300">
         </div>
       </div>
       {{ attachment_section('aefv') }}
@@ -1865,7 +1865,7 @@
 </div>
 
 <!-- ── Adverse Event Clinical Visit modal ────────────────────────────────────── -->
-<div id="ae-clinical-visit-modal" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" style="display:none">
+<div id="ae-clinical-visit-modal" data-date-error="aecv-error" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" style="display:none">
   <div class="bg-white rounded-2xl shadow-xl max-w-lg w-full flex flex-col" style="max-height:90vh">
     <div class="flex items-center justify-between px-6 pt-6 pb-4 shrink-0">
       <h3 id="aecv-title" class="text-xl font-bold text-slate-800">Adverse Event Clinical Visit</h3>
@@ -1899,7 +1899,7 @@
         </label>
         <div id="aecv-visit-date-wrap" class="hidden pl-6">
           <label class="block text-xs font-medium text-slate-600 mb-1">Target date/time <span class="text-red-500">*</span></label>
-          <input type="datetime-local" id="aecv-visit-date" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-300">
+          <input type="datetime-local" id="aecv-visit-date" data-date-rule="scheduling" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-300">
         </div>
       </div>
       <!-- Clinical visit scheduling -->
@@ -1910,7 +1910,7 @@
         </label>
         <div id="aecv-clinical-date-wrap" class="hidden pl-6">
           <label class="block text-xs font-medium text-slate-600 mb-1">Target date/time <span class="text-red-500">*</span></label>
-          <input type="datetime-local" id="aecv-clinical-date" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-300">
+          <input type="datetime-local" id="aecv-clinical-date" data-date-rule="scheduling" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-300">
         </div>
       </div>
       {{ attachment_section('aecv') }}
@@ -1927,7 +1927,7 @@
 </div>
 
 <!-- ── Resolve Robot Issue Visit modal ───────────────────────────────────────── -->
-<div id="resolve-robot-issue-visit-modal" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" style="display:none">
+<div id="resolve-robot-issue-visit-modal" data-date-error="rriv-error" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" style="display:none">
   <div class="bg-white rounded-2xl shadow-xl max-w-lg w-full flex flex-col" style="max-height:90vh">
     <div class="flex items-center justify-between px-6 pt-6 pb-4 shrink-0">
       <h3 class="text-xl font-bold text-slate-800">Robot Issue — Replacement Visit</h3>
@@ -1948,7 +1948,7 @@
         <div>
           <label class="block text-sm font-medium text-slate-700 mb-1">Can resume from <span class="text-red-500">*</span></label>
           <p class="text-xs text-slate-500 mb-1">Earliest date training can resume.</p>
-          <input type="date" id="rriv-resume-date" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-300">
+          <input type="date" id="rriv-resume-date" data-date-rule="scheduling" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-300">
         </div>
       </div>
       <!-- BP fault-documentation rows (built by JS in BP mode) -->
@@ -1971,7 +1971,7 @@
 
 <!-- ── Other Device Issue Modal ─────────────────────────────────────────────── -->
 <!-- Other Device Issue — Engineer Call Modal -->
-<div id="other-device-issue-modal" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" style="display:none">
+<div id="other-device-issue-modal" data-date-error="odi-error" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" style="display:none">
   <div class="bg-white rounded-2xl shadow-xl max-w-2xl w-full flex flex-col" style="max-height:90vh">
     <div class="flex items-center justify-between px-6 pt-6 pb-4 shrink-0">
       <h3 class="text-xl font-bold text-slate-800">Other Device Issue — Engineer Call</h3>
@@ -2013,7 +2013,7 @@
 </div>
 
 <!-- Other Device Issue — Engineer Visit Modal -->
-<div id="other-device-issue-visit-modal" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" style="display:none">
+<div id="other-device-issue-visit-modal" data-date-error="odiv-error" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" style="display:none">
   <div class="bg-white rounded-2xl shadow-xl max-w-2xl w-full flex flex-col" style="max-height:90vh">
     <div class="flex items-center justify-between px-6 pt-6 pb-4 shrink-0">
       <h3 class="text-xl font-bold text-slate-800">Other Device Issue — Engineer Visit</h3>
@@ -2056,7 +2056,7 @@
 </div>
 
 <!-- ── Create Note modal ───────────────────────────────────────────────────── -->
-<div id="note-modal" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" style="display:none">
+<div id="note-modal" data-date-error="note-error" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" style="display:none">
   <div class="bg-white rounded-2xl shadow-xl max-w-3xl w-full flex flex-col" style="max-height:90vh">
     <div class="flex items-center justify-between px-6 pt-6 pb-4 shrink-0">
       <h3 class="text-xl font-bold text-slate-800">Create Note</h3>

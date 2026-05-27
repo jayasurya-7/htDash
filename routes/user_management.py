@@ -14,6 +14,7 @@ from utils.protocol_events import (
     set_free_event, read_protocol_events, write_protocol_events, load_study_protocol,
 )
 from utils.device_events import append_device_event
+from utils.date_validation import validate_completion_date
 import os
 import csv
 import json
@@ -58,6 +59,14 @@ bp = Blueprint("user_management", __name__)
 def _filer():
     """loginid of the current request's user — stamped as `filed_by` on every filed event."""
     return flask_session.get('loginid', 'unknown')
+
+
+def _bad_date(patient, value):
+    """Date Rule Framework gate. Returns a (jsonify(error), 400) response tuple
+    when `value` violates the default completion-date rule, else None. Routes
+    use the walrus pattern:  `if r := _bad_date(patient, event_date): return r`."""
+    err = validate_completion_date(patient, value)
+    return (jsonify({'error': err}), 400) if err else None
 
 
 def _wdu_event_name(entry, fallback='AG Watch Data Upload'):
@@ -792,6 +801,7 @@ def api_complete_device_install(homer_id):
     data = request.get_json() or {}
     event_id   = data.get('event_id')
     event_date = data.get('eventDate', '').strip()
+    if r := _bad_date(patient, event_date): return r
     pluto_id   = data.get('plutoId', '').strip()
     mars_id    = data.get('marsId', '').strip()
     modem_id   = data.get('modemId', '').strip()
@@ -1107,6 +1117,7 @@ def api_discontinue_patient(homer_id):
 
     if not completion_date:
         return jsonify({'error': 'Discontinuation date is required.'}), 400
+    if r := _bad_date(patient, completion_date): return r
     try:
         disc_dt = datetime.strptime(completion_date, '%Y-%m-%dT%H:%M')
         if disc_dt > datetime.now():
@@ -1301,6 +1312,7 @@ def api_complete_device_return(homer_id):
 
     if not completion_date:
         return jsonify({'error': 'Event date is required.'}), 400
+    if r := _bad_date(patient, completion_date): return r
     try:
         comp_dt = datetime.strptime(completion_date, '%Y-%m-%dT%H:%M')
         if comp_dt > datetime.now():
@@ -1460,6 +1472,8 @@ def api_activate_patient(homer_id):
         return jsonify({'error': 'Patient not found'}), 404
     if derive_status(patient) != 'inactive':
         return jsonify({'error': 'Patient must be inactive to activate'}), 409
+    if r := _bad_date(patient, activation_date): return r
+    if r := _bad_date(patient, session_start):   return r
 
     # Control patients must have a VCG group selected at activation
     if patient.get('group') == 'control':
@@ -1651,6 +1665,7 @@ def api_log_activation_attempt(homer_id):
         return jsonify({'error': 'Patient not found'}), 404
     if derive_status(patient) != 'inactive':
         return jsonify({'error': 'Patient must be inactive to log an activation attempt'}), 409
+    if r := _bad_date(patient, visit_date): return r
 
     is_experimental = patient.get('group') == 'experimental'
     if primary_reason in ('robot_issue_call', 'other_device_issue_call') and not is_experimental:
@@ -2018,6 +2033,8 @@ def api_complete_simple_event(homer_id):
 
     if protocol_event_id not in _SIMPLE_EVENT_IDS:
         return jsonify({'error': 'Invalid protocol event ID.'}), 400
+    if r := _bad_date(patient, completion_date): return r
+    if r := _bad_date(patient, session_start):   return r
     if protocol_event_id in _HOME_VISIT_IDS:
         if not session_start or not session_end:
             return jsonify({'error': 'Session start and end are required.'}), 400
@@ -2113,6 +2130,7 @@ def api_complete_training_completion(homer_id):
 
     if not completion_date:
         return jsonify({'error': 'Event date is required.'}), 400
+    if r := _bad_date(patient, completion_date): return r
     try:
         if datetime.strptime(completion_date, '%Y-%m-%dT%H:%M') > datetime.now():
             return jsonify({'error': 'Event date cannot be in the future.'}), 400
@@ -2363,6 +2381,7 @@ def api_complete_home_visit(homer_id):
 
         if not visit_date:
             return jsonify({'error': 'Visit date is required.'}), 400
+        if r := _bad_date(patient, visit_date): return r
         try:
             _vd = datetime.strptime(visit_date, '%Y-%m-%dT%H:%M')
             if _vd > datetime.now():
@@ -2433,6 +2452,7 @@ def api_complete_home_visit(homer_id):
 
         if not session_start or not session_end:
             return jsonify({'error': 'Session start and end are required.'}), 400
+        if r := _bad_date(patient, session_start): return r
         try:
             _ss = datetime.strptime(session_start, '%Y-%m-%dT%H:%M')
             _se = datetime.strptime(session_end,   '%Y-%m-%dT%H:%M')
@@ -2509,6 +2529,7 @@ def api_complete_adverse_event(homer_id):
         return jsonify({'error': 'event_id is required.'}), 400
     if not completion_date:
         return jsonify({'error': 'Event date is required.'}), 400
+    if r := _bad_date(patient, completion_date): return r
     try:
         if datetime.strptime(completion_date, '%Y-%m-%dT%H:%M') > datetime.now():
             return jsonify({'error': 'Event date cannot be in the future.'}), 400
@@ -2677,6 +2698,7 @@ def api_complete_adverse_event_followup(homer_id):
         return jsonify({'error': 'event_id is required.'}), 400
     if not completion_date:
         return jsonify({'error': 'Call date is required.'}), 400
+    if r := _bad_date(patient, completion_date): return r
     try:
         if datetime.strptime(completion_date, '%Y-%m-%dT%H:%M') > datetime.now():
             return jsonify({'error': 'Call date cannot be in the future.'}), 400
@@ -3034,6 +3056,7 @@ def api_complete_ae_followup_visit(homer_id):
         return jsonify({'error': 'Visit start is required.'}), 400
     if not visit_end:
         return jsonify({'error': 'Visit end is required.'}), 400
+    if r := _bad_date(patient, visit_start): return r
     try:
         start_dt = datetime.strptime(visit_start, '%Y-%m-%dT%H:%M')
         end_dt   = datetime.strptime(visit_end,   '%Y-%m-%dT%H:%M')
@@ -3160,6 +3183,7 @@ def api_complete_ae_clinical_visit(homer_id):
         return jsonify({'error': 'Visit start is required.'}), 400
     if not visit_end:
         return jsonify({'error': 'Visit end is required.'}), 400
+    if r := _bad_date(patient, visit_start): return r
     try:
         start_dt = datetime.strptime(visit_start, '%Y-%m-%dT%H:%M')
         end_dt   = datetime.strptime(visit_end,   '%Y-%m-%dT%H:%M')
@@ -3381,6 +3405,7 @@ def api_complete_robot_issue_call(homer_id):
         return jsonify({'error': 'event_id is required.'}), 400
     if not completion_date:
         return jsonify({'error': 'Call date is required.'}), 400
+    if r := _bad_date(patient, completion_date): return r
     try:
         call_dt = datetime.strptime(completion_date, '%Y-%m-%dT%H:%M')
         if call_dt > datetime.now():
@@ -3391,6 +3416,7 @@ def api_complete_robot_issue_call(homer_id):
     # Validate issue_occur_date (required for robot issues)
     if not issue_occur_date:
         return jsonify({'error': 'Issue occurred date is required.'}), 400
+    if r := _bad_date(patient, issue_occur_date): return r
     try:
         issue_dt = _parse_date_flex(issue_occur_date)
         if not issue_dt:
@@ -3555,6 +3581,8 @@ def api_complete_other_device_issue_call(homer_id):
         return jsonify({'error': 'event_id is required.'}), 400
     if not completion_date:
         return jsonify({'error': 'Call date is required.'}), 400
+    if r := _bad_date(patient, completion_date):  return r
+    if r := _bad_date(patient, issue_occur_date): return r
     try:
         call_dt = datetime.strptime(completion_date, '%Y-%m-%dT%H:%M')
         if call_dt > datetime.now():
@@ -3789,6 +3817,7 @@ def api_complete_other_device_issue_visit(homer_id):
         return jsonify({'error': 'event_id is required.'}), 400
     if not completion_date:
         return jsonify({'error': 'Visit date is required.'}), 400
+    if r := _bad_date(patient, completion_date): return r
     try:
         visit_dt = datetime.strptime(completion_date, '%Y-%m-%dT%H:%M')
         if visit_dt > datetime.now():
@@ -4028,6 +4057,7 @@ def api_complete_robot_issue_visit(homer_id):
         return jsonify({'error': 'event_id is required.'}), 400
     if not completion_date:
         return jsonify({'error': 'Visit date is required.'}), 400
+    if r := _bad_date(patient_meta, completion_date): return r
     try:
         visit_dt = datetime.strptime(completion_date, '%Y-%m-%dT%H:%M')
         if visit_dt > datetime.now():
@@ -4298,6 +4328,7 @@ def api_complete_resolve_robot_issue_visit(homer_id):
         return jsonify({'error': 'event_id is required.'}), 400
     if not completion_date:
         return jsonify({'error': 'Visit date is required.'}), 400
+    if r := _bad_date(patient, completion_date): return r
     try:
         visit_dt = datetime.strptime(completion_date, '%Y-%m-%dT%H:%M')
         if visit_dt > datetime.now():
@@ -4650,6 +4681,7 @@ def api_complete_followup_call(homer_id):
         return jsonify({'error': 'Invalid protocol event ID.'}), 400
     if not completion_date:
         return jsonify({'error': 'Call date is required.'}), 400
+    if r := _bad_date(patient, completion_date): return r
     try:
         if datetime.strptime(completion_date, '%Y-%m-%dT%H:%M') > datetime.now():
             return jsonify({'error': 'Call date cannot be in the future.'}), 400
@@ -4849,6 +4881,8 @@ def api_complete_watch_record(homer_id):
                 return jsonify({'error': f'{label} date cannot be in the future'}), 400
         except ValueError:
             return jsonify({'error': f'{label} date format must be YYYY-MM-DDTHH:MM'}), 400
+    if r := _bad_date(patient, sync_datetime): return r
+    if r := _bad_date(patient, worn_datetime): return r
 
     events_data = read_protocol_events(folder, homer_id)
     if not events_data:
@@ -5855,6 +5889,7 @@ def api_complete_a1_assessment(homer_id):
     patient = read_patient_meta(folder, homer_id)
     if not patient:
         return jsonify({'error': 'Patient not found'}), 404
+    if r := _bad_date(patient, a1_date): return r
     status = derive_status(patient)
     if status not in ('training_completed', 'broken_protocol', 'discontinued', 'post_training'):
         return jsonify({'error': 'Patient must have completed training to record A1 assessment.'}), 409
@@ -5923,6 +5958,7 @@ def api_complete_a2_assessment(homer_id):
     patient = read_patient_meta(folder, homer_id)
     if not patient:
         return jsonify({'error': 'Patient not found'}), 404
+    if r := _bad_date(patient, a2_date): return r
     status = derive_status(patient)
     if status not in ('training_completed', 'broken_protocol', 'discontinued', 'post_training', 'a1_completed'):
         return jsonify({'error': 'Patient must have completed training to record A2 assessment.'}), 409
@@ -6158,6 +6194,7 @@ def api_complete_schedule_assessment_call(homer_id):
 
     if not completion_date:
         return jsonify({'error': 'Call date is required.'}), 400
+    if r := _bad_date(read_patient_meta(folder, homer_id), completion_date): return r
     try:
         if datetime.strptime(completion_date, '%Y-%m-%dT%H:%M') > datetime.now():
             return jsonify({'error': 'Call date cannot be in the future.'}), 400
