@@ -33,7 +33,8 @@ FMT      = '%Y-%m-%dT%H:%M'
 FMT_SECS = '%Y-%m-%dT%H:%M:%S'
 
 DATETIME_FIELDS = ('completion_date', 'session_start', 'session_end',
-                   'sync_datetime', 'worn_datetime', 'cancelled_at')
+                   'sync_datetime', 'worn_datetime', 'cancelled_at',
+                   'removed_date', 'data_start', 'data_end')
 
 
 def parse_dt(value: str) -> datetime:

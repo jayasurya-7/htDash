@@ -13,6 +13,15 @@ _AE_FOLLOWUP_LABELS = {
 }
 
 
+def _wdu_event_name(entry, fallback='AG Watch Data Upload'):
+    """Per-entry display name for a watch_data_upload event: limb + watch id, so the
+    right/left tasks are distinguishable. Kept in sync with the same helper in
+    routes/user_management.py."""
+    limb = (entry.get('limb') or '').title()
+    wid  = entry.get('watch_id') or ''
+    return f"AG Watch Data Upload — {limb} ({wid})" if (limb or wid) else fallback
+
+
 def _topo_sort(events, event_defs, date_fn):
     """Group events by date_fn, topo-sort within each group (parents before dependents),
     return in ascending date order.
@@ -117,6 +126,7 @@ def events():
     event_names['schedule_a1_call']        = 'Schedule A1 Assessment'
     event_names['schedule_a2_call']        = 'Schedule A2 Assessment'
     event_names['device_return']           = 'Device Return'
+    event_names['watch_data_upload']       = 'AG Watch Data Upload'
 
     # Build per-group event_defs so depends_on is looked up against the correct
     # group definition (e.g. activation has different depends_on per group).
@@ -129,6 +139,7 @@ def events():
             defs[e['id']] = e
         defs['training_pause_followup'] = {'name': 'Training Pause Follow-up', 'depends_on': []}
         defs['device_return']           = {'name': 'Device Return',            'depends_on': []}
+        defs['watch_data_upload']       = {'name': 'AG Watch Data Upload',     'depends_on': []}
         group_defs[grp] = defs
 
     # Merged defs for topo sort (experimental preferred — stricter depends_on).
@@ -159,6 +170,7 @@ def events():
                 'adverse_event', 'adverse_event_followup',
                 'adverse_event_followup_visit', 'adverse_event_clinical_visit',
                 'device_return',
+                'watch_data_upload',
             })
             ae_alias_map_bp = {
                 e['id']: e['alias']
@@ -180,6 +192,8 @@ def events():
                     ae_ids  = entry.get('adverse_event_ids') or []
                     aliases = [ae_alias_map_bp[aid] for aid in ae_ids if aid in ae_alias_map_bp]
                     ev_name = f"{_AE_FOLLOWUP_LABELS[pid]}: {', '.join(aliases)}" if aliases else _AE_FOLLOWUP_LABELS[pid]
+                elif pid == 'watch_data_upload':
+                    ev_name = _wdu_event_name(entry)
                 else:
                     ev_name = event_names.get(pid, pid)
                 overdue.append({
@@ -260,6 +274,7 @@ def events():
             'other_device_issue_call', 'other_device_issue_visit',
             'training_completion_d29',
             'device_return',
+            'watch_data_upload',
         })
         _DISCONTINUED_VISIBLE = frozenset({
             'adverse_event', 'adverse_event_followup',
@@ -267,6 +282,7 @@ def events():
             'a1_assessment', 'a2_assessment',
             'schedule_a1_call', 'schedule_a2_call',
             'device_return',
+            'watch_data_upload',
         })
         _POST_TRAINING_VISIBLE = frozenset({
             'training_completion_d29',
@@ -275,6 +291,7 @@ def events():
             'a1_assessment', 'a2_assessment',
             'schedule_a1_call', 'schedule_a2_call',
             'device_return',
+            'watch_data_upload',
         })
         is_paused        = bool(patient.get('trainingPausedDate'))
         is_discontinued  = bool(patient.get('discontinuationDate'))
@@ -341,6 +358,8 @@ def events():
                 ae_ids   = entry.get('adverse_event_ids') or []
                 aliases  = [ae_alias_map[aid] for aid in ae_ids if aid in ae_alias_map]
                 ev_name  = f"{_AE_FOLLOWUP_LABELS[pid]}: {', '.join(aliases)}" if aliases else _AE_FOLLOWUP_LABELS[pid]
+            elif pid == 'watch_data_upload':
+                ev_name  = _wdu_event_name(entry)
             else:
                 ev_name  = event_names.get(pid, pid)
 

@@ -6,6 +6,7 @@
 let patientData = null;
 let isAdmin      = false;
 let userPrivilege = '';
+let userLoginId   = '';   // current user's loginId (for "filed by You")
 let eventsCache = [];
 
 // ── Status helpers ────────────────────────────────────────────────────────────
@@ -1088,6 +1089,14 @@ const _FIELD_LABELS = {
   ae_discussions:       'AE Discussions',
   training_blocked:     'Training Blocked',
   paused:              'Paused',
+  watch_id:            'Watch',
+  limb:                'Limb',
+  removed_date:        'Removed',
+  data_start:          'Data From',
+  data_end:            'Data To',
+  data_file:           'Data File',
+  original_filename:   'File Name',
+  skipped:             'Skipped (no data)',
   notes:               'Notes',
 };
 
@@ -1105,6 +1114,8 @@ function _timelineExtraFields(ev) {
     const val = ev[key];
     if (val === null || val === undefined || val === '' || val === false) continue;
     if (Array.isArray(val) && val.length === 0) continue;
+    // Watch data upload: the download link already shows the filename — skip the dup row.
+    if (key === 'original_filename' && ev.data_file) continue;
     const label = _FIELD_LABELS[key] || key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
     let display;
     if (typeof val === 'boolean') {
@@ -1164,6 +1175,10 @@ function _timelineExtraFields(ev) {
       }).join('; ');
     } else if (key === 'duration_minutes') {
       display = `${val} min`;
+    } else if (key === 'data_file' && ev.id) {
+      // .gt3x watch data → download link (admin/therapist/engineer)
+      display = `<a href="/api/patients/${PATIENT_HOMER_ID}/watch-data/${ev.id}" target="_blank" ` +
+                `class="text-blue-600 hover:underline">${ev.original_filename || val.split('/').pop()}</a>`;
     } else if (Array.isArray(val)) {
       display = val.join(', ');
     } else if (val && typeof val === 'object' && 'new_id' in val) {
@@ -1444,7 +1459,7 @@ function _timelineMasterRow(ev, i, isLast, meta) {
     <div ${click} data-tlrow="${i}"
          class="grid gap-x-4 px-2 -mx-2 rounded-lg transition-colors ${rowHighlight} ${interactive} ${selCls}"
          style="grid-template-columns:1fr 20px 1fr">
-      <div class="text-right pb-${isLast ? '2' : '7'} pt-2">
+      <div class="text-right pb-${isLast ? '2' : '4'} pt-2">
         <p class="${nameCls}">${ev.event_name}</p>
         ${!meta.isSynthetic && schedDate ? `<p class="text-xs text-slate-400 mt-0.5">Scheduled: ${schedStr}</p>` : ''}
         ${dayLabel ? `<p class="text-sm font-semibold text-indigo-500 mt-1">${dayLabel}</p>` : ''}
@@ -1454,10 +1469,11 @@ function _timelineMasterRow(ev, i, isLast, meta) {
         <div class="w-3 h-3 rounded-full ${meta.circleCls} border-2 border-white ring-1 z-10 flex-shrink-0"></div>
         ${isLast ? '' : '<div class="flex-1 w-0.5 bg-green-200 -mb-2"></div>'}
       </div>
-      <div class="pb-${isLast ? '2' : '7'} pt-2">
+      <div class="flex flex-col pb-${isLast ? '2' : '4'} pt-2">
         <p class="text-xs font-medium text-slate-700">${compStr}</p>
         ${filedStr ? `<p class="text-xs text-slate-400 mt-0.5">Filed: ${filedStr}</p>` : ''}
         ${extra}
+        ${ev.filed_by ? `<p class="text-[10px] italic text-slate-400 text-right mt-1 pr-3">– filed by ${ev.filed_by === userLoginId ? 'You' : _esc(ev.filed_by)}</p>` : ''}
       </div>
     </div>`;
 }
@@ -1816,15 +1832,82 @@ function renderWatchRecordsTab() {
     .filter(e => e.protocol_event_id === 'watch_record')
     .sort((a, b) => (b.completion_date || '').localeCompare(a.completion_date || ''));
 
-  if (!records.length) {
-    container.innerHTML = `
-      <div class="flex flex-col items-center justify-center py-16 text-slate-300">
-        <i class="fas fa-clock text-3xl mb-3"></i>
-        <p class="text-sm">No watch records yet.</p>
-      </div>`;
-    return;
+  // AG Watch data-upload tasks: outstanding (incomplete) + completed (free).
+  const uploadsOpen = (eventsCache || [])
+    .filter(e => e.protocol_event_id === 'watch_data_upload')
+    .sort((a, b) => (a.removed_date || '').localeCompare(b.removed_date || ''));
+  const uploadsDone = (_completeEventsCache || [])
+    .filter(e => e.protocol_event_id === 'watch_data_upload')
+    .sort((a, b) => (b.removed_date || b.completion_date || '')
+      .localeCompare(a.removed_date || a.completion_date || ''));
+
+  const recordsHtml = records.length
+    ? records.map(_watchRecordCard).join('')
+    : `<div class="flex flex-col items-center justify-center py-12 text-slate-300">
+         <i class="fas fa-clock text-3xl mb-3"></i>
+         <p class="text-sm">No watch records yet.</p>
+       </div>`;
+
+  let uploadsHtml = '';
+  if (uploadsOpen.length || uploadsDone.length) {
+    uploadsHtml =
+      `<h3 class="text-sm font-semibold text-slate-600 mt-6 mb-2 flex items-center gap-2">
+         <i class="fas fa-database text-indigo-400"></i> AG Watch Data Uploads
+       </h3>` +
+      uploadsOpen.map(_watchDataUploadOpenCard).join('') +
+      uploadsDone.map(_watchDataUploadDoneCard).join('');
   }
-  container.innerHTML = records.map(_watchRecordCard).join('');
+
+  container.innerHTML = recordsHtml + uploadsHtml;
+}
+
+function _watchDataUploadOpenCard(ev) {
+  const limb    = ev.limb ? ev.limb.charAt(0).toUpperCase() + ev.limb.slice(1) : '';
+  const removed = ev.removed_date ? _fmtDateTime(ev.removed_date) : '—';
+  const rangeFrom = ev.data_start ? _fmtDateTime(ev.data_start) : '—';
+  const rangeTo   = ev.data_end   ? _fmtDateTime(ev.data_end)   : '—';
+  return `
+    <div class="bg-white rounded-xl border border-amber-200 shadow-sm mb-3 overflow-hidden">
+      <div class="bg-amber-50 border-b border-amber-100 px-4 py-2.5 flex items-center justify-between">
+        <span class="text-sm font-semibold text-amber-800">Watch ${ev.watch_id || '—'}${limb ? ` (${limb})` : ''}</span>
+        <span class="inline-flex items-center gap-1 text-xs bg-amber-100 text-amber-800 border border-amber-300 rounded-full px-2 py-0.5">
+          <i class="fas fa-clock text-[10px]"></i>Upload pending</span>
+      </div>
+      <div class="px-4 py-3 text-xs text-slate-500 space-y-0.5">
+        <div><span class="text-slate-400">Removed:</span> ${removed}</div>
+        <div><span class="text-slate-400">Expected range:</span> ${rangeFrom} → ${rangeTo}</div>
+      </div>
+    </div>`;
+}
+
+function _watchDataUploadDoneCard(ev) {
+  const limb    = ev.limb ? ev.limb.charAt(0).toUpperCase() + ev.limb.slice(1) : '';
+  const removed = ev.removed_date ? _fmtDateTime(ev.removed_date) : '—';
+  const skipped = !!ev.skipped;
+  const badge = skipped
+    ? `<span class="inline-flex items-center gap-1 text-xs bg-slate-100 text-slate-600 border border-slate-300 rounded-full px-2 py-0.5"><i class="fas fa-ban text-[10px]"></i>No data</span>`
+    : `<span class="inline-flex items-center gap-1 text-xs bg-green-100 text-green-800 border border-green-200 rounded-full px-2 py-0.5"><i class="fas fa-check text-[10px]"></i>Uploaded</span>`;
+  const link = (!skipped && ev.data_file && ev.id)
+    ? `<a href="/api/patients/${PATIENT_HOMER_ID}/watch-data/${ev.id}" target="_blank" class="inline-flex items-center gap-1 text-xs text-blue-600 hover:underline mt-1"><i class="fas fa-download"></i>${ev.original_filename || 'Download .gt3x'}</a>`
+    : '';
+  const uploadedAt = (!skipped && ev.completion_date) ? `<div><span class="text-slate-400">Uploaded:</span> ${_fmtDateTime(ev.completion_date)}</div>` : '';
+  const notes = ev.notes ? `<div class="mt-1"><span class="text-slate-400">Notes:</span> ${_esc(ev.notes)}</div>` : '';
+  const borderCls = skipped ? 'border-slate-200' : 'border-green-200';
+  const headerBg  = skipped ? 'bg-slate-50' : 'bg-green-50';
+  const titleCls  = skipped ? 'text-slate-700' : 'text-green-800';
+  return `
+    <div class="bg-white rounded-xl border ${borderCls} shadow-sm mb-3 overflow-hidden">
+      <div class="${headerBg} border-b border-slate-100 px-4 py-2.5 flex items-center justify-between">
+        <span class="text-sm font-semibold ${titleCls}">Watch ${ev.watch_id || '—'}${limb ? ` (${limb})` : ''}</span>
+        ${badge}
+      </div>
+      <div class="px-4 py-3 text-xs text-slate-500 space-y-0.5">
+        <div><span class="text-slate-400">Removed:</span> ${removed}</div>
+        ${uploadedAt}
+        ${notes}
+        ${link}
+      </div>
+    </div>`;
 }
 
 function _watchAssignmentRow(side, wr) {
@@ -3556,6 +3639,7 @@ const EVENT_OPENERS = {
   agwatch_timing_d03:        (ev) => openAgwatchTimingModal(ev),
   agwatch_timing_d15:        (ev) => openAgwatchTimingModal(ev),
   watch_record:              (ev) => openWatchRecordModal(ev),
+  watch_data_upload:         (ev) => openWatchDataUploadModal(ev),
   adverse_event:                (ev) => openAdverseEventModal(ev),
   robot_issue_call:             (ev) => openRobotIssueCallModal(ev),
   robot_issue_visit:            (ev) => openRobotIssueVisitModal(ev),
@@ -3634,6 +3718,7 @@ function patientEventRow(ev) {
     'adverse_event_followup_visit', 'adverse_event_clinical_visit',
     'a1_assessment', 'a2_assessment',
     'schedule_a1_call', 'schedule_a2_call',
+    'watch_data_upload',
   ]);
   const discontinuedBlocks = _patientDiscontinued && !_DISCONTINUED_VISIBLE.has(ev.protocol_event_id);
   // Assessment events are always clickable (cancel appointment or complete early).
@@ -6551,6 +6636,162 @@ async function saveWatchRecord() {
   loadPatientEvents();
 }
 
+// ── AG Watch Data Upload modal ─────────────────────────────────────────────────
+
+let _wduEventId         = null;
+let _wduUploaded        = false;  // true once the .gt3x has fully uploaded (staged on server)
+let _wduOriginalFilename = null;
+let _wduXhr             = null;   // in-flight upload, so a re-selection can abort it
+
+function openWatchDataUploadModal(ev) {
+  _wduEventId          = ev.id;
+  _wduUploaded         = false;
+  _wduOriginalFilename = null;
+  if (_wduXhr) { try { _wduXhr.abort(); } catch {} _wduXhr = null; }
+
+  // Context banner — watch id, limb, removed date, expected data range (read-only)
+  const limb      = ev.limb ? ev.limb.charAt(0).toUpperCase() + ev.limb.slice(1) : '—';
+  const removed   = ev.removed_date ? _fmtDateTime(ev.removed_date) : '—';
+  const rangeFrom = ev.data_start ? _fmtDateTime(ev.data_start) : '—';
+  const rangeTo   = ev.data_end   ? _fmtDateTime(ev.data_end)   : '—';
+  document.getElementById('wdu-context-banner').innerHTML =
+    `<div class="font-semibold mb-1">Watch ${ev.watch_id || '—'} <span class="font-normal text-indigo-600">(${limb})</span></div>` +
+    `<div class="text-xs text-indigo-700">Removed: ${removed}</div>` +
+    `<div class="text-xs text-indigo-700">Expected data range: ${rangeFrom} → ${rangeTo}</div>`;
+
+  // Reset fields
+  document.getElementById('wdu-skip').checked = false;
+  document.getElementById('wdu-file').value   = '';
+  document.getElementById('wdu-notes').value  = '';
+  _wduHideProgress();
+  setError('wdu-error', '');
+
+  const skipCb   = document.getElementById('wdu-skip');
+  const fileWrap = document.getElementById('wdu-file-wrap');
+  const notesReq = document.getElementById('wdu-notes-req');
+  const fileEl   = document.getElementById('wdu-file');
+
+  // Skip toggle: hide file/progress, flip Notes to required, re-gate Save.
+  function syncSkip() {
+    const skip = skipCb.checked;
+    fileWrap.classList.toggle('hidden', skip);
+    notesReq.textContent = skip ? '(required — explain why)' : '(optional)';
+    if (skip) _wduHideProgress();
+    _wduUpdateSave();
+  }
+  skipCb.onchange = syncSkip;
+
+  // File-select: validate and upload immediately, showing progress; Save stays
+  // disabled until the upload completes.
+  fileEl.onchange = () => _wduStartUpload(fileEl.files[0] || null);
+
+  syncSkip();
+  _wduUpdateSave();        // Save opens disabled (nothing uploaded, skip off)
+  showModal('watch-data-upload-modal');
+}
+
+// Save enables only when the file has finished uploading, or skip is checked.
+function _wduUpdateSave() {
+  const skip = document.getElementById('wdu-skip').checked;
+  document.getElementById('wdu-save').disabled = !(_wduUploaded || skip);
+}
+
+function _wduShowProgress(pct, done) {
+  const wrap = document.getElementById('wdu-progress-wrap');
+  const bar  = document.getElementById('wdu-progress-bar');
+  const txt  = document.getElementById('wdu-progress-text');
+  wrap.classList.remove('hidden');
+  bar.style.width = `${pct}%`;
+  bar.classList.toggle('bg-green-500', !!done);
+  bar.classList.toggle('bg-blue-500',  !done);
+  txt.textContent = done ? 'Uploaded ✓' : `Uploading… ${pct}%`;
+}
+
+function _wduHideProgress() {
+  const wrap = document.getElementById('wdu-progress-wrap');
+  if (wrap) wrap.classList.add('hidden');
+  const bar = document.getElementById('wdu-progress-bar');
+  if (bar) bar.style.width = '0%';
+}
+
+function _wduStartUpload(file) {
+  setError('wdu-error', '');
+  _wduUploaded = false;
+  _wduOriginalFilename = null;
+  if (_wduXhr) { try { _wduXhr.abort(); } catch {} _wduXhr = null; }
+  _wduUpdateSave();
+
+  if (!file) { _wduHideProgress(); return; }
+  if (!file.name.toLowerCase().endsWith('.gt3x')) {
+    setError('wdu-error', 'Data file must be a .gt3x file.');
+    document.getElementById('wdu-file').value = '';
+    _wduHideProgress();
+    return;
+  }
+
+  _wduShowProgress(0, false);
+
+  const fd = new FormData();
+  fd.append('event_id', _wduEventId);
+  fd.append('file', file);
+
+  // XMLHttpRequest (not fetch) so we get upload.onprogress for the progress bar.
+  const xhr = new XMLHttpRequest();
+  _wduXhr = xhr;
+  xhr.open('POST', `/api/patients/${PATIENT_HOMER_ID}/upload-watch-data`);
+  xhr.upload.onprogress = (e) => {
+    if (e.lengthComputable) _wduShowProgress(Math.round((e.loaded / e.total) * 100), false);
+  };
+  xhr.onload = () => {
+    _wduXhr = null;
+    let data = {};
+    try { data = JSON.parse(xhr.responseText); } catch {}
+    if (xhr.status >= 200 && xhr.status < 300 && data.ok) {
+      _wduUploaded = true;
+      _wduOriginalFilename = data.original_filename || file.name;
+      _wduShowProgress(100, true);
+    } else {
+      setError('wdu-error', data.error || 'Upload failed. Please try again.');
+      _wduHideProgress();
+    }
+    _wduUpdateSave();
+  };
+  xhr.onerror = () => {
+    _wduXhr = null;
+    setError('wdu-error', 'Network error during upload. Please try again.');
+    _wduHideProgress();
+    _wduUpdateSave();
+  };
+  xhr.onabort = () => { _wduXhr = null; };
+  xhr.send(fd);
+}
+
+async function saveWatchDataUpload() {
+  const skip  = document.getElementById('wdu-skip').checked;
+  const notes = document.getElementById('wdu-notes').value.trim();
+
+  if (skip) {
+    if (!notes) { setError('wdu-error', 'Please give a detailed reason for skipping the upload.'); return; }
+  } else {
+    if (!_wduUploaded) { setError('wdu-error', 'Please choose and upload a .gt3x file first.'); return; }
+  }
+
+  const saveBtn = document.getElementById('wdu-save');
+  saveBtn.disabled = true;
+
+  const body = { event_id: _wduEventId, skipped: skip, notes };
+  if (!skip) body.original_filename = _wduOriginalFilename;
+
+  const { ok, data } = await apiPost(`/api/patients/${PATIENT_HOMER_ID}/complete-event/watch-data-upload`, body);
+  if (!ok) {
+    _wduUpdateSave();
+    setError('wdu-error', data.error || 'Failed to save.');
+    return;
+  }
+  hideModal('watch-data-upload-modal');
+  loadPatientEvents();
+}
+
 // ── AG Watch Timing modal ─────────────────────────────────────────────────────
 
 let _agwatchEventId         = null;
@@ -6803,6 +7044,7 @@ async function loadPrivilege() {
     if (res.ok) {
       const s = await res.json();
       userPrivilege = s.privilege || '';
+      userLoginId   = s.loginId || '';
       isAdmin = userPrivilege === 'admin';
     }
   } catch (_) {}

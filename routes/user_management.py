@@ -55,6 +55,20 @@ def _parse_date_flex(date_str):
 bp = Blueprint("user_management", __name__)
 
 
+def _filer():
+    """loginid of the current request's user — stamped as `filed_by` on every filed event."""
+    return flask_session.get('loginid', 'unknown')
+
+
+def _wdu_event_name(entry, fallback='AG Watch Data Upload'):
+    """Per-entry display name for a watch_data_upload event: limb + watch id, so the
+    right/left tasks are distinguishable in the event lists. Kept in sync with the
+    same helper in routes/dashboard.py."""
+    limb = (entry.get('limb') or '').title()
+    wid  = entry.get('watch_id') or ''
+    return f"AG Watch Data Upload — {limb} ({wid})" if (limb or wid) else fallback
+
+
 # ── URL-routed patients page ───────────────────────────────────────────────────
 
 @bp.route('/patients', methods=['GET'])
@@ -297,6 +311,7 @@ def api_patient_events(homer_id):
                     'protocol_event_id': 'schedule_a1_call',
                     'scheduled_date':    [_a1_seed_date, _a1_seed_date],
                     'filed_at':          _filed_at,
+                    'filed_by':   _filer(),
                 })
                 _dirty = True
 
@@ -348,6 +363,7 @@ def api_patient_events(homer_id):
                             'protocol_event_id': 'schedule_a2_call',
                             'scheduled_date':    [_a2_seed_date, _a2_seed_date],
                             'filed_at':          _filed_at,
+                            'filed_by':   _filer(),
                         })
                         _dirty = True
             except Exception:
@@ -377,6 +393,7 @@ def api_patient_events(homer_id):
                     'protocol_event_id': 'device_return',
                     'scheduled_date':    [_dr_now, _dr_now],
                     'filed_at':          _dr_filed_at,
+                    'filed_by':   _filer(),
                 })
                 write_protocol_events(folder, homer_id, events_data)
 
@@ -392,6 +409,7 @@ def api_patient_events(homer_id):
     event_defs['schedule_a1_call']        = {'name': 'Schedule A1 Assessment',   'depends_on': []}
     event_defs['schedule_a2_call']        = {'name': 'Schedule A2 Assessment',   'depends_on': []}
     event_defs['device_return']           = {'name': 'Device Return',            'depends_on': []}
+    event_defs['watch_data_upload']       = {'name': 'AG Watch Data Upload',     'depends_on': []}
 
     # Precompute A1/A2 window dates from activationDate for row display
     _assessment_windows = {}
@@ -447,6 +465,7 @@ def api_patient_events(homer_id):
         'other_device_issue_call', 'other_device_issue_visit',
         'training_completion_d29',
         'device_return',
+        'watch_data_upload',
     })
     # For broken_protocol patients only AE/RI/ODI chains + assessments are interactive.
     _BROKEN_PROTOCOL_INTERACTIVE = frozenset({
@@ -458,6 +477,7 @@ def api_patient_events(homer_id):
         'a1_assessment', 'a2_assessment',
         'schedule_a1_call', 'schedule_a2_call',
         'device_return',
+        'watch_data_upload',
     })
     # For discontinued patients only open AE chains + assessments remain relevant.
     _DISCONTINUED_VISIBLE = frozenset({
@@ -466,6 +486,7 @@ def api_patient_events(homer_id):
         'a1_assessment', 'a2_assessment',
         'schedule_a1_call', 'schedule_a2_call',
         'device_return',
+        'watch_data_upload',
     })
     # For post_training patients (Day 28 passed, D29 not yet filed): only D29,
     # AE chains, assessments, and device_return are shown.
@@ -476,6 +497,7 @@ def api_patient_events(homer_id):
         'a1_assessment', 'a2_assessment',
         'schedule_a1_call', 'schedule_a2_call',
         'device_return',
+        'watch_data_upload',
     })
     is_paused        = bool(patient and patient.get('trainingPausedDate'))
     is_discontinued  = bool(patient and patient.get('discontinuationDate'))
@@ -540,6 +562,8 @@ def api_patient_events(homer_id):
             ae_ids  = entry.get('adverse_event_ids') or []
             aliases = [ae_alias_map[aid] for aid in ae_ids if aid in ae_alias_map]
             event_name = f"{_AE_FOLLOWUP_LABELS[pid]}: {', '.join(aliases)}" if aliases else _AE_FOLLOWUP_LABELS[pid]
+        elif pid == 'watch_data_upload':
+            event_name = _wdu_event_name(entry)
         else:
             event_name = event_defs.get(pid, {}).get('name', pid)
 
@@ -557,6 +581,9 @@ def api_patient_events(homer_id):
             record['appointment_date'] = entry.get('appointment_date')
         if entry.get('triggered_by'):
             record['triggered_by'] = entry['triggered_by']
+        if pid == 'watch_data_upload':
+            for _f in ('watch_id', 'limb', 'removed_date', 'data_start', 'data_end'):
+                record[_f] = entry.get(_f)
         if entry.get('adverse_event_ids') is not None:
             record['adverse_event_ids'] = entry['adverse_event_ids']
         if entry.get('training_stopped'):
@@ -629,11 +656,13 @@ def api_patient_events(homer_id):
         'resolve_robot_issue_visit':     'Robot Issue — Replacement Visit',
         'other_device_issue_call':       'Other Device Issue — Engineer Call',
         'other_device_issue_visit':      'Other Device Issue — Engineer Visit',
+        'watch_data_upload':             'AG Watch Data Upload',
     }
     for free_type, free_name in _FREE_EVENT_NAMES.items():
         for entry in events_data.get('free', {}).get(free_type, []):
             item = dict(entry)
-            item['event_name']        = free_name
+            item['event_name']        = (_wdu_event_name(entry, free_name)
+                                         if free_type == 'watch_data_upload' else free_name)
             item['protocol_event_id'] = free_type
             complete_list.append(item)
 
@@ -804,6 +833,7 @@ def api_complete_device_install(homer_id):
         **entry,
         'completion_date': event_date,
         'filed_at':        filed_at,
+        'filed_by':   _filer(),
         'pluto_id':        pluto_id,
         'mars_id':         mars_id,
         'modem_id':        modem_id,
@@ -1043,6 +1073,7 @@ def api_create_discontinuation_stub(homer_id):
         'protocol_event_id': 'discontinuation',
         'scheduled_date':    [now, now],
         'filed_at':          filed_at,
+        'filed_by':   _filer(),
     }
     events_data.setdefault('incomplete', []).append(stub)
     write_protocol_events(folder, homer_id, events_data)
@@ -1119,6 +1150,7 @@ def api_discontinue_patient(homer_id):
         'id':              record_id,
         'completion_date': completion_date,
         'filed_at':        filed_at,
+        'filed_by':   _filer(),
         'reason':          reason,
         'notes':           notes,
     }
@@ -1372,6 +1404,7 @@ def api_complete_device_return(homer_id):
         'protocol_event_id': 'device_return',
         'completion_date': completion_date,
         'filed_at':        filed_at,
+        'filed_by':   _filer(),
         'notes':           notes,
         'devices':         device_entries,
     }
@@ -1484,7 +1517,7 @@ def api_activate_patient(homer_id):
         if entry:
             activation_entry_id = entry['id']
             filed_at = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
-            complete_entry = {**entry, 'completion_date': activation_date, 'filed_at': filed_at,
+            complete_entry = {**entry, 'completion_date': activation_date, 'filed_at': filed_at, 'filed_by': _filer(),
                               'session_start': session_start, 'session_end': session_end, 'notes': notes,
                               'triggered': []}
             events_data['incomplete'] = [e for e in incomplete if e.get('id') != entry['id']]
@@ -1525,6 +1558,7 @@ def api_activate_patient(homer_id):
                         'triggered_by':     {'type': 'activation', 'id': activation_entry_id},
                         'scheduled_date':   [now_hhmm, now_hhmm],
                         'filed_at':         filed_at,
+                        'filed_by':   _filer(),
                     })
                     triggered_refs.append({'type': 'adverse_event', 'id': new_id})
                 elif t == 'robot_issue_call':
@@ -1535,6 +1569,7 @@ def api_activate_patient(homer_id):
                         'triggered_by':     {'type': 'activation', 'id': activation_entry_id},
                         'scheduled_date':   [now_hhmm, now_hhmm],
                         'filed_at':         filed_at,
+                        'filed_by':   _filer(),
                     })
                     triggered_refs.append({'type': 'robot_issue_call', 'id': new_id})
                 elif t == 'other_device_issue_call':
@@ -1545,6 +1580,7 @@ def api_activate_patient(homer_id):
                         'triggered_by':     {'type': 'activation', 'id': activation_entry_id},
                         'scheduled_date':   [now_hhmm, now_hhmm],
                         'filed_at':         filed_at,
+                        'filed_by':   _filer(),
                     })
                     triggered_refs.append({'type': 'other_device_issue_call', 'id': new_id})
                 elif t == 'watch_record':
@@ -1649,6 +1685,7 @@ def api_log_activation_attempt(homer_id):
             'triggered_by':      {'type': 'activation_attempt', 'id': attempt_id},
             'scheduled_date':    [now_hhmm, now_hhmm],
             'filed_at':          filed_at,
+            'filed_by':   _filer(),
         }
         if training_stopped:
             stub['training_stopped'] = True
@@ -1666,6 +1703,7 @@ def api_log_activation_attempt(homer_id):
         'primary_reason':    primary_reason,
         'notes':             notes,
         'filed_at':          filed_at,
+        'filed_by':   _filer(),
         'triggered':         triggered_refs,
         'triggered_by':      None,
     }
@@ -1757,6 +1795,7 @@ def api_complete_prescription_printout(homer_id):
         **entry,
         'completion_date': now,
         'filed_at':        now,
+        'filed_by':   _filer(),
     }
 
     events_data['incomplete'] = [e for e in incomplete if e.get('id') != entry['id']]
@@ -1875,6 +1914,7 @@ def api_generate_prescription_pdf(homer_id):
                 **entry,
                 'completion_date': now,
                 'filed_at': now,
+                'filed_by':   _filer(),
                 'attachment': pdf_rel_path,
                 'attachment_caption': caption,
             }
@@ -2021,6 +2061,7 @@ def api_complete_simple_event(homer_id):
         **entry,
         'completion_date': completion_date,
         'filed_at':        filed_at,
+        'filed_by':   _filer(),
         'notes':           notes,
     }
     if protocol_event_id in _HOME_VISIT_IDS:
@@ -2167,6 +2208,7 @@ def api_complete_training_completion(homer_id):
         **entry,
         'completion_date':          completion_date,
         'filed_at':                 filed_at,
+        'filed_by':   _filer(),
         'notes':                    notes,
         'feedback_form_attachment': feedback_rel,
         'feedback_form_notes':      feedback_notes,
@@ -2294,6 +2336,7 @@ def api_complete_home_visit(homer_id):
                     'triggered_by':      {'type': source_protocol_id, 'id': source_entry_id},
                     'scheduled_date':    [now_hhmm, now_hhmm],
                     'filed_at':          filed_at,
+                    'filed_by':   _filer(),
                 }
                 if item.get('training_stopped'):
                     stub['training_stopped'] = True
@@ -2345,6 +2388,7 @@ def api_complete_home_visit(homer_id):
                 'primary_reason':    primary_reason,
                 'notes':             notes,
                 'filed_at':          filed_at,
+                'filed_by':   _filer(),
                 'triggered':         triggered_refs,
             })
             write_protocol_events(folder, homer_id, events_data)
@@ -2363,6 +2407,7 @@ def api_complete_home_visit(homer_id):
                 'training_not_done': True,
                 'primary_reason':    primary_reason,
                 'filed_at':          filed_at,
+                'filed_by':   _filer(),
                 'notes':             notes,
                 'triggered':         triggered_refs,
             }
@@ -2421,6 +2466,7 @@ def api_complete_home_visit(homer_id):
             'session_start':   session_start,
             'session_end':     session_end,
             'filed_at':        filed_at,
+            'filed_by':   _filer(),
             'notes':           notes,
             'triggered':       triggered_refs,
         }
@@ -2509,6 +2555,7 @@ def api_complete_adverse_event(homer_id):
         **entry,
         'completion_date':          completion_date,
         'filed_at':                 filed_at,
+        'filed_by':   _filer(),
         'description':              description,
         'action_taken':             action_taken,
         'training_blocked':         training_blocked,
@@ -2546,6 +2593,7 @@ def api_complete_adverse_event(homer_id):
             'scheduled_date':     [scheduled_followup_visit, scheduled_followup_visit],
             'triggered_by':       {'type': 'adverse_event', 'id': event_id},
             'filed_at':           filed_at,
+            'filed_by':   _filer(),
             'cancellable':        True,
         })
         write_patient_log(folder, homer_id, loginid, session_id, 'AE follow-up visit scheduled')
@@ -2559,6 +2607,7 @@ def api_complete_adverse_event(homer_id):
             'scheduled_date':     [scheduled_clinical_visit, scheduled_clinical_visit],
             'triggered_by':       {'type': 'adverse_event', 'id': event_id},
             'filed_at':           filed_at,
+            'filed_by':   _filer(),
             'cancellable':        True,
         })
         write_patient_log(folder, homer_id, loginid, session_id, 'AE clinical visit scheduled')
@@ -2579,6 +2628,7 @@ def api_complete_adverse_event(homer_id):
             'adverse_event_ids':   [event_id],
             'scheduled_date':      [today_str, tomorrow],
             'filed_at':            filed_at,
+            'filed_by':   _filer(),
         })
 
     # Also update any existing follow-up visit / clinical visit stubs so they
@@ -2700,6 +2750,7 @@ def api_complete_adverse_event_followup(homer_id):
         **entry,
         'completion_date':         completion_date,
         'filed_at':                filed_at,
+        'filed_by':   _filer(),
         'duration_minutes':        duration_minutes,
         'notes':                   notes,
         'ae_discussions':          ae_discussions,
@@ -2726,6 +2777,7 @@ def api_complete_adverse_event_followup(homer_id):
             'adverse_event_ids': unresolved_ids,
             'scheduled_date':    [today_str, tomorrow],
             'filed_at':          filed_at,
+            'filed_by':   _filer(),
         })
     else:
         # All AEs resolved — check if pause can be cleared
@@ -2902,6 +2954,7 @@ def _seed_next_ae_followup_or_clear(events_data, stub_ae_ids, ae_discussions, fr
                 'adverse_event_ids': unresolved_ids,
                 'scheduled_date':    [today_str, tomorrow],
                 'filed_at':          filed_at,
+                'filed_by':   _filer(),
             })
         else:
             existing['adverse_event_ids'] = unresolved_ids
@@ -2936,6 +2989,7 @@ def _create_ae_visit_stubs(events_data, source_type, source_id, ae_ids,
             'adverse_event_ids': list(ae_ids),
             'scheduled_date':    [scheduled_followup_visit, scheduled_followup_visit],
             'filed_at':          filed_at,
+            'filed_by':   _filer(),
             'triggered_by':      {'type': source_type, 'id': source_id},
         })
     if scheduled_clinical_visit and ae_ids:
@@ -2945,6 +2999,7 @@ def _create_ae_visit_stubs(events_data, source_type, source_id, ae_ids,
             'adverse_event_ids': list(ae_ids),
             'scheduled_date':    [scheduled_clinical_visit, scheduled_clinical_visit],
             'filed_at':          filed_at,
+            'filed_by':   _filer(),
             'triggered_by':      {'type': source_type, 'id': source_id},
         })
 
@@ -3042,6 +3097,7 @@ def api_complete_ae_followup_visit(homer_id):
         **entry,
         'completion_date':          visit_start,
         'filed_at':                 filed_at,
+        'filed_by':   _filer(),
         'visit_start':              visit_start,
         'visit_end':                visit_end,
         'ae_discussions':           ae_discussions,
@@ -3168,6 +3224,7 @@ def api_complete_ae_clinical_visit(homer_id):
         **entry,
         'completion_date':          visit_start,
         'filed_at':                 filed_at,
+        'filed_by':   _filer(),
         'visit_start':              visit_start,
         'visit_end':                visit_end,
         'ae_discussions':           ae_discussions,
@@ -3425,6 +3482,7 @@ def api_complete_robot_issue_call(homer_id):
             'completion_date':      completion_date,
             'issue_occur_date':     issue_occur_date,
             'filed_at':             filed_at,
+            'filed_by':   _filer(),
             'notes':                notes,
             'devices':              devices,
             'visit_required':       False,
@@ -3443,6 +3501,7 @@ def api_complete_robot_issue_call(homer_id):
         'completion_date':  completion_date,
         'issue_occur_date': issue_occur_date,
         'filed_at':         filed_at,
+        'filed_by':   _filer(),
         'notes':            notes,
         'devices':          devices,
         'visit_required':   visit_required,
@@ -3457,6 +3516,7 @@ def api_complete_robot_issue_call(homer_id):
             'triggered_by':      {'type': 'robot_issue_call', 'id': event_id},
             'scheduled_date':    [now_hhmm, now_hhmm],
             'filed_at':          filed_at,
+            'filed_by':   _filer(),
         })
         write_patient_log(folder, homer_id, loginid, session_id, 'Robot issue visit required.')
 
@@ -3589,6 +3649,7 @@ def api_complete_other_device_issue_call(homer_id):
             'completion_date':      completion_date,
             'issue_occur_date':     issue_occur_date,
             'filed_at':             filed_at,
+            'filed_by':   _filer(),
             'notes':                notes,
             'devices':              device_results,
             'visit_required':       False,
@@ -3672,6 +3733,7 @@ def api_complete_other_device_issue_call(homer_id):
         'completion_date':  completion_date,
         'issue_occur_date': issue_occur_date,
         'filed_at':         filed_at,
+        'filed_by':   _filer(),
         'notes':            notes,
         'devices':          device_results,
         'visit_required':   visit_required,
@@ -3688,6 +3750,7 @@ def api_complete_other_device_issue_call(homer_id):
             'triggered_by':      {'type': 'other_device_issue_call', 'id': event_id},
             'scheduled_date':    [now_hhmm, now_hhmm],
             'filed_at':          filed_at,
+            'filed_by':   _filer(),
         })
         write_patient_log(folder, homer_id, loginid, session_id,
                           'Other device issue — engineer visit required.')
@@ -3808,6 +3871,7 @@ def api_complete_other_device_issue_visit(homer_id):
             **entry,
             'completion_date':      completion_date,
             'filed_at':             filed_at,
+            'filed_by':   _filer(),
             'broken_protocol_mode': True,
             'device_faults':        device_faults,
             'notes':                notes,
@@ -3917,6 +3981,7 @@ def api_complete_other_device_issue_visit(homer_id):
         **entry,
         'completion_date':   completion_date,
         'filed_at':          filed_at,
+        'filed_by':   _filer(),
         'notes':             notes,
         'device_outcomes':   saved_outcomes,
         'attachment':        None,
@@ -4054,6 +4119,7 @@ def api_complete_robot_issue_visit(homer_id):
             **entry,
             'completion_date':   completion_date,
             'filed_at':          filed_at,
+            'filed_by':   _filer(),
             'broken_protocol_mode': True,
             'device_faults':     device_faults,
             'notes':             notes,
@@ -4120,7 +4186,7 @@ def api_complete_robot_issue_visit(homer_id):
                         'event_id':   event_id,
                         'swap_type':  'fault_driven',
                         'notes':      out_notes,
-                        'filed_by':   loginid,
+                        'filed_by':   _filer(),
                         'filed_at':   filed_at,
                         'resolution': None,
                     })
@@ -4167,6 +4233,7 @@ def api_complete_robot_issue_visit(homer_id):
         **entry,
         'completion_date': completion_date,
         'filed_at':        filed_at,
+        'filed_by':   _filer(),
         'device_outcomes': saved_outcomes,
         'notes':           notes,
     }
@@ -4189,6 +4256,7 @@ def api_complete_robot_issue_visit(homer_id):
             'triggered_by':      {'type': 'robot_issue_visit', 'id': event_id},
             'scheduled_date':    [now_hhmm, now_hhmm],
             'filed_at':          filed_at,
+            'filed_by':   _filer(),
         })
         write_patient_log(folder, homer_id, loginid, session_id,
                           'Training paused — robot issue (device taken back without replacement).')
@@ -4344,6 +4412,7 @@ def api_complete_resolve_robot_issue_visit(homer_id):
             **entry,
             'completion_date':      completion_date,
             'filed_at':             filed_at,
+            'filed_by':   _filer(),
             'broken_protocol_mode': True,
             'device_faults':        device_faults,
             'notes':                notes,
@@ -4437,7 +4506,7 @@ def api_complete_resolve_robot_issue_visit(homer_id):
                         'event_id':   event_id,
                         'swap_type':  'fault_driven',
                         'notes':      out_notes,
-                        'filed_by':   loginid,
+                        'filed_by':   _filer(),
                         'filed_at':   filed_at,
                         'resolution': None,
                     })
@@ -4476,6 +4545,7 @@ def api_complete_resolve_robot_issue_visit(homer_id):
         **entry,
         'completion_date':      completion_date,
         'filed_at':             filed_at,
+        'filed_by':   _filer(),
         'can_resume_from':      can_resume_from,
         'device_replacements':  saved_replacements,
         'other_device_outcomes': saved_other_outcomes,
@@ -4492,6 +4562,7 @@ def api_complete_resolve_robot_issue_visit(homer_id):
             'triggered_by':      {'type': 'resolve_robot_issue_visit', 'id': event_id},
             'scheduled_date':    [now_hhmm, now_hhmm],
             'filed_at':          filed_at,
+            'filed_by':   _filer(),
         })
 
     # Check if all pause causes are now resolved
@@ -4643,6 +4714,7 @@ def api_complete_followup_call(homer_id):
                 'triggered_by':     {'type': protocol_event_id, 'id': call_id},
                 'scheduled_date':   [now_hhmm, now_hhmm],
                 'filed_at':         filed_at,
+                'filed_by':   _filer(),
             })
             triggered_refs.append({'type': 'adverse_event', 'id': new_id})
 
@@ -4654,6 +4726,7 @@ def api_complete_followup_call(homer_id):
                 'triggered_by':     {'type': protocol_event_id, 'id': call_id},
                 'scheduled_date':   [now_hhmm, now_hhmm],
                 'filed_at':         filed_at,
+                'filed_by':   _filer(),
             })
             triggered_refs.append({'type': 'robot_issue_call', 'id': new_id})
 
@@ -4665,6 +4738,7 @@ def api_complete_followup_call(homer_id):
                 'triggered_by':     {'type': protocol_event_id, 'id': call_id},
                 'scheduled_date':   [now_hhmm, now_hhmm],
                 'filed_at':         filed_at,
+                'filed_by':   _filer(),
             })
             triggered_refs.append({'type': 'other_device_issue_call', 'id': new_id})
 
@@ -4684,6 +4758,7 @@ def api_complete_followup_call(homer_id):
         **entry,
         'completion_date':  completion_date,
         'filed_at':         filed_at,
+        'filed_by':   _filer(),
         'duration_minutes': duration_minutes,
         'notes':            notes,
         'triggered':        triggered_refs,
@@ -4794,6 +4869,7 @@ def api_complete_watch_record(homer_id):
         **entry,
         'completion_date':    completion_date,
         'filed_at':           filed_at,
+        'filed_by':   _filer(),
         'ag_watch_right':     {'old_id': old_right, 'old_lost': right_old_lost, 'new_id': ag_right_new},
         'ag_watch_left':      {'old_id': old_left,  'old_lost': left_old_lost,  'new_id': ag_left_new},
         'sync_datetime':      sync_datetime,
@@ -4804,6 +4880,44 @@ def api_complete_watch_record(homer_id):
 
     events_data['incomplete'] = [e for e in incomplete if e.get('id') != event_id]
     events_data.setdefault('complete', []).append(complete_entry)
+
+    # Read agwatch assignments once — used both to seed data-upload tasks (for the
+    # removed watch's assignment window) and for the assignment mutation loop below.
+    assignments = read_device_assignments(folder, 'agwatch')
+
+    # Seed a watch_data_upload task for each removed, recoverable (non-lost) watch.
+    # A watch is "removed" when it had an old id that differs from the new id (a swap,
+    # or a removal to a gap with new_id null). Lost watches are skipped — there is no
+    # physical device to pull data from. The engineer uploads the raw .gt3x later.
+    wdu_refs = []
+    for old_id, old_lost, new_id, limb in (
+        (old_right, right_old_lost, ag_right_new, 'right'),
+        (old_left,  left_old_lost,  ag_left_new,  'left'),
+    ):
+        if old_id and old_id != new_id and not old_lost:
+            assigned_date = next(
+                (a.get('assigned_date') for a in assignments
+                 if a.get('device_id') == old_id and a.get('homer_id') == homer_id
+                 and a.get('returned_date') is None),
+                None
+            )
+            wdu_id = str(uuid.uuid4())
+            events_data.setdefault('incomplete', []).append({
+                'id':                wdu_id,
+                'protocol_event_id': 'watch_data_upload',
+                'triggered_by':      {'type': 'watch_record', 'id': event_id},
+                'watch_id':          old_id,
+                'limb':              limb,
+                'removed_date':      completion_date,
+                'data_start':        assigned_date,
+                'data_end':          completion_date,
+                'scheduled_date':    [completion_date, completion_date],
+                'filed_at':          filed_at,
+                'filed_by':          _filer(),
+            })
+            wdu_refs.append({'type': 'watch_data_upload', 'id': wdu_id})
+    if wdu_refs:
+        complete_entry['triggered'] = wdu_refs
 
     # Seed next chain entry only if training has not permanently ended
     _training_ended = bool(
@@ -4834,9 +4948,9 @@ def api_complete_watch_record(homer_id):
     write_patient_meta(folder, homer_id, patient)
 
     # Update device assignments: close old open assignment, open new
+    # (assignments already read above for data-upload seeding)
     loginid    = flask_session.get('loginid', 'unknown')
     session_id = flask_session.get('session_id', -1)
-    assignments = read_device_assignments(folder, 'agwatch')
     lost_date_str = completion_date[:10]
     for old_id, old_lost, new_id, limb in (
         (old_right, right_old_lost, ag_right_new, 'right'),
@@ -4875,6 +4989,199 @@ def api_complete_watch_record(homer_id):
 
     write_patient_log(folder, homer_id, loginid, session_id, 'Watch record filed')
     return jsonify({'status': 'success'})
+
+
+# ── AG Watch Data Upload ───────────────────────────────────────────────────────
+
+def _save_watch_data_file(folder: str, homer_id: str, rel_path: str, file_obj) -> None:
+    """Persist an uploaded .gt3x (S3 or local) at <patient>/<rel_path>."""
+    if Config.USE_S3:
+        from utils.s3_store import s3_upload_file
+        import tempfile, os as _os
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.gt3x') as tmp:
+            file_obj.save(tmp.name)
+            tmp_path = tmp.name
+        try:
+            s3_upload_file(tmp_path, f"{folder}/patients/{homer_id}/{rel_path}",
+                           content_type='application/octet-stream')
+        finally:
+            _os.unlink(tmp_path)
+    else:
+        dest = get_patients_path(folder) / homer_id / rel_path
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        file_obj.save(str(dest))
+
+
+def _watch_data_staged(folder: str, homer_id: str, event_id: str) -> bool:
+    """True if a staged .gt3x exists for this event (uploaded but not yet completed)."""
+    rel = f'actigraphs/{event_id}.gt3x'
+    if Config.USE_S3:
+        from utils.s3_store import s3_key_exists
+        return s3_key_exists(f"{folder}/patients/{homer_id}/{rel}")
+    return (get_patients_path(folder) / homer_id / rel).exists()
+
+
+@bp.route('/api/patients/<homer_id>/upload-watch-data', methods=['POST'])
+def api_upload_watch_data(homer_id):
+    """Stage a raw .gt3x for a watch_data_upload task (step 1 of 2).
+
+    Fires the moment a file is chosen so the client can show an upload progress bar
+    and gate the Save button. Stores to actigraphs/<event_id>.gt3x (idempotent — a
+    re-selected file overwrites). The event is completed separately (JSON call).
+    """
+    if not flask_session.get('login_place'):
+        return jsonify({'error': 'Not authenticated'}), 401
+    if flask_session.get('privilege') not in ('admin', 'engineer'):
+        return jsonify({'error': 'Forbidden'}), 403
+    folder = find_patient_folder(flask_session['login_place'], homer_id)
+    if not folder:
+        return jsonify({'error': 'Patient not found'}), 404
+
+    event_id  = (request.form.get('event_id') or '').strip()
+    data_file = request.files.get('file')
+    if not event_id:
+        return jsonify({'error': 'event_id is required'}), 400
+    if not data_file or not data_file.filename:
+        return jsonify({'error': 'No file provided'}), 400
+    if not data_file.filename.lower().endswith('.gt3x'):
+        return jsonify({'error': 'Data file must be a .gt3x file.'}), 400
+
+    # Guard: only allow writes for an actual open watch_data_upload stub.
+    events_data = read_protocol_events(folder, homer_id)
+    stub = next(
+        (e for e in (events_data or {}).get('incomplete', [])
+         if e.get('id') == event_id and e.get('protocol_event_id') == 'watch_data_upload'),
+        None
+    )
+    if not stub:
+        return jsonify({'error': 'Watch data upload task not found in incomplete'}), 404
+
+    _save_watch_data_file(folder, homer_id, f'actigraphs/{event_id}.gt3x', data_file)
+    return jsonify({'ok': True, 'original_filename': data_file.filename})
+
+
+@bp.route('/api/patients/<homer_id>/complete-event/watch-data-upload', methods=['POST'])
+def api_complete_watch_data_upload(homer_id):
+    """Complete a watch_data_upload task (step 2 of 2): record metadata, or skip.
+
+    JSON request (the .gt3x was already staged via /upload-watch-data). Engineer/admin
+    only. Deliberately NOT blocked when the patient is discontinued — watch data must
+    remain uploadable.
+    """
+    if not flask_session.get('login_place'):
+        return jsonify({'error': 'Not authenticated'}), 401
+    if flask_session.get('privilege') not in ('admin', 'engineer'):
+        return jsonify({'error': 'Forbidden'}), 403
+    folder = find_patient_folder(flask_session['login_place'], homer_id)
+    if not folder:
+        return jsonify({'error': 'Patient not found'}), 404
+
+    data              = request.get_json() or {}
+    event_id          = (data.get('event_id') or '').strip()
+    skipped           = bool(data.get('skipped'))
+    notes             = (data.get('notes') or '').strip()
+    original_filename = (data.get('original_filename') or '').strip() or None
+
+    if not event_id:
+        return jsonify({'error': 'event_id is required'}), 400
+
+    if skipped:
+        if not notes:
+            return jsonify({'error': 'A detailed reason is required when the upload is skipped.'}), 400
+    else:
+        if not _watch_data_staged(folder, homer_id, event_id):
+            return jsonify({'error': 'Please upload the data file before saving.'}), 400
+
+    events_data = read_protocol_events(folder, homer_id)
+    if not events_data:
+        return jsonify({'error': 'Protocol events not found'}), 404
+    incomplete = events_data.get('incomplete', [])
+    entry = next(
+        (e for e in incomplete
+         if e.get('id') == event_id and e.get('protocol_event_id') == 'watch_data_upload'),
+        None
+    )
+    if not entry:
+        return jsonify({'error': 'Watch data upload task not found in incomplete'}), 404
+
+    filed_at        = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
+    completion_date = filed_at[:16]   # htDash upload/completion time — no engineer-entered date
+    data_file_rel   = f'actigraphs/{event_id}.gt3x'
+    if skipped:
+        original_filename = None
+        data_file_rel     = None
+        # Best-effort cleanup of any staged file the engineer uploaded then abandoned (local only).
+        if not Config.USE_S3:
+            try:
+                (get_patients_path(folder) / homer_id / f'actigraphs/{event_id}.gt3x').unlink(missing_ok=True)
+            except Exception:
+                pass
+
+    complete_entry = {
+        **entry,
+        'completion_date':   completion_date,
+        'filed_at':          filed_at,
+        'filed_by':          _filer(),
+        'data_file':         data_file_rel,
+        'original_filename': original_filename,
+        'skipped':           bool(skipped),
+        'notes':             notes,
+    }
+    events_data['incomplete'] = [e for e in incomplete if e.get('id') != event_id]
+    events_data.setdefault('free', {}).setdefault('watch_data_upload', []).append(complete_entry)
+    write_protocol_events(folder, homer_id, events_data)
+
+    loginid    = flask_session.get('loginid', 'unknown')
+    session_id = flask_session.get('session_id', -1)
+    log_msg    = 'AG watch data upload skipped' if skipped else 'AG watch data uploaded'
+    watch_id   = entry.get('watch_id')
+    if watch_id:
+        write_device_log(folder, watch_id, loginid, session_id, f'{log_msg} ({homer_id})')
+    write_patient_log(folder, homer_id, loginid, session_id, log_msg)
+    return jsonify({'status': 'success'})
+
+
+@bp.route('/api/patients/<homer_id>/watch-data/<event_id>', methods=['GET'])
+def api_download_watch_data(homer_id, event_id):
+    """Download the uploaded .gt3x for a watch_data_upload event.
+
+    Exception to the admin/therapist-only attachment rule: engineers may download
+    raw watch data, so admin, therapist, and engineer are all permitted.
+    """
+    from flask import send_file
+    if not flask_session.get('login_place'):
+        return jsonify({'error': 'Not authenticated'}), 401
+    if flask_session.get('privilege', '') not in ('admin', 'therapist', 'engineer'):
+        return jsonify({'error': 'Forbidden'}), 403
+    folder = find_patient_folder(flask_session['login_place'], homer_id)
+    if not folder:
+        return jsonify({'error': 'Patient not found'}), 404
+
+    events_data = read_protocol_events(folder, homer_id)
+    entry = None
+    if events_data:
+        for e in events_data.get('free', {}).get('watch_data_upload', []):
+            if e.get('id') == event_id:
+                entry = e
+                break
+    if not entry or not entry.get('data_file'):
+        return jsonify({'error': 'Data file not found'}), 404
+
+    rel           = entry['data_file']
+    download_name = entry.get('original_filename') or f'{event_id}.gt3x'
+    if Config.USE_S3:
+        from utils.s3_store import s3_get_bytes
+        import io
+        data = s3_get_bytes(f"{folder}/patients/{homer_id}/{rel}")
+        if data is None:
+            return jsonify({'error': 'Data file not found'}), 404
+        return send_file(io.BytesIO(data), mimetype='application/octet-stream',
+                         as_attachment=True, download_name=download_name)
+    path = get_patients_path(folder) / homer_id / rel
+    if not path.exists():
+        return jsonify({'error': 'Data file not found'}), 404
+    return send_file(str(path), mimetype='application/octet-stream',
+                     as_attachment=True, download_name=download_name)
 
 
 # ── AG Watch Timing endpoints ──────────────────────────────────────────────────
@@ -5098,6 +5405,7 @@ def api_complete_agwatch_timing(homer_id):
         **entry,
         'completion_date': filed_at,
         'filed_at':        filed_at,
+        'filed_by':   _filer(),
         'timing_file':     timing_rel,
     }
     events_data['incomplete'] = [e for e in incomplete if e.get('id') != entry['id']]
@@ -5377,6 +5685,7 @@ def api_log_patient_call(homer_id):
                 'triggered_by':     {'type': 'patient_call', 'id': call_id},
                 'scheduled_date':   [now_hhmm, now_hhmm],
                 'filed_at':         filed_at,
+                'filed_by':   _filer(),
             })
             triggered_refs.append({'type': 'adverse_event', 'id': new_id})
 
@@ -5388,6 +5697,7 @@ def api_log_patient_call(homer_id):
                 'triggered_by':     {'type': 'patient_call', 'id': call_id},
                 'scheduled_date':   [now_hhmm, now_hhmm],
                 'filed_at':         filed_at,
+                'filed_by':   _filer(),
             })
             triggered_refs.append({'type': 'robot_issue_call', 'id': new_id})
 
@@ -5399,6 +5709,7 @@ def api_log_patient_call(homer_id):
                 'triggered_by':     {'type': 'patient_call', 'id': call_id},
                 'scheduled_date':   [now_hhmm, now_hhmm],
                 'filed_at':         filed_at,
+                'filed_by':   _filer(),
             })
             triggered_refs.append({'type': 'other_device_issue_call', 'id': new_id})
 
@@ -5417,6 +5728,7 @@ def api_log_patient_call(homer_id):
         'id':               call_id,
         'completion_date':  completion_date,
         'filed_at':         filed_at,
+        'filed_by':   _filer(),
         'duration_minutes': duration_minutes,
         'call_type':        call_type,
         'reason':           reason if call_type == 'therapist_initiated' else None,
@@ -5561,7 +5873,7 @@ def api_complete_a1_assessment(homer_id):
         return jsonify({'error': 'A1 assessment event not found in incomplete list.'}), 404
 
     filed_at = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
-    complete_entry = {**entry, 'completion_date': a1_date, 'filed_at': filed_at, 'notes': notes}
+    complete_entry = {**entry, 'completion_date': a1_date, 'filed_at': filed_at, 'filed_by': _filer(), 'notes': notes}
     # Remove the assessment entry and any orphaned schedule-call stubs.
     events_data['incomplete'] = [
         e for e in events_data['incomplete']
@@ -5629,7 +5941,7 @@ def api_complete_a2_assessment(homer_id):
         return jsonify({'error': 'A2 assessment event not found in incomplete list.'}), 404
 
     filed_at = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
-    complete_entry = {**entry, 'completion_date': a2_date, 'filed_at': filed_at, 'notes': notes}
+    complete_entry = {**entry, 'completion_date': a2_date, 'filed_at': filed_at, 'filed_by': _filer(), 'notes': notes}
 
     # Auto-miss A1 if still incomplete.
     a1_entry = next(
@@ -5645,7 +5957,7 @@ def api_complete_a2_assessment(homer_id):
         except (TypeError, ValueError):
             _gap = 0.0
         a1_filed_at = (datetime.strptime(filed_at, '%Y-%m-%dT%H:%M:%S') - timedelta(seconds=_gap)).strftime('%Y-%m-%dT%H:%M:%S')
-        a1_missed = {**a1_entry, 'missed': True, 'missed_at': a1_filed_at[:16], 'filed_at': a1_filed_at}
+        a1_missed = {**a1_entry, 'missed': True, 'missed_at': a1_filed_at[:16], 'filed_at': a1_filed_at, 'filed_by': _filer()}
         patient['a1MissedDate'] = a1_filed_at
 
     # Remove A2, A1 (if being auto-missed), and any orphaned schedule-call stubs.
@@ -5708,7 +6020,7 @@ def api_miss_assessment(homer_id):
     filed_at  = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
     missed_at = filed_at[:16]
 
-    complete_entry = {**stub, 'missed': True, 'missed_at': missed_at, 'filed_at': filed_at}
+    complete_entry = {**stub, 'missed': True, 'missed_at': missed_at, 'filed_at': filed_at, 'filed_by': _filer()}
 
     # When marking A2 as missed, auto-miss A1 if still incomplete.
     a1_auto_missed = None
@@ -5725,7 +6037,7 @@ def api_miss_assessment(homer_id):
             except (TypeError, ValueError):
                 _gap = 0.0
             a1_filed_at = (datetime.strptime(filed_at, '%Y-%m-%dT%H:%M:%S') - timedelta(seconds=_gap)).strftime('%Y-%m-%dT%H:%M:%S')
-            a1_auto_missed = {**a1_stub, 'missed': True, 'missed_at': a1_filed_at[:16], 'filed_at': a1_filed_at}
+            a1_auto_missed = {**a1_stub, 'missed': True, 'missed_at': a1_filed_at[:16], 'filed_at': a1_filed_at, 'filed_by': _filer()}
 
     events_data['incomplete'] = [
         e for e in events_data['incomplete']
@@ -5906,6 +6218,7 @@ def api_complete_schedule_assessment_call(homer_id):
         **entry,
         'completion_date':    completion_date,
         'filed_at':           filed_at,
+        'filed_by':   _filer(),
         'duration_minutes':   duration_minutes,
         'notes':              notes,
         'new_appointment_date': new_appt_date,
@@ -8096,6 +8409,7 @@ def _complete_prescription_event(folder, homer_id, event_id, presc_file,
         **entry,
         'completion_date':   completion_date,
         'filed_at':          filed_at,
+        'filed_by':   _filer(),
         'prescription_file': presc_file,
     }
     events_data['incomplete'] = [e for e in incomplete if e['id'] != entry['id']]

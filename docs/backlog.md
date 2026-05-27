@@ -19,13 +19,15 @@ role-keyed `event_notes` on each event entry; immutable; `EvtNote-<R>-NNNN`
 aliases. See `docs/pages.md` → Retrospective Event Notes and CLAUDE.md →
 Patient Notes Tab → Retrospective event notes.
 
-## 2. Retrospective admin comments on all events and free notes
+## 2. Retrospective admin comments on all events and free notes ✅ Covered by [1]
 Admin can add comments, after the fact, on **any event** and on **free notes**
 (the Notes tab entries). Comment thread / annotation layer over existing
 records.
 
-**Status:** planned — needs design. Relates to [1] and to the immutable Notes
-tab (notes themselves stay immutable; comments are a separate overlay).
+**Status:** ✅ covered by the notes feature ([1]). Any role — admin included —
+can now add retrospective notes to any event from the Timeline, which serves the
+"admin comments on events" need. (A distinct per-free-note comment thread is not
+built; revisit only if that specific overlay is later required.)
 
 ## 3. Systematic access control across htDash
 A detailed, systematic role-based access-control design covering every page,
@@ -38,12 +40,16 @@ what.
 ## 4. AG Watch data upload event (engineer), per patient, on watch change
 A new **engineer event** to upload AG watch data for a patient whenever a watch
 is changed. **Seeded automatically** off events where a watch is swapped —
-i.e. Watch Records (`watch_record`) and any device-issue flow that swaps a
-watch — so the engineer is prompted to pull and upload the data from the
-removed watch.
+i.e. Watch Records (`watch_record`) and `device_return` — so the engineer is
+prompted to pull and upload the data from the removed watch.
 
-**Status:** planned — needs design (event definition, seeding triggers, where
-the uploaded data lands, file schema).
+**Status:** ✅ spec finalised — pending implementation (step 19c). Design
+decisions locked: raw ActiGraph `.gt3x` file; one task per removed (non-lost)
+watch; seeded by `watch_record` + `device_return`; skip-with-required-reason
+path when data is unrecoverable; data lands at `actigraphs/<event_id>.gt3x`;
+downloadable by admin/therapist/engineer. Full spec in `docs/pages.md` →
+AG Watch Data Upload, `docs/data_schemas.md` → `watch_data_upload`, and
+CLAUDE.md.
 
 ## 5. Final global lock of a patient record (admin)
 When everything for a patient is complete, the admin can apply a **final global

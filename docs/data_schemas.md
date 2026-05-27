@@ -93,7 +93,7 @@ patients/<homer_id>/
 ### Populating folders
 The patient folder and all subfolders are created when a new patient is enrolled.
 - `pluto/` and `mars/` — populated by devices uploading directly to S3
-- `actigraphs/` — uploaded periodically by the study engineer
+- `actigraphs/` — raw ActiGraph data files (`.gt3x`) uploaded by the study engineer via the `watch_data_upload` event. One file per upload, named by the event UUID: `actigraphs/<event_id>.gt3x`. See the `watch_data_upload` schema below.
 - `vcg_exercise/`, `adl/` — populated by the therapist via htDash
 - `protocol_events.json` — created when a patient is assigned to a group
 - `attachments/` — populated whenever an attachment is added to any protocol event
@@ -351,9 +351,12 @@ free        — unscheduled events (adverse_event, patient_call, etc.)
 ```json
 {
   "completion_date": "YYYY-MM-DDTHH:MM",
-  "filed_at": "YYYY-MM-DDTHH:MM:SS"
+  "filed_at": "YYYY-MM-DDTHH:MM:SS",
+  "filed_by": "<loginid>"
 }
 ```
+
+- `filed_by` — **every** filed event records the `loginid` of the user who filed it (server-stamped from the session at filing time). Applies to all `complete` entries and all completed `free.*` entries. (Notes use the equivalent `author` field.) Surfaced as "Filed by" on the Timeline.
 
 - `scheduled_date` — always a two-element list `[start, end]` where both are `"YYYY-MM-DDTHH:MM"`. For point-in-time events `start == end`. For windowed events (e.g. `a1_assessment` days 30–37) `start` and `end` differ. `null` for activation placeholders and free events. `[activationDate, activationDate]` for first `watch_record`.
   - `start` = `reference_date + start_day`, `end` = `reference_date + end_day`
@@ -527,6 +530,35 @@ For the initial record (first fill after activation), `old_id` is always `null` 
 | `"W001"` | `false`    | `null`   | Watch intentionally removed — gap starts |
 | `null`   | —          | `"W005"` | Missing watch replaced — gap ends |
 
+**`watch_data_upload`**
+```json
+{
+  "watch_id":        "W001",
+  "limb":            "right",
+  "removed_date":    "2026-04-10T11:30",
+  "data_start":      "2026-03-23T12:00",
+  "data_end":        "2026-04-10T11:30",
+  "triggered_by":    { "type": "watch_record | device_return", "id": "<uuid>" },
+  "data_file":       "actigraphs/<event_id>.gt3x",
+  "original_filename": "W001_20260410.gt3x",
+  "skipped":         false,
+  "notes":           ""
+}
+```
+
+- Engineer-only free event. **One entry per removed watch**, auto-seeded — never created via an "add" button. Seeded by `watch_record` (each non-lost swapped/removed limb) and `device_return` (each non-lost returned watch). Lost watches are never seeded (no device to pull data from).
+- `watch_id` / `limb`: the physical watch that was removed and the limb it was on.
+- `removed_date`: `completion_date` of the triggering event. The seeded stub's `scheduled_date` is `[removed_date, removed_date]`.
+- `data_start` / `data_end`: the watch's assignment window for this patient (`assigned_date` → `removed_date`), derived from the assignment record at seed time. Display-only context for the engineer.
+- `triggered_by`: back-reference to the `watch_record` / `device_return` entry that seeded this task. The triggering entry carries the reverse reference in its `triggered` array: `{ "type": "watch_data_upload", "id": "<uuid>" }`.
+- `data_file`: relative path to the stored `.gt3x` (`actigraphs/<event_id>.gt3x`), or `null` when skipped. The file is uploaded **on file-select** via `POST …/upload-watch-data` (see below), before the event is completed. The `.gt3x` is self-describing (device serial, recording start time, sample rate, per-sample timestamps); the clinically meaningful window is `data_start` → `data_end`, so no separate "data pulled" timestamp is stored.
+- `original_filename`: the engineer's uploaded filename (display only), or `null` when skipped.
+- `completion_date`: always `filed_at[:16]` — the htDash upload/completion time (there is no engineer-entered date on this event). `filed_at`/`filed_by` capture full provenance.
+- `skipped`: `true` when the data could not be retrieved. When `true`, `data_file` and `original_filename` are `null` and `notes` is required (detailed reason).
+
+**Upload flow (two-step):** the `.gt3x` is uploaded the moment a file is chosen — `POST /api/patients/<homer_id>/upload-watch-data` (multipart; engineer/admin; validates the file is `.gt3x` and that an open `watch_data_upload` stub with that `event_id` exists) stores it to `actigraphs/<event_id>.gt3x` (idempotent — re-selecting overwrites) and returns `{ok, original_filename}`. The completion call `POST …/complete-event/watch-data-upload` is then a **JSON** request (no file, no date) that verifies the staged file exists and records the metadata. The client shows an upload progress bar and keeps **Save disabled until the upload finishes** (or "skip" is checked).
+- Downloadable by `admin`, `therapist`, **and `engineer`** (deliberate exception to the admin/therapist-only attachment rule).
+
 **`adl_prescription_d01`** / **`adl_prescription_d15`**
 ```json
 { "prescription_file": "adl/adl_prescription_d01.json" }
@@ -580,6 +612,7 @@ Extra fields on `complete`:
   "adverse_event_clinical_visit":   [],
   "patient_call":                   [],
   "watch_record":                   [],
+  "watch_data_upload":              [],
   "activation_attempt":             [],
   "d15_attempt":                    [],
   "schedule_a1_call":               [],
@@ -1445,6 +1478,7 @@ Each event's group, type, window, clinical purpose, dependencies, and date sourc
 | `a1_assessment` | A1 Assessment | windowed | activation | day 30–37 | — | — | `user` | Post-training clinical outcome assessment conducted within one week of training completion. |
 | `a2_assessment` | A2 Assessment | windowed | activation | day 180–187 | — | — | `user` | Six-month follow-up clinical outcome assessment. |
 | `watch_record` | Watch Record | chained | — | — | — | — | `user` | Track actigraph watch assignments and swaps throughout the study. First entry seeded at activation; each completion seeds the next. Can also be triggered by activation, a patient call, or a follow-up call — the existing open chain entry is claimed (stamped with `triggered_by` and `scheduled_date` set to now) rather than a new entry being created. |
+| `watch_data_upload` | AG Watch Data Upload | anytime | — | — | — | — | `user` | Engineer pulls and uploads the raw ActiGraph `.gt3x` file from a watch each time it is physically removed. One stub auto-seeded per removed (non-lost) watch by `watch_record` and `device_return`. May be skipped with a required reason when data cannot be retrieved. Engineer/admin file it; admin/therapist/engineer download it. |
 | `adverse_event` | Adverse Event | anytime | — | — | — | — | `user` | Document any adverse event experienced by the patient during the intervention. Always triggered by a home visit or call event — never standalone. Two-phase: stub created in `incomplete` at trigger time; completed via standalone modal. May trigger a training pause. |
 | `patient_call` | Patient Call | anytime | — | — | — | — | `user` | Document any unscheduled contact with the patient or carer. May spawn `adverse_event`, `robot_issue_call` (exp only), and/or `watch_record` entries. |
 | `pre_discontinuation` | Pre-Discontinuation | anytime | — | — | — | — | `user` | Document withdrawal from the study before group assignment. |

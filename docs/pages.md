@@ -1336,6 +1336,47 @@ Same fault-documentation approach as `robot_issue_visit` broken-protocol mode. N
 
 ---
 
+### AG Watch Data Upload (`watch_data_upload`)
+
+Engineer event to pull and upload the raw ActiGraph data file (`.gt3x`) from a watch each time it is physically removed from a patient. **One task per removed watch.** Auto-seeded — there is no "add" button.
+
+- **Trigger:** `watch_data_upload` event row on patient detail (also surfaced on the Watch Records tab). Auto-seeded when a watch is **removed and recoverable**:
+  - **From `watch_record`:** for each limb where `old_id` is present, `old_id != new_id` (normal swap, or removal-to-gap with `new_id` null), and `old_lost` is **false**. One stub per such limb. Lost watches are never seeded — there is no device to pull data from.
+  - **From `device_return`:** for each watch returned at end of training whose status is **not** lost. One stub per returned watch. *(device_return is step 19b — the seeding hook is wired when that event is built.)*
+- **Allowed users:** `admin`, `engineer`
+- **Display name:** the event row name embeds the limb and watch id so the right/left tasks are distinguishable when a single swap removes both watches — e.g. **"AG Watch Data Upload — Right (WOLD1)"**. Computed per-entry in both event APIs (helper `_wdu_event_name`, mirrored in `routes/user_management.py` and `routes/dashboard.py`), the same way AE follow-up rows embed their AE aliases.
+- **Stub fields** (in `incomplete`, before fill):
+  - `triggered_by`: `{ type: "watch_record" | "device_return", id: <uuid of triggering entry> }`
+  - `watch_id`: the removed watch's device ID
+  - `limb`: `"right" | "left"`
+  - `removed_date`: triggering event's `completion_date` (`YYYY-MM-DDTHH:MM`)
+  - `data_start` / `data_end`: the watch's assignment window for this patient (`assigned_date` → `removed_date`), derived from the assignment record — shows the engineer the expected data range
+  - `scheduled_date`: `[removed_date, removed_date]` — surfaces immediately as actionable
+  - The triggering entry stores the reverse reference: `triggered: [{ type: "watch_data_upload", id }]`
+- **Modal:** `watch-data-upload-modal`
+  - **Context banner** (read-only): watch ID, limb, removed date, expected data range (`data_start` → `data_end`)
+  - **Data file** (file input, `.gt3x` only) — the raw ActiGraph file. **Uploads immediately on select** (see upload flow below): a progress bar shows 0–100%, and **Save stays disabled until the upload completes**. No engineer-entered date — the `.gt3x` is self-describing and the meaningful window is `data_start` → `data_end`; the htDash upload time is `filed_at`.
+  - **Skip toggle: "Data could not be retrieved"** — when checked, the file input + progress are hidden, a **detailed reason is required** in Notes, and Save becomes enabled; when unchecked, the `.gt3x` upload must complete before Save enables
+  - **Notes** (textarea) — optional when a file is uploaded; **required and detailed when the skip toggle is checked**
+- **Save-button gating:** Save opens **disabled**. It enables only when `uploaded || skip` — i.e. the `.gt3x` has finished uploading, or the skip toggle is checked.
+- **Two-step upload:**
+  - `POST /api/patients/<homer_id>/upload-watch-data` (multipart; engineer/admin) fires on file-select. Validates the file is `.gt3x` and that an open `watch_data_upload` stub with that `event_id` exists, stores it at `actigraphs/<event_id>.gt3x` (idempotent), returns `{ok, original_filename}`. The client uses `XMLHttpRequest` (`upload.onprogress`) to drive the progress bar — `fetch` can't report upload progress.
+  - `POST …/complete-event/watch-data-upload` is then a **JSON** call (no file) — see server actions.
+- **Validation** (client + server, identical rules):
+  - Not skipped → the staged `.gt3x` must exist (server verifies via `s3_key_exists` / `path.exists`)
+  - Skipped → a non-empty reason (Notes) is required
+- **Server actions** (complete call):
+  - Not skipped: verify the staged `actigraphs/<event_id>.gt3x` exists; record `data_file`, `original_filename`
+  - Skipped: best-effort delete any staged file (local); `data_file`/`original_filename` = `null`
+  - `completion_date` = `filed_at[:16]` in both cases (the htDash upload/completion time)
+  - Move the `watch_data_upload` entry from `incomplete` to `free.watch_data_upload`, adding `filed_at`, `filed_by`, `skipped` (bool), `notes`
+  - Write device log `AG watch data uploaded` / `AG watch data upload skipped` to the watch's log
+- **Download:** the uploaded `.gt3x` is downloadable by `admin`, `therapist`, and `engineer` — note this is a **deliberate exception** to the "admin/therapist only" attachment rule (engineers may download watch data). Surfaced on the Watch Records tab and the Timeline row. Endpoint: `GET /api/patients/<homer_id>/watch-data/<event_id>`
+- **Visibility:** included in `_BROKEN_PROTOCOL_INTERACTIVE`, `_DISCONTINUED_VISIBLE`, and `_PAUSE_VISIBLE` — the data must never be lost and engineer work does not pause
+- Log message: `AG watch data uploaded` (or `AG watch data upload skipped`)
+
+---
+
 ## Future Requirements
 
 ### Device Repair (Devices page — not yet implemented)
