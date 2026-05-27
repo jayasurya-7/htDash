@@ -1041,6 +1041,16 @@ function _fmtDate(raw) {
   return isNaN(d) ? raw : d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
+// Should a completed event's "Filed: ..." secondary line be shown? True only when
+// filed_at differs from completion_date on the date portion — same-day filings
+// (the common case) suppress the line to keep cards quiet. watch_data_upload is
+// always equal by design, so the line is suppressed for it regardless.
+function _showFiledLine(ev) {
+  if (!ev?.filed_at || !ev.completion_date) return false;
+  if (ev.protocol_event_id === 'watch_data_upload') return false;
+  return ev.completion_date.slice(0, 10) !== ev.filed_at.slice(0, 10);
+}
+
 // Fields always rendered in the main timeline layout — skip in extra fields
 const _TIMELINE_BASE_FIELDS = new Set([
   'id', 'protocol_event_id', 'event_name', 'scheduled_date',
@@ -1382,8 +1392,8 @@ function renderTimelineTab() {
   // Merge protocol events with synthetic patient milestones, sort most-recent first
   const all = [...(_completeEventsCache || []), ..._syntheticPatientEvents()];
   all.sort((a, b) => {
-    const ta = a.filed_at || a.completion_date || '';
-    const tb = b.filed_at || b.completion_date || '';
+    const ta = a.completion_date || a.filed_at || '';
+    const tb = b.completion_date || b.filed_at || '';
     return tb.localeCompare(ta);
   });
   _timelineEvents = all;
@@ -1437,7 +1447,7 @@ function _timelineMasterRow(ev, i, isLast, meta) {
   const schedDate = _eventSchedDate(ev);
   const schedStr  = _fmtDate(schedDate);
   const compStr   = ev.completion_date ? _fmtDateTime(ev.completion_date) : '—';
-  const filedStr  = ev.filed_at ? _fmtDateTime(ev.filed_at) : '';
+  const filedStr  = _showFiledLine(ev) ? _fmtDateTime(ev.filed_at) : '';
   const extra     = _timelineExtraFields(ev);
   const dayNum    = _dayNumber(ev.completion_date);
   const dayLabel  = dayNum !== null ? `Day ${dayNum}` : null;
@@ -1610,6 +1620,7 @@ function _callCard(c) {
   const dayBadge = dayNum !== null
     ? `<span class="text-xs font-semibold ${dayBadgeCls}">Day ${dayNum}</span>` : '';
   const dateStr  = c.completion_date ? _fmtDateTime(c.completion_date) : '—';
+  const filedStr = _showFiledLine(c) ? _fmtDateTime(c.filed_at) : '';
   const duration = c.duration_minutes ? `${c.duration_minutes} min` : '—';
 
   const triggered = (c.triggered || []).map(t =>
@@ -1631,9 +1642,12 @@ function _callCard(c) {
     <div class="bg-white rounded-xl border ${borderCls} shadow-sm mb-3 overflow-hidden">
       <div class="${headerBg} px-4 py-2.5 flex items-center justify-between">
         <span class="text-sm font-semibold ${titleCls}">${c.event_name || 'Patient Call'}</span>
-        <div class="flex items-center gap-3">
-          ${dayBadge}
-          <span class="text-xs text-slate-500">${dateStr}</span>
+        <div class="flex flex-col items-end">
+          <div class="flex items-center gap-3">
+            ${dayBadge}
+            <span class="text-xs text-slate-500">${dateStr}</span>
+          </div>
+          ${filedStr ? `<span class="text-[11px] text-slate-400">Filed: ${filedStr}</span>` : ''}
         </div>
       </div>
       <div class="px-4 py-3 space-y-1.5">
@@ -1737,9 +1751,10 @@ function _adverseEventCard(ev, followupEvents) {
   }
 
   const dayNum = _dayNumber(ev.completion_date);
+  const filedReportStr = _showFiledLine(ev) ? _fmtDate(ev.filed_at) : '';
   const sep    = `<span class="text-slate-300 mx-1.5">|</span>`;
   const metaParts = [
-    `<span class="text-xs text-slate-500"><span class="text-slate-400">Reported:</span> ${reportDateStr}</span>`,
+    `<span class="text-xs text-slate-500"><span class="text-slate-400">Reported:</span> ${reportDateStr}${filedReportStr ? ` <span class="text-slate-300">(filed ${filedReportStr})</span>` : ''}</span>`,
     resolveDateStr ? `<span class="text-xs text-slate-500"><span class="text-slate-400">Resolved:</span> ${resolveDateStr}</span>` : '',
     durationStr    ? `<span class="text-xs text-slate-500"><span class="text-slate-400">Duration:</span> ${durationStr}</span>` : '',
     dayNum !== null ? `<span class="text-xs text-slate-400">Day ${dayNum}</span>` : '',
@@ -1769,6 +1784,7 @@ function _adverseEventCard(ev, followupEvents) {
     const typeLabel = (_AEF_TYPE_LABELS[fe.protocol_event_id] || fe.protocol_event_id)
       + (aeAliases ? `: ${aeAliases}` : '');
     const feDate    = fe.completion_date ? _fmtDateTime(fe.completion_date) : '—';
+    const feFiled   = _showFiledLine(fe) ? _fmtDateTime(fe.filed_at) : '';
     const feNotes   = fe.notes   ? `<p class="text-xs text-slate-500 mt-0.5">${fe.notes}</p>`        : '';
     const discNotes = disc?.notes ? `<p class="text-xs text-slate-500 mt-0.5 italic">${disc.notes}</p>` : '';
     const resumeStr = disc?.can_resume_from
@@ -1784,7 +1800,7 @@ function _adverseEventCard(ev, followupEvents) {
       <div class="py-2 border-t border-slate-100">
         <div class="flex items-center justify-between flex-wrap gap-1 mb-0.5">
           <span class="text-xs font-medium text-slate-700">${typeLabel}</span>
-          <span class="text-xs text-slate-400">${feDate}</span>
+          <span class="text-xs text-slate-400">${feDate}${feFiled ? ` <span class="text-slate-300">(filed ${feFiled})</span>` : ''}</span>
         </div>
         ${feNotes}${discNotes}
         <div class="mt-1 flex items-center gap-3 flex-wrap">${statusEl}${feAttach}</div>
@@ -1941,6 +1957,7 @@ function _watchRecordCard(wr) {
   const dayNum   = _dayNumber(wr.completion_date);
   const dayBadge = dayNum !== null ? `<span class="text-xs font-semibold text-indigo-500">Day ${dayNum}</span>` : '';
   const dateStr  = wr.completion_date ? _fmtDateTime(wr.completion_date) : '—';
+  const filedStr = _showFiledLine(wr) ? _fmtDateTime(wr.filed_at) : '';
 
   const rightRow = _watchAssignmentRow('right', wr);
   const leftRow  = _watchAssignmentRow('left', wr);
@@ -1970,9 +1987,12 @@ function _watchRecordCard(wr) {
     <div class="bg-white rounded-xl border border-indigo-200 shadow-sm mb-3 overflow-hidden">
       <div class="bg-indigo-50 border-b border-indigo-100 px-4 py-2.5 flex items-center justify-between">
         <span class="text-sm font-semibold text-indigo-800">Watch Record</span>
-        <div class="flex items-center gap-3">
-          ${dayBadge}
-          <span class="text-xs text-slate-500">${dateStr}</span>
+        <div class="flex flex-col items-end">
+          <div class="flex items-center gap-3">
+            ${dayBadge}
+            <span class="text-xs text-slate-500">${dateStr}</span>
+          </div>
+          ${filedStr ? `<span class="text-[11px] text-slate-400">Filed: ${filedStr}</span>` : ''}
         </div>
       </div>
       <div class="px-4 py-3 space-y-1.5">
@@ -2008,6 +2028,7 @@ function _robotIssueCard(ev) {
   const dayNum   = _dayNumber(ev.completion_date);
   const dayBadge = dayNum !== null ? `<span class="text-xs font-semibold text-orange-500">Day ${dayNum}</span>` : '';
   const dateStr  = ev.completion_date ? _fmtDateTime(ev.completion_date) : '—';
+  const filedStr = _showFiledLine(ev) ? _fmtDateTime(ev.filed_at) : '';
 
   let triggerStr = '';
   if (ev.triggered_by) {
@@ -2047,9 +2068,12 @@ function _robotIssueCard(ev) {
     <div class="bg-white rounded-xl border border-orange-200 shadow-sm mb-3 overflow-hidden">
       <div class="bg-orange-50 border-b border-orange-100 px-4 py-2.5 flex items-center justify-between">
         <span class="text-sm font-semibold text-orange-800">Robot Issue</span>
-        <div class="flex items-center gap-3">
-          ${dayBadge}
-          <span class="text-xs text-slate-500">${dateStr}</span>
+        <div class="flex flex-col items-end">
+          <div class="flex items-center gap-3">
+            ${dayBadge}
+            <span class="text-xs text-slate-500">${dateStr}</span>
+          </div>
+          ${filedStr ? `<span class="text-[11px] text-slate-400">Filed: ${filedStr}</span>` : ''}
         </div>
       </div>
       <div class="px-4 py-3 space-y-1.5">
@@ -3583,10 +3607,14 @@ async function saveResolveRobotIssueVisit() {
 
 function completedTimeline(events) {
   const _ASSESS_PIDS_CT = new Set(['a1_assessment', 'a2_assessment']);
+  const _fmtCT = (raw) => {
+    const d = raw ? new Date(raw) : null;
+    return d ? d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }) : '—';
+  };
   const items = events.map((ev, i) => {
     const raw = ev.completion_date || ev.filed_at || '';
-    const d   = raw ? new Date(raw) : null;
-    const dateStr = d ? d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }) : '—';
+    const dateStr  = _fmtCT(raw);
+    const filedStr = _showFiledLine(ev) ? _fmtCT(ev.filed_at) : '';
     const isLast  = i === events.length - 1;
     const isDisc  = ev.protocol_event_id === 'discontinuation';
     const isAssEv = _ASSESS_PIDS_CT.has(ev.protocol_event_id);
@@ -3610,6 +3638,7 @@ function completedTimeline(events) {
         ${isLast ? '' : '<div class="absolute left-[8px] top-4 bottom-0 w-0.5 bg-green-100"></div>'}
         <p class="${nameCls}">${ev.event_name}</p>
         <p class="text-xs text-slate-400 mt-0.5">${dateStr}</p>
+        ${filedStr ? `<p class="text-[11px] text-slate-300 leading-tight">Filed: ${filedStr}</p>` : ''}
         ${badge}
       </div>`;
   }).join('');

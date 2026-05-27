@@ -674,7 +674,7 @@ def api_patient_events(homer_id):
         item['protocol_event_id'] = 'discontinuation'
         complete_list.append(item)
 
-    complete_list.sort(key=lambda x: x.get('filed_at') or x.get('completion_date') or '', reverse=True)
+    complete_list.sort(key=lambda x: x.get('completion_date') or x.get('filed_at') or '', reverse=True)
 
     # Retrospective event notes are role-private — never expose their content here. Emit
     # only a role-filtered count (therapist/engineer: own bucket; admin: all), then strip
