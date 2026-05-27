@@ -775,14 +775,17 @@ Discontinuing a patient is a two-step process: (1) a `discontinuation` stub is c
   - Notes (textarea, required)
   - **Therapist initiated** (toggle, default off) — indicates an unplanned outbound call by the therapist (e.g. following up after an adverse event). Protocol follow-up calls (D7/D21) are not recorded here. When toggled on, a **Reason** field (textarea, required) appears to document why the call was made outside the normal protocol.
   - **Adverse event(s) discussed** (checkbox, default unchecked) — indicates that one or more ongoing adverse events were discussed during this call. Stored as `ae_discussed: true/false`. Used on the Adverse Events tab to show that a patient call touched an AE, and allows follow-up calls to reference this patient call as the initiating contact when `patient_initiated: true`.
-  - **Triggered events section** — optional; user selects which downstream events arose from this call:
+  - **Call mode (required)** — two pills (Audio / Video), no default. Therapist must pick one before save. Stored as `call_mode: "audio" | "video"`. Same field on `followup_call_d07` and `followup_call_d21`.
+  - **What came out of this call? (required)** — the user must explicitly state the outcome. Five toggles, with **mutual exclusion** between "No issue" and any of the other four:
+    - **No issue** (toggle, both groups): the call had no downstream consequence. Sits at the top of the group. When checked, all four issue toggles below are disabled; when any issue toggle is checked, this toggle is disabled. Stored as `no_issue: true` on the call record.
     - **Adverse Event** (toggle, both groups): if enabled, shows an info note only — no sub-form fields
     - **Robot Issue** (toggle, experimental only — hidden for control patients): if enabled, shows an info note only — no sub-form fields
     - **Watch Record** (toggle, both groups): only shown if at least one watch is currently assigned (`agWatchRightID` or `agWatchLeftID` is not null); if enabled, shows an info note — no sub-form fields
-  - Multiple toggles may be enabled simultaneously
+    - **Other Device Issue** (toggle, experimental only — hidden for control patients): if enabled, shows an info note only — no sub-form fields
+  - Multiple issue toggles may be enabled simultaneously when "No issue" is not selected. Save is blocked until either "No issue" or at least one issue toggle is checked (the client shows an error; the server enforces `no_issue XOR len(triggered) > 0`).
   - Attachment (optional PDF)
 - Server actions:
-  - Append `patient_call` entry to `free.patient_call` in `protocol_events.json`, with `call_type`, `reason` (if therapist initiated), `ae_discussed`, `triggered: [...]`
+  - Append `patient_call` entry to `free.patient_call` in `protocol_events.json`, with `call_type`, `call_mode`, `reason` (if therapist initiated), `ae_discussed`, `no_issue`, `triggered: [...]`
   - For each enabled toggle:
     - **Adverse event**: append a stub to `incomplete` with `protocol_event_id = "adverse_event"`, `scheduled_date = [now, now]`, `triggered_by: {type: "patient_call", id: <call_id>}` — stub is completed later via the standalone `adverse-event-modal`
     - **Robot issue** (exp only): append a `robot_issue_call` stub to `incomplete` with `triggered_by: {type: "patient_call", id: <call_id>}`, `scheduled_date: [now, now]` — no intermediate `robot_issue` event

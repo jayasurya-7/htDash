@@ -189,7 +189,10 @@ function _attachDateGuard(inputId, errorId) {
 }
 
 function _validateDateInput(input, errorId) {
-  // Comprehensive validation for keyboard-entered dates against min/max constraints
+  // Comprehensive validation for keyboard-entered dates against min/max constraints.
+  // Error messages always include the time when the input is datetime-local so
+  // datetime-precision bounds (e.g. "must be after device setup at 14:30") are
+  // unambiguous. For date-only inputs the time is omitted.
   if (!input.value) {
     setError(errorId, '');
     return true;
@@ -198,50 +201,124 @@ function _validateDateInput(input, errorId) {
   const value = input.value;
   let errorMsg = '';
 
-  // Check min constraint
   if (input.min && value < input.min) {
-    const minDate = input.min.includes('T') ? input.min.split('T')[0] : input.min;
-    const valueDate = value.includes('T') ? value.split('T')[0] : value;
-    errorMsg = `Date cannot be before ${_formatDateForDisplay(minDate)}.`;
-  }
-
-  // Check max constraint
-  if (!errorMsg && input.max && value > input.max) {
-    const maxDate = input.max.includes('T') ? input.max.split('T')[0] : input.max;
-    const valueDate = value.includes('T') ? value.split('T')[0] : value;
-    errorMsg = `Date cannot be after ${_formatDateForDisplay(maxDate)}.`;
+    errorMsg = `Date cannot be before ${_formatDateForDisplay(input.min)}.`;
+  } else if (input.max && value > input.max) {
+    errorMsg = `Date cannot be after ${_formatDateForDisplay(input.max)}.`;
   }
 
   setError(errorId, errorMsg);
   return !errorMsg;
 }
 
-// Date Rule Framework — Phase 1. Sweep every <input type="date"> and
-// <input type="datetime-local"> in the given modal and apply the universal
-// completion-date bounds: floor = activationDate || enrollDate, ceiling = today.
-// Inputs that carry data-date-rule="scheduling" (future/scheduling dates) are
-// skipped. Additive: only sets min/max when the opener hasn't already set a
-// (stricter) bound, so per-modal custom bounds are preserved. Hooked into
-// showModal so every modal gets covered automatically. See CLAUDE.md →
-// "Date Rule Framework".
+// Date Rule Framework — client mirror of utils/date_validation.py. The rules
+// spec is rendered server-side as window.DATE_RULES (so client and server
+// stay in lock-step). Each modal-open hooks _applyDateBounds via showModal;
+// per-input data-event-id selects the per-event rule when present, otherwise
+// the default rule applies. Inputs marked data-date-rule="scheduling" skip
+// the framework entirely. See CLAUDE.md → "Date Rule Framework".
+
+const _DSL_OFFSET = /^([A-Za-z_]\w*)\s*([+-])\s*(\d+)d$/;
+
+function _dtFromInput(s) {
+  // Parse 'YYYY-MM-DD' or 'YYYY-MM-DDTHH:MM[:SS]' to a Date built from local
+  // components (Date.parse with a date-only string treats it as UTC, which
+  // shifts the date in non-UTC zones — avoid that).
+  if (!s) return null;
+  const v = s.replace(' ', 'T');
+  const m = v.match(/^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}))?/);
+  if (!m) return null;
+  return new Date(+m[1], +m[2] - 1, +m[3], +(m[4] || 0), +(m[5] || 0), 0, 0);
+}
+function _atMidnight(d) { return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0); }
+function _atEod(d)      { return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 0, 0); }
+function _addDays(d, n) { const r = new Date(d); r.setDate(r.getDate() + n); return r; }
+
+function _latestCompletion(events, eventId) {
+  // Most recent completion_date among completed entries (complete[] + free[*])
+  // matching the given protocol_event_id. _completeEventsCache merges both.
+  let best = null;
+  for (const e of (events || [])) {
+    if (e.protocol_event_id !== eventId || !e.completion_date) continue;
+    if (best === null || e.completion_date > best) best = e.completion_date;
+  }
+  return best;
+}
+
+function _resolveToken(token, patient, events, role) {
+  // role: 'floor' or 'ceiling'. Mirrors _resolve_token in utils/date_validation.py.
+  const t = (token || '').trim();
+  if (t === 'today') {
+    const now = new Date();
+    return role === 'ceiling'
+      ? new Date(now.getFullYear(), now.getMonth(), now.getDate(), now.getHours(), now.getMinutes(), 0, 0)
+      : _atMidnight(now);
+  }
+  if (t.startsWith('event:')) {
+    const eid = t.slice('event:'.length).trim();
+    const comp = _latestCompletion(_completeEventsCache, eid);
+    return comp ? _dtFromInput(comp) : null;
+  }
+  const m = t.match(_DSL_OFFSET);
+  if (m) {
+    const [, field, sign, n] = m;
+    const base = _dtFromInput((patient || {})[field]);
+    if (!base) return null;
+    const shifted = _addDays(base, sign === '+' ? +n : -+n);
+    return role === 'ceiling' ? _atEod(shifted) : _atMidnight(shifted);
+  }
+  // Bare patient-field — normalized to midnight/EOD so a patient activated at
+  // 11:00 still allows earlier-time events on the same day.
+  const base = _dtFromInput((patient || {})[t]);
+  if (!base) return null;
+  return role === 'ceiling' ? _atEod(base) : _atMidnight(base);
+}
+
+function _ruleForEvent(eventId, group) {
+  const rules = window.DATE_RULES || {};
+  const spec  = (rules.events || {})[eventId];
+  if (!spec || typeof spec !== 'object') return null;
+  if ('experimental' in spec || 'control' in spec) return group ? spec[group] : null;
+  return spec;
+}
+
+function _resolveDateBounds(eventId) {
+  // Returns {min: Date|null, max: Date|null} for the given event_id (or the
+  // default rule when no per-event override exists).
+  const rules   = window.DATE_RULES || {};
+  const patient = patientData || {};
+  const rule    = _ruleForEvent(eventId, patient.group) || rules.default_completion_rule || {};
+  const nb = (rule.not_before || []).map(t => _resolveToken(t, patient, _completeEventsCache, 'floor')).filter(Boolean);
+  const na = (rule.not_after  || []).map(t => _resolveToken(t, patient, _completeEventsCache, 'ceiling')).filter(Boolean);
+  return {
+    min: nb.length ? new Date(Math.max(...nb.map(d => d.getTime()))) : null,
+    max: na.length ? new Date(Math.min(...na.map(d => d.getTime()))) : null,
+  };
+}
+
+function _toInputValue(d, isDateTime) {
+  // YYYY-MM-DD or YYYY-MM-DDTHH:MM in local time (mirrors _nowForInput style).
+  const pad = n => String(n).padStart(2, '0');
+  const ymd = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  return isDateTime ? `${ymd}T${pad(d.getHours())}:${pad(d.getMinutes())}` : ymd;
+}
+
+// Hooked into showModal — sweeps every <input type="date"> and <input
+// type="datetime-local"> in the modal and applies bounds resolved by the DSL.
+// Additive: only sets min/max when the opener hasn't already set a (stricter)
+// bound, so per-modal custom bounds are preserved.
 function _applyDateBounds(modalElOrId, errorId) {
   const modalEl = typeof modalElOrId === 'string'
     ? document.getElementById(modalElOrId) : modalElOrId;
   if (!modalEl) return;
 
-  const p = patientData || {};
-  const floor = p.activationDate || p.enrollDate || null;
-  const floorDate = floor ? floor.slice(0, 10) : null;
-  const todayDate = _nowForInput().slice(0, 10);
-  const todayDT   = _nowForInput();
-
   modalEl.querySelectorAll('input[type="date"], input[type="datetime-local"]').forEach(input => {
     if (input.dataset.dateRule === 'scheduling') return;
     const isDateTime = input.type === 'datetime-local';
-    // Additive — preserve any min/max the opener already set (e.g. AE modal's
-    // tighter bounds based on the AE issue date).
-    if (!input.min && floorDate) input.min = isDateTime ? `${floorDate}T00:00` : floorDate;
-    if (!input.max)              input.max = isDateTime ? todayDT : todayDate;
+    const { min: minDt, max: maxDt } = _resolveDateBounds(input.dataset.eventId || null);
+
+    if (!input.min && minDt) input.min = _toInputValue(minDt, isDateTime);
+    if (!input.max && maxDt) input.max = _toInputValue(maxDt, isDateTime);
 
     const errId = input.dataset.dateError || errorId;
     if (!errId) return;
@@ -256,8 +333,17 @@ function _applyDateBounds(modalElOrId, errorId) {
 }
 
 function _formatDateForDisplay(dateStr) {
-  // Convert YYYY-MM-DD to readable format (e.g., "30 Apr 2026")
+  // Format an input attribute value (YYYY-MM-DD or YYYY-MM-DDTHH:MM) for an
+  // error message. When the string carries a time component (datetime-local
+  // inputs), the time is always included — even at midnight — so the user
+  // can see precisely where the bound falls (e.g. "after device setup at 14:30").
   try {
+    if (typeof dateStr === 'string' && dateStr.includes('T')) {
+      const d = new Date(dateStr);
+      const date = d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+      const time = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+      return `${date} ${time}`;
+    }
     const d = new Date(dateStr + 'T00:00:00');
     return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
   } catch {
@@ -266,18 +352,33 @@ function _formatDateForDisplay(dateStr) {
 }
 
 function _hasDateValidationErrors(errorElementIds) {
-  // Check if any date validation error elements have visible errors
-  // errorElementIds: array of error element IDs to check (e.g., ['activation-error', 'device-setup-error'])
-  // Returns: true if any errors are visible, false if all clear
-  if (!errorElementIds || errorElementIds.length === 0) return false;
+  // Re-validates every date / datetime-local input in each modal that contains
+  // one of the given error elements. Returns true if any input's value is
+  // outside its min/max bounds.
+  //
+  // Important: this used to inspect the textual content of the named error
+  // elements, but those elements are shared between the date validator and
+  // other validation messages (outcome group, custom field errors). A leftover
+  // non-date message would be misread as a date error and block submission
+  // even after the underlying issue was fixed. Re-validating the inputs
+  // directly is robust against that.
+  if (!errorElementIds) return false;
+  if (!Array.isArray(errorElementIds)) errorElementIds = [errorElementIds];
 
+  const seenModals = new Set();
   for (const errorId of errorElementIds) {
     const el = document.getElementById(errorId);
-    if (el && !el.classList.contains('hidden') && el.textContent.trim()) {
-      return true; // Found a visible error
+    if (!el) continue;
+    const modal = el.closest('[id$="-modal"]');
+    if (!modal || seenModals.has(modal)) continue;
+    seenModals.add(modal);
+    for (const input of modal.querySelectorAll('input[type="date"], input[type="datetime-local"]')) {
+      if (!input.value) continue;
+      if (input.min && input.value < input.min) return true;
+      if (input.max && input.value > input.max) return true;
     }
   }
-  return false; // No visible errors
+  return false;
 }
 
 function setLoading(btnId, loading) {
@@ -1086,14 +1187,28 @@ function _fmtDate(raw) {
   return isNaN(d) ? raw : d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
-// Should a completed event's "Filed: ..." secondary line be shown? True only when
-// filed_at differs from completion_date on the date portion — same-day filings
-// (the common case) suppress the line to keep cards quiet. watch_data_upload is
-// always equal by design, so the line is suppressed for it regardless.
+// Newest-first comparator for completed-event lists. Primary key is
+// completion_date (falling back to filed_at when absent — synthetic milestones,
+// legacy data); tiebreaker is filed_at descending so events that share a
+// clinical date appear in reverse filing order (last filed at the top). Mirrors
+// the server-side sort in routes/user_management.py — keep the two in sync.
+function _cmpCompletedDesc(a, b) {
+  const ka = a.completion_date || a.filed_at || '';
+  const kb = b.completion_date || b.filed_at || '';
+  const c = kb.localeCompare(ka);
+  if (c !== 0) return c;
+  return (b.filed_at || '').localeCompare(a.filed_at || '');
+}
+
+// Should a completed event's "Filed: ..." secondary line be shown? True whenever
+// filed_at is recorded — the line surfaces who/when the event was filed even on
+// same-day filings (useful for audit). watch_data_upload is the one exception:
+// its completion_date equals filed_at[:16] by construction (the upload time IS
+// the completion time), so the second line would be pure repetition.
 function _showFiledLine(ev) {
   if (!ev?.filed_at || !ev.completion_date) return false;
   if (ev.protocol_event_id === 'watch_data_upload') return false;
-  return ev.completion_date.slice(0, 10) !== ev.filed_at.slice(0, 10);
+  return true;
 }
 
 // Fields always rendered in the main timeline layout — skip in extra fields
@@ -1436,11 +1551,7 @@ function renderTimelineTab() {
 
   // Merge protocol events with synthetic patient milestones, sort most-recent first
   const all = [...(_completeEventsCache || []), ..._syntheticPatientEvents()];
-  all.sort((a, b) => {
-    const ta = a.completion_date || a.filed_at || '';
-    const tb = b.completion_date || b.filed_at || '';
-    return tb.localeCompare(ta);
-  });
+  all.sort(_cmpCompletedDesc);
   _timelineEvents = all;
 
   if (!all.length) {
@@ -1635,7 +1746,7 @@ function _renderCallLogs(container, data) {
     ...(data.followup_calls || []).map(c => ({ ...c, _callType: 'followup' })),
     ...(data.patient_calls  || []).map(c => ({ ...c, _callType: 'patient'  })),
   ];
-  all.sort((a, b) => (b.completion_date || '').localeCompare(a.completion_date || ''));
+  all.sort(_cmpCompletedDesc);
 
   if (!all.length) {
     container.innerHTML = `
@@ -1692,7 +1803,7 @@ function _callCard(c) {
             ${dayBadge}
             <span class="text-xs text-slate-500">${dateStr}</span>
           </div>
-          ${filedStr ? `<span class="text-[11px] text-slate-400">Filed: ${filedStr}</span>` : ''}
+          ${filedStr ? `<span class="text-xs text-slate-400">Filed: ${filedStr}</span>` : ''}
         </div>
       </div>
       <div class="px-4 py-3 space-y-1.5">
@@ -1720,7 +1831,7 @@ function renderAdverseEventsTab() {
 
   const aeEvents = (_completeEventsCache || [])
     .filter(e => e.protocol_event_id === 'adverse_event')
-    .sort((a, b) => (b.completion_date || '').localeCompare(a.completion_date || '')); // newest first
+    .sort(_cmpCompletedDesc); // newest first
 
   if (!aeEvents.length) {
     container.innerHTML = `
@@ -1747,7 +1858,7 @@ function _adverseEventCard(ev, followupEvents) {
   // Find all follow-ups referencing this AE, sorted chronologically
   const related = followupEvents
     .filter(fe => (fe.ae_discussions || []).some(d => d.adverse_event_id === ev.id))
-    .sort((a, b) => (b.completion_date || '').localeCompare(a.completion_date || ''));
+    .sort(_cmpCompletedDesc);
 
   let resolvedEntry = null;
   for (const fe of related) {
@@ -1796,7 +1907,7 @@ function _adverseEventCard(ev, followupEvents) {
   }
 
   const dayNum = _dayNumber(ev.completion_date);
-  const filedReportStr = _showFiledLine(ev) ? _fmtDate(ev.filed_at) : '';
+  const filedReportStr = _showFiledLine(ev) ? _fmtDateTime(ev.filed_at) : '';
   const sep    = `<span class="text-slate-300 mx-1.5">|</span>`;
   const metaParts = [
     `<span class="text-xs text-slate-500"><span class="text-slate-400">Reported:</span> ${reportDateStr}${filedReportStr ? ` <span class="text-slate-300">(filed ${filedReportStr})</span>` : ''}</span>`,
@@ -1891,7 +2002,7 @@ function renderWatchRecordsTab() {
 
   const records = (_completeEventsCache || [])
     .filter(e => e.protocol_event_id === 'watch_record')
-    .sort((a, b) => (b.completion_date || '').localeCompare(a.completion_date || ''));
+    .sort(_cmpCompletedDesc);
 
   // AG Watch data-upload tasks: outstanding (incomplete) + completed (free).
   const uploadsOpen = (eventsCache || [])
@@ -2037,7 +2148,7 @@ function _watchRecordCard(wr) {
             ${dayBadge}
             <span class="text-xs text-slate-500">${dateStr}</span>
           </div>
-          ${filedStr ? `<span class="text-[11px] text-slate-400">Filed: ${filedStr}</span>` : ''}
+          ${filedStr ? `<span class="text-xs text-slate-400">Filed: ${filedStr}</span>` : ''}
         </div>
       </div>
       <div class="px-4 py-3 space-y-1.5">
@@ -2056,7 +2167,7 @@ function renderRobotIssuesTab() {
 
   const issues = (_completeEventsCache || [])
     .filter(e => e.protocol_event_id === 'robot_issue_call')
-    .sort((a, b) => (b.completion_date || '').localeCompare(a.completion_date || ''));
+    .sort(_cmpCompletedDesc);
 
   if (!issues.length) {
     container.innerHTML = `
@@ -2118,7 +2229,7 @@ function _robotIssueCard(ev) {
             ${dayBadge}
             <span class="text-xs text-slate-500">${dateStr}</span>
           </div>
-          ${filedStr ? `<span class="text-[11px] text-slate-400">Filed: ${filedStr}</span>` : ''}
+          ${filedStr ? `<span class="text-xs text-slate-400">Filed: ${filedStr}</span>` : ''}
         </div>
       </div>
       <div class="px-4 py-3 space-y-1.5">
@@ -3659,7 +3770,7 @@ function completedTimeline(events) {
   const items = events.map((ev, i) => {
     const raw = ev.completion_date || ev.filed_at || '';
     const dateStr  = _fmtCT(raw);
-    const filedStr = _showFiledLine(ev) ? _fmtCT(ev.filed_at) : '';
+    const filedStr = _showFiledLine(ev) ? _fmtDateTime(ev.filed_at) : '';
     const isLast  = i === events.length - 1;
     const isDisc  = ev.protocol_event_id === 'discontinuation';
     const isAssEv = _ASSESS_PIDS_CT.has(ev.protocol_event_id);
@@ -3683,7 +3794,7 @@ function completedTimeline(events) {
         ${isLast ? '' : '<div class="absolute left-[8px] top-4 bottom-0 w-0.5 bg-green-100"></div>'}
         <p class="${nameCls}">${ev.event_name}</p>
         <p class="text-xs text-slate-400 mt-0.5">${dateStr}</p>
-        ${filedStr ? `<p class="text-[11px] text-slate-300 leading-tight">Filed: ${filedStr}</p>` : ''}
+        ${filedStr ? `<p class="text-xs text-slate-400 leading-tight">Filed: ${filedStr}</p>` : ''}
         ${badge}
       </div>`;
   }).join('');
@@ -3787,11 +3898,15 @@ function patientEventRow(ev) {
 
   const blocked   = !onHold && ev.blocked_by && ev.blocked_by.length > 0;
   const hasOpener = !!EVENT_OPENERS[ev.protocol_event_id];
+  // Must be kept in sync with _DISCONTINUED_VISIBLE in routes/user_management.py
+  // and routes/dashboard.py. If the server shows a row but this set omits its
+  // type, the row appears but cannot be opened (silent clickability gate).
   const _DISCONTINUED_VISIBLE = new Set([
     'adverse_event', 'adverse_event_followup',
     'adverse_event_followup_visit', 'adverse_event_clinical_visit',
     'a1_assessment', 'a2_assessment',
     'schedule_a1_call', 'schedule_a2_call',
+    'device_return',
     'watch_data_upload',
   ]);
   const discontinuedBlocks = _patientDiscontinued && !_DISCONTINUED_VISIBLE.has(ev.protocol_event_id);
@@ -3971,15 +4086,6 @@ let _activationEventId = null;
 let _activationTrainingCompleted = null; // null = not chosen, true = yes, false = no
 let _actNoPrimaryReason          = null;
 
-function _actToggleSubform(type) {
-  const noteId = {
-    adverse: 'act-adverse-note', robot: 'act-robot-note',
-    watch: 'act-watch-note', 'other-device': 'act-other-device-note',
-  }[type];
-  const checked = document.getElementById(`act-trigger-${type}`).checked;
-  if (noteId) document.getElementById(noteId).classList.toggle('hidden', !checked);
-}
-
 function _actNoToggleSubform(type) {
   const noteId = {
     adverse: 'act-no-adverse-note', robot: 'act-no-robot-note',
@@ -4087,14 +4193,11 @@ async function openActivationModal(evId) {
   if (vcgRow) vcgRow.classList.toggle('hidden', !isControl);
   if (vcgSel) vcgSel.value = '';
 
-  ['adverse', 'robot', 'watch', 'other-device'].forEach(type => {
-    const cb = document.getElementById(`act-trigger-${type}`);
-    if (cb) { cb.checked = false; _actToggleSubform(type); }
-  });
   document.getElementById('act-trigger-robot-wrap').classList.toggle('hidden', !isExperimental);
   document.getElementById('act-trigger-watch-wrap').classList.toggle('hidden',
     !(patientData?.agWatchRightID || patientData?.agWatchLeftID));
   document.getElementById('act-trigger-other-device-wrap').classList.toggle('hidden', !isExperimental);
+  _outcomeReset('act');
 
   // Reset NO section fields
   _actNoPrimaryReason = null;
@@ -4170,19 +4273,11 @@ async function submitActivation() {
   }
   if (!_validateAttachment('activation', 'activation-error')) return;
 
-  const triggered = [];
-  if (document.getElementById('act-trigger-adverse').checked)
-    triggered.push({ type: 'adverse_event' });
-  if (!document.getElementById('act-trigger-robot-wrap').classList.contains('hidden') &&
-      document.getElementById('act-trigger-robot').checked)
-    triggered.push({ type: 'robot_issue_call' });
-  if (!document.getElementById('act-trigger-watch-wrap').classList.contains('hidden') &&
-      document.getElementById('act-trigger-watch').checked)
-    triggered.push({ type: 'watch_record' });
-  if (!document.getElementById('act-trigger-other-device-wrap').classList.contains('hidden') &&
-      document.getElementById('act-trigger-other-device').checked)
-    triggered.push({ type: 'other_device_issue_call' });
+  const outcomeErrAct = _outcomeError('act');
+  if (outcomeErrAct) { setError('activation-error', outcomeErrAct); return; }
+  const { no_issue: noIssueAct, triggered } = _outcomeRead('act');
   body.triggered = triggered;
+  body.no_issue  = noIssueAct;
 
   setLoading('activation-submit', true);
   const { ok, data } = await apiPost(`/api/patients/${PATIENT_HOMER_ID}/activate`, body);
@@ -5892,18 +5987,6 @@ let _hvNoPrimaryReason   = null;
 
 const _HV_ACTIVATION_OFFSETS = { home_visit_d02: 1, home_visit_d03: 2 };
 
-function _hvToggleSubform(type) {
-  const map = {
-    adverse:         'hv-adverse-note',
-    robot:           'hv-robot-note',
-    watch:           'hv-watch-note',
-    'other-device':  'hv-other-device-note',
-  };
-  const noteId = map[type];
-  if (!noteId) return;
-  const checked = document.getElementById(`hv-trigger-${type}`).checked;
-  document.getElementById(noteId).classList.toggle('hidden', !checked);
-}
 
 function _hvNoToggleSubform(type) {
   const map = {
@@ -6037,15 +6120,12 @@ function openHomeVisitModal(ev) {
     document.getElementById('hv-date-lock-note').classList.add('hidden');
   }
 
-  ['adverse', 'robot', 'watch', 'other-device'].forEach(type => {
-    const cb = document.getElementById(`hv-trigger-${type}`);
-    if (cb) { cb.checked = false; _hvToggleSubform(type); }
-  });
   const isExpHv = patientData?.group === 'experimental';
   document.getElementById('hv-trigger-robot-wrap').classList.toggle('hidden', !isExpHv);
   document.getElementById('hv-trigger-other-device-wrap').classList.toggle('hidden', !isExpHv);
   document.getElementById('hv-trigger-watch-wrap').classList.toggle('hidden',
     !(patientData?.agWatchRightID || patientData?.agWatchLeftID));
+  _outcomeReset('hv');
 
   // ── NO section setup ──
   _hvNoPrimaryReason = null;
@@ -6112,18 +6192,9 @@ async function _saveHomeVisitYes() {
   if (sessionStart >= sessionEnd) { setError('hv-error', 'Session end must be after session start.'); return; }
   if (!_validateAttachment('hv', 'hv-error')) return;
 
-  const triggered = [];
-  if (document.getElementById('hv-trigger-adverse').checked)
-    triggered.push({ type: 'adverse_event' });
-  if (!document.getElementById('hv-trigger-robot-wrap').classList.contains('hidden') &&
-      document.getElementById('hv-trigger-robot').checked)
-    triggered.push({ type: 'robot_issue_call' });
-  if (!document.getElementById('hv-trigger-watch-wrap').classList.contains('hidden') &&
-      document.getElementById('hv-trigger-watch').checked)
-    triggered.push({ type: 'watch_record' });
-  if (!document.getElementById('hv-trigger-other-device-wrap').classList.contains('hidden') &&
-      document.getElementById('hv-trigger-other-device').checked)
-    triggered.push({ type: 'other_device_issue_call' });
+  const outcomeErrHv = _outcomeError('hv');
+  if (outcomeErrHv) { setError('hv-error', outcomeErrHv); return; }
+  const { no_issue: noIssueHv, triggered } = _outcomeRead('hv');
 
   saveBtn.disabled = true;
   const { ok, data } = await apiPost(`/api/patients/${PATIENT_HOMER_ID}/complete-event/home-visit`, {
@@ -6132,6 +6203,7 @@ async function _saveHomeVisitYes() {
     session_start:     sessionStart,
     session_end:       sessionEnd,
     notes,
+    no_issue:          noIssueHv,
     triggered,
   });
   if (!ok) { setError('hv-error', data.error || 'Failed to save.'); saveBtn.disabled = false; return; }
@@ -6228,13 +6300,6 @@ function _followupCallCheckDateChange() {
   }
 }
 
-// Toggle a triggered sub-form on/off and clear its fields when hidden
-function _fcToggleSubform(type) {
-  const noteId  = { adverse: 'fc-adverse-note', robot: 'fc-robot-note', watch: 'fc-watch-note' }[type];
-  const checked = document.getElementById(`fc-trigger-${type}`).checked;
-  document.getElementById(noteId).classList.toggle('hidden', !checked);
-}
-
 function _fcSelectAeDiscussed(discussed) {
   document.getElementById('fc-ae-discussed').value = discussed ? 'yes' : 'no';
   _fcStyleAeBtn(discussed);
@@ -6259,6 +6324,7 @@ function openFollowupCallModal(ev) {
   document.getElementById('followup-call-title').textContent             = ev.event_name;
   document.getElementById('followup-call-date').value                    = '';
   document.getElementById('followup-call-duration').value                = '';
+  document.querySelectorAll('input[name="fc-call-mode"]').forEach(r => { r.checked = false; });
   document.getElementById('followup-call-notes').value                   = '';
   _resetAttachment('followup-call');
   document.getElementById('followup-call-date-reason').value             = '';
@@ -6266,11 +6332,6 @@ function openFollowupCallModal(ev) {
   document.getElementById('followup-call-scheduled-display').textContent = _followupCallScheduledDate || '';
   document.getElementById('followup-call-date').addEventListener('change', _followupCallCheckDateChange, { once: false });
 
-  // Reset triggered section
-  ['adverse', 'robot', 'watch'].forEach(type => {
-    const cb = document.getElementById(`fc-trigger-${type}`);
-    if (cb) { cb.checked = false; _fcToggleSubform(type); }
-  });
   // Robot Issue and ODI only shown for experimental patients
   const isExpFc = patientData?.group === 'experimental';
   const robotWrap = document.getElementById('fc-trigger-robot-wrap');
@@ -6279,6 +6340,7 @@ function openFollowupCallModal(ev) {
   // Watch Record only shown when at least one watch is currently assigned
   const watchWrap = document.getElementById('fc-trigger-watch-wrap');
   if (watchWrap) watchWrap.classList.toggle('hidden', !(patientData?.agWatchRightID || patientData?.agWatchLeftID));
+  _outcomeReset('fc');
 
   // Show AE discussion section only when an adverse_event_followup stub exists.
   const hasAefStubFc = eventsCache.some(e => e.protocol_event_id === 'adverse_event_followup');
@@ -6305,9 +6367,11 @@ async function saveFollowupCall() {
   err.classList.add('hidden');
 
   const dateChanged = !reasonWrap.classList.contains('hidden');
+  const callMode    = document.querySelector('input[name="fc-call-mode"]:checked')?.value || '';
 
   if (!dateVal)                            { err.textContent = 'Call date is required.';                    err.classList.remove('hidden'); return; }
   if (!duration || parseInt(duration) < 1) { err.textContent = 'Duration must be at least 1 minute.';       err.classList.remove('hidden'); return; }
+  if (!callMode)                           { err.textContent = 'Call mode (Audio / Video) is required.';    err.classList.remove('hidden'); return; }
   if (dateChanged && !dateReason)          { err.textContent = 'Please explain why the date is different.'; err.classList.remove('hidden'); return; }
   if (!notes)                              { err.textContent = 'Notes are required.';                       err.classList.remove('hidden'); return; }
   if (!_validateAttachment('followup-call', 'followup-call-error')) return;
@@ -6320,27 +6384,18 @@ async function saveFollowupCall() {
     return;
   }
 
-  // Collect triggered items
-  const triggered = [];
-
-  if (document.getElementById('fc-trigger-adverse').checked)
-    triggered.push({ type: 'adverse_event' });
-  if (!document.getElementById('fc-trigger-robot-wrap').classList.contains('hidden') &&
-      document.getElementById('fc-trigger-robot').checked)
-    triggered.push({ type: 'robot_issue_call' });
-  if (!document.getElementById('fc-trigger-watch-wrap').classList.contains('hidden') &&
-      document.getElementById('fc-trigger-watch').checked)
-    triggered.push({ type: 'watch_record' });
-  if (!document.getElementById('fc-trigger-other-device-wrap').classList.contains('hidden') &&
-      document.getElementById('fc-trigger-other-device').checked)
-    triggered.push({ type: 'other_device_issue_call' });
+  const outcomeErr = _outcomeError('fc');
+  if (outcomeErr) { err.textContent = outcomeErr; err.classList.remove('hidden'); return; }
+  const { no_issue: noIssueFc, triggered } = _outcomeRead('fc');
 
   const body = {
     event_id:          _followupCallEventId,
     protocol_event_id: _followupCallProtocolEventId,
     completion_date:   dateVal,
     duration_minutes:  parseInt(duration),
+    call_mode:         callMode,
     notes,
+    no_issue:          noIssueFc,
     triggered,
     ...(dateChanged ? { date_change_reason: dateReason } : {}),
   };
@@ -6374,13 +6429,126 @@ async function saveFollowupCall() {
   }
 }
 
-// ── Patient Call modal ────────────────────────────────────────────────────────
+// ── Outcome group ("What came out of this …?") — shared by patient_call,
+// followup_call, activation, home_visit modals ────────────────────────────────
+//
+// Each modal that uses the outcome group has five toggles with a shared naming
+// convention: `{prefix}-trigger-no-issue` plus four issue toggles
+// `{prefix}-trigger-{adverse|robot|watch|other-device}`. Per-toggle info notes
+// are at `{prefix}-{type}-note`. Visibility wraps are at
+// `{prefix}-trigger-{type}-wrap` (used to hide group/feature-specific toggles —
+// e.g. robot/other-device are hidden for control patients). The four prefixes:
+//   'pc'  → patient_call modal
+//   'fc'  → followup_call modal
+//   'act' → activation modal (YES path)
+//   'hv'  → home_visit modal (YES path)
+//
+// Convention: "No issue" is mutually exclusive with the four issue toggles.
+// Checking one side disables and dims the other. Save is gated on either
+// "No issue" or at least one issue toggle being checked. See CLAUDE.md →
+// "Outcome group convention".
 
-function _pcToggleSubform(type) {
-  const noteId  = { adverse: 'pc-adverse-note', robot: 'pc-robot-note', watch: 'pc-watch-note' }[type];
-  const checked = document.getElementById(`pc-trigger-${type}`).checked;
-  document.getElementById(noteId).classList.toggle('hidden', !checked);
+const _OUTCOME_ISSUE_TYPES = ['adverse', 'robot', 'watch', 'other-device'];
+
+const _OUTCOME_TRIGGER_API_TYPES = {
+  adverse:        'adverse_event',
+  robot:          'robot_issue_call',
+  watch:          'watch_record',
+  'other-device': 'other_device_issue_call',
+};
+
+// Show/hide the inline info note for an issue toggle.
+function _outcomeUpdateNote(prefix, type) {
+  const note = document.getElementById(`${prefix}-${type}-note`);
+  if (!note) return;
+  const cb = document.getElementById(`${prefix}-trigger-${type}`);
+  note.classList.toggle('hidden', !cb?.checked);
 }
+
+// Mutual-exclusion driver. Called by each toggle's onchange handler with the
+// type of the changed toggle (so we can update its info note), or with no
+// argument when called from a reset / initial render.
+function _outcomeChange(prefix, changedType) {
+  if (changedType) _outcomeUpdateNote(prefix, changedType);
+
+  const noIssueCb   = document.getElementById(`${prefix}-trigger-no-issue`);
+  if (!noIssueCb) return;
+  const noIssueNote = document.getElementById(`${prefix}-no-issue-note`);
+
+  const anyIssueChecked = _OUTCOME_ISSUE_TYPES.some(t => {
+    const cb = document.getElementById(`${prefix}-trigger-${t}`);
+    return cb && cb.checked;
+  });
+
+  if (noIssueNote) noIssueNote.classList.toggle('hidden', !noIssueCb.checked);
+
+  noIssueCb.disabled = anyIssueChecked;
+  _OUTCOME_ISSUE_TYPES.forEach(t => {
+    const cb = document.getElementById(`${prefix}-trigger-${t}`);
+    if (!cb) return;
+    cb.disabled = noIssueCb.checked;
+    const label = cb.closest('label');
+    if (label) label.classList.toggle('opacity-50', cb.disabled);
+  });
+  const noIssueLabel = noIssueCb.closest('label');
+  if (noIssueLabel) noIssueLabel.classList.toggle('opacity-50', noIssueCb.disabled);
+
+  // Quality-of-life: if the user just made the outcome valid by selecting
+  // something, clear the stale "Please indicate what came out of this..."
+  // message so the error display matches the new state. Only clear when the
+  // current message is an outcome-group error — avoids wiping unrelated
+  // messages from other validators.
+  if (changedType !== undefined && (noIssueCb.checked || anyIssueChecked)) {
+    const modal = noIssueCb.closest('[id$="-modal"]');
+    const errId = modal && modal.dataset.dateError;
+    const errEl = errId && document.getElementById(errId);
+    if (errEl && errEl.textContent.includes('came out of this')) {
+      setError(errId, '');
+    }
+  }
+}
+
+// Reset every toggle in the outcome group to unchecked and refresh the
+// notes + disabled/dimmed state. Called by each modal's opener.
+function _outcomeReset(prefix) {
+  const noIssueCb = document.getElementById(`${prefix}-trigger-no-issue`);
+  if (noIssueCb) noIssueCb.checked = false;
+  _OUTCOME_ISSUE_TYPES.forEach(t => {
+    const cb = document.getElementById(`${prefix}-trigger-${t}`);
+    if (cb) cb.checked = false;
+    _outcomeUpdateNote(prefix, t);
+  });
+  _outcomeChange(prefix);
+}
+
+// Read the outcome group's current state. Returns { no_issue, triggered }.
+// Toggles whose visibility wrap (`{prefix}-trigger-{type}-wrap`) is hidden are
+// treated as unchecked, so non-experimental patients don't accidentally send
+// robot/other-device triggers even if the checkbox state survived a re-open.
+function _outcomeRead(prefix) {
+  const noIssue = !!document.getElementById(`${prefix}-trigger-no-issue`)?.checked;
+  const triggered = [];
+  for (const t of _OUTCOME_ISSUE_TYPES) {
+    const wrap = document.getElementById(`${prefix}-trigger-${t}-wrap`);
+    if (wrap && wrap.classList.contains('hidden')) continue;
+    const cb = document.getElementById(`${prefix}-trigger-${t}`);
+    if (cb?.checked) triggered.push({ type: _OUTCOME_TRIGGER_API_TYPES[t] });
+  }
+  return { no_issue: noIssue, triggered };
+}
+
+// Returns an error string when the outcome selection is invalid (neither side
+// picked), else null. UI also disables the opposite side once one is selected,
+// but this is the defensive gate before submit.
+function _outcomeError(prefix) {
+  const { no_issue, triggered } = _outcomeRead(prefix);
+  if (!no_issue && triggered.length === 0) {
+    return 'Please indicate what came out of this (select "No issue" or one of the issue types).';
+  }
+  return null;
+}
+
+// ── Patient Call modal ────────────────────────────────────────────────────────
 
 function _pcToggleTherapistInitiated() {
   const checked = document.getElementById('pc-therapist-initiated').checked;
@@ -6391,20 +6559,18 @@ function openPatientCallModal() {
   document.getElementById('pc-date').value     = '';
   document.getElementById('pc-duration').value = '';
   document.getElementById('pc-notes').value    = '';
+  document.querySelectorAll('input[name="pc-call-mode"]').forEach(r => { r.checked = false; });
   document.getElementById('pc-therapist-initiated').checked = false;
   document.getElementById('pc-reason-wrap').classList.add('hidden');
   document.getElementById('pc-reason').value = '';
   _resetAttachment('pc');
 
-  ['adverse', 'robot', 'watch'].forEach(type => {
-    const cb = document.getElementById(`pc-trigger-${type}`);
-    if (cb) { cb.checked = false; _pcToggleSubform(type); }
-  });
   const isExpPc = patientData?.group === 'experimental';
   document.getElementById('pc-trigger-robot-wrap').classList.toggle('hidden', !isExpPc);
   document.getElementById('pc-trigger-other-device-wrap').classList.toggle('hidden', !isExpPc);
   document.getElementById('pc-trigger-watch-wrap').classList.toggle('hidden',
     !(patientData?.agWatchRightID || patientData?.agWatchLeftID));
+  _outcomeReset('pc');
 
   setError('pc-error', '');
   _attachDateGuard('pc-date', 'pc-error');
@@ -6417,24 +6583,17 @@ async function savePatientCall() {
   const notes    = document.getElementById('pc-notes').value.trim();
   const saveBtn  = document.getElementById('pc-save');
 
+  const callMode = document.querySelector('input[name="pc-call-mode"]:checked')?.value || '';
+
   if (!dateVal)                            { setError('pc-error', 'Call date is required.'); return; }
   if (!duration || parseInt(duration) < 1) { setError('pc-error', 'Duration must be at least 1 minute.'); return; }
+  if (!callMode)                           { setError('pc-error', 'Call mode (Audio / Video) is required.'); return; }
   if (!notes)                              { setError('pc-error', 'Notes are required.'); return; }
   if (!_validateAttachment('pc', 'pc-error')) return;
 
-  const triggered = [];
-
-  if (document.getElementById('pc-trigger-adverse').checked)
-    triggered.push({ type: 'adverse_event' });
-  if (!document.getElementById('pc-trigger-robot-wrap').classList.contains('hidden') &&
-      document.getElementById('pc-trigger-robot').checked)
-    triggered.push({ type: 'robot_issue_call' });
-  if (!document.getElementById('pc-trigger-watch-wrap').classList.contains('hidden') &&
-      document.getElementById('pc-trigger-watch').checked)
-    triggered.push({ type: 'watch_record' });
-  if (!document.getElementById('pc-trigger-other-device-wrap').classList.contains('hidden') &&
-      document.getElementById('pc-trigger-other-device').checked)
-    triggered.push({ type: 'other_device_issue_call' });
+  const outcomeErr = _outcomeError('pc');
+  if (outcomeErr) { setError('pc-error', outcomeErr); return; }
+  const { no_issue: noIssue, triggered } = _outcomeRead('pc');
 
   const therapistInitiated = document.getElementById('pc-therapist-initiated').checked;
   const reason = document.getElementById('pc-reason').value.trim();
@@ -6445,8 +6604,8 @@ async function savePatientCall() {
   saveBtn.disabled = true;
   const { ok, data } = await apiPost(
     `/api/patients/${PATIENT_HOMER_ID}/log-patient-call`,
-    { completion_date: dateVal, duration_minutes: parseInt(duration), notes, triggered,
-      call_type, reason: therapistInitiated ? reason : undefined }
+    { completion_date: dateVal, duration_minutes: parseInt(duration), notes, triggered, no_issue: noIssue,
+      call_type, call_mode: callMode, reason: therapistInitiated ? reason : undefined }
   );
   if (!ok) { setError('pc-error', data.error || 'Failed to save.'); saveBtn.disabled = false; return; }
 

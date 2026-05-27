@@ -259,6 +259,12 @@ def events():
                 continue
 
         completed_ids = {e['protocol_event_id'] for e in events_data.get('complete', [])}
+        # Free-event types (e.g. watch_record) count as completed once at least
+        # one entry has been filed, so depends_on can reference them. Kept in
+        # sync with the same rule in routes/user_management.py.
+        for free_type, free_list in (events_data.get('free') or {}).items():
+            if free_list:
+                completed_ids.add(free_type)
         known_ids     = completed_ids | {e['protocol_event_id'] for e in events_data.get('incomplete', [])}
         patient_defs  = group_defs.get(patient.get('group', ''), {})
         ae_alias_map  = {

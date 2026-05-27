@@ -2,7 +2,22 @@
   "$schema_version": 1,
   "default_completion_rule": {
     "not_before": ["activationDate", "enrollDate"],
-    "not_after":  "today"
+    "not_after":  ["today"]
   },
-  "events": {}
+  "events": {
+    "exp_device_install": {
+      "not_before": ["enrollDate"],
+      "not_after":  ["enrollDate + 5d", "today"]
+    },
+    "activation": {
+      "experimental": {
+        "not_before": ["enrollDate", "event:exp_device_install"],
+        "not_after":  ["enrollDate + 5d", "today"]
+      },
+      "control": {
+        "not_before": ["enrollDate"],
+        "not_after":  ["enrollDate + 5d", "today"]
+      }
+    }
+  }
 }

@@ -408,7 +408,8 @@ Any event entry — in `complete[]` or in a completed `free.*[]` entry — may c
 {
   "session_start": "YYYY-MM-DDTHH:MM",
   "session_end":   "YYYY-MM-DDTHH:MM",
-  "notes": ""
+  "no_issue":      false,
+  "notes":         ""
 }
 ```
 
@@ -417,6 +418,7 @@ Any event entry — in `complete[]` or in a completed `free.*[]` entry — may c
   2. `session_end` must be strictly **after** `session_start`
   3. Future-date guard applies to `session_start`
   - `completion_date` is set to `session_start` — no separate event date is recorded.
+- `no_issue`: `true` when the therapist explicitly selected "No issue" in the outcome group (the "What came out of this visit?" section, YES path only). Mutually exclusive with a non-empty `triggered` list. See the outcome-group convention in CLAUDE.md. The NO path (training not completed) does **not** carry this field — the primary reason for incompletion is the outcome there.
 - `notes`: optional free text.
 
 **Training completion visit** (`training_completion_d29`)
@@ -444,20 +446,24 @@ Any event entry — in `complete[]` or in a completed `free.*[]` entry — may c
 ```json
 {
   "duration_minutes": 15,
+  "call_mode": "audio | video",
+  "no_issue": false,
   "attachment": "attachments/followup_call_d07.pdf",
   "notes": "",
   "date_change_reason": "",
   "triggered": [
-    { "type": "adverse_event | robot_issue_call | watch_record", "id": "<uuid of triggered entry>" }
+    { "type": "adverse_event | robot_issue_call | watch_record | other_device_issue_call", "id": "<uuid of triggered entry>" }
   ]
 }
 ```
 
 - `duration_minutes`: positive integer; duration of the call in minutes (required)
+- `call_mode`: `"audio"` or `"video"`. Required, no default — the therapist must explicitly pick one. Same field as on `patient_call`.
+- `no_issue`: `true` when the therapist explicitly selected "No issue" in the "What came out of this call?" section. Mutually exclusive with a non-empty `triggered` list. See [Outcome group convention](#outcome-group-convention) in CLAUDE.md.
 - `attachment`: relative path to the training log PDF uploaded by the therapist; fixed filenames `followup_call_d07.pdf` / `followup_call_d21.pdf`, overwritten on re-submission
 - `notes`: call summary (required; non-empty)
 - `date_change_reason`: *(optional)* explanation of why the call date differs from the scheduled date; present only when completion date ≠ scheduled date
-- `triggered`: list of downstream events created as a result of this call; empty list `[]` if none
+- `triggered`: list of downstream events created as a result of this call; empty list `[]` when `no_issue` is `true`
 
 **AG Watch Timing events** (`adl_agwatch_timing_d03`, `adl_agwatch_timing_d15`, `vcg_agwatch_timing_d03`, `vcg_agwatch_timing_d15`)
 ```json
@@ -826,20 +832,24 @@ Stores both the call details and forward references to any downstream events it 
   "filed_at": "YYYY-MM-DDTHH:MM:SS",
   "duration_minutes": 15,
   "call_type": "patient_initiated | therapist_initiated",
+  "call_mode": "audio | video",
   "reason": null,
   "ae_discussed": false,
+  "no_issue": false,
   "notes": "",
   "triggered": [
-    { "type": "adverse_event | robot_issue_call | watch_record", "id": "<uuid of triggered entry>" }
+    { "type": "adverse_event | robot_issue_call | watch_record | other_device_issue_call", "id": "<uuid of triggered entry>" }
   ]
 }
 ```
 
 - `call_type`: `"patient_initiated"` (default) or `"therapist_initiated"` (unplanned outbound call by therapist).
+- `call_mode`: `"audio"` or `"video"`. Required, no default — the therapist must explicitly pick one. Same field is recorded on `followup_call_d07` and `followup_call_d21` entries.
 - `reason`: required and non-null when `call_type = "therapist_initiated"`; documents why the call was made outside the normal protocol. `null` for patient-initiated calls.
 - `ae_discussed`: `true` if one or more ongoing adverse events were discussed during this call. Used to filter eligible patient calls when linking from a patient-initiated follow-up call stub.
-- `triggered`: list of downstream events created as a result of this call; empty list `[]` if none.
-- `type` in triggered entries: `"adverse_event"`, `"robot_issue_call"`, or `"watch_record"` (referring to a `watch_record` entry in `incomplete`/`complete`).
+- `no_issue`: `true` when the therapist explicitly selected "No issue" in the "What came out of this call?" section — confirming that nothing downstream needed to be triggered. **Mutually exclusive with a non-empty `triggered` list**; one or the other must hold (the UI enforces this; the server validates `no_issue XOR len(triggered) > 0`). Stored as a permanent audit signal so an explicit "nothing came of this call" can be distinguished from legacy records that simply had no triggered events.
+- `triggered`: list of downstream events created as a result of this call; empty list `[]` when `no_issue` is `true`.
+- `type` in triggered entries: `"adverse_event"`, `"robot_issue_call"`, `"watch_record"` (referring to a `watch_record` entry in `incomplete`/`complete`), or `"other_device_issue_call"` (experimental only).
 
 **`adverse_event_followup`**
 

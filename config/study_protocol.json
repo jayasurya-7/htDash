@@ -517,9 +517,7 @@
       "cancellable": false,
       "repeatable": false,
       "depends_on": [
-        "activation"
-      ],
-      "comes_after": [
+        "activation",
         "watch_record"
       ]
     },

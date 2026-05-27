@@ -14,7 +14,7 @@ from utils.protocol_events import (
     set_free_event, read_protocol_events, write_protocol_events, load_study_protocol,
 )
 from utils.device_events import append_device_event
-from utils.date_validation import validate_completion_date
+from utils.date_validation import validate_completion_date, validate_event_date, get_date_rules
 import os
 import csv
 import json
@@ -61,11 +61,40 @@ def _filer():
     return flask_session.get('loginid', 'unknown')
 
 
-def _bad_date(patient, value):
+_CALL_MODES = ('audio', 'video')
+
+
+def _bad_outcome(no_issue, triggered_items):
+    """Outcome-group gate. Returns (jsonify(error), 400) when the outcome
+    selection is invalid (both sides set or neither set), else None. Same
+    semantics as the patient_call route used to enforce inline — pulled into
+    a helper so activation / home_visit / followup_call / patient_call all
+    apply the identical rule. See CLAUDE.md → "Outcome group convention"."""
+    if no_issue and triggered_items:
+        return (jsonify({'error': '"No issue" cannot be combined with any triggered events.'}), 400)
+    if not no_issue and not triggered_items:
+        return (jsonify({'error': 'Please indicate what came out of this (select "No issue" or one of the issue types).'}), 400)
+    return None
+
+
+def _bad_call_mode(value):
+    """Call-mode gate. Returns (jsonify(error), 400) when value is missing or
+    outside {"audio","video"}, else None. Applied to every call route
+    (patient_call, followup_call_d07, followup_call_d21)."""
+    if value not in _CALL_MODES:
+        return (jsonify({'error': 'Call mode is required and must be "audio" or "video".'}), 400)
+    return None
+
+
+def _bad_date(patient, value, event_id=None, events_data=None):
     """Date Rule Framework gate. Returns a (jsonify(error), 400) response tuple
-    when `value` violates the default completion-date rule, else None. Routes
-    use the walrus pattern:  `if r := _bad_date(patient, event_date): return r`."""
-    err = validate_completion_date(patient, value)
+    when `value` violates the applicable rule (per-event when `event_id` is in
+    `config/date_rules.json` events, else the default rule), else None. Routes
+    use the walrus pattern:  `if r := _bad_date(patient, event_date): return r`.
+    For events with per-event overrides (e.g. exp_device_install, activation),
+    pass `event_id` and `events_data` so the resolver can dereference
+    `event:<id>` tokens against currently-completed entries."""
+    err = validate_event_date(patient, value, event_id=event_id, events_data=events_data)
     return (jsonify({'error': err}), 400) if err else None
 
 
@@ -91,7 +120,8 @@ def patients_page():
 def patient_detail_page(homer_id):
     if not flask_session.get('login_place'):
         return redirect(url_for('login'))
-    return render_template('patient_detail.html', homer_id=homer_id, place=flask_session.get('login_place'), active_page='patients')
+    return render_template('patient_detail.html', homer_id=homer_id, place=flask_session.get('login_place'),
+                           active_page='patients', date_rules=get_date_rules())
 
 
 @bp.route('/api/patients/<homer_id>', methods=['GET'])
@@ -150,6 +180,47 @@ def _topo_sort(events, event_defs, date_fn):
         sorted_group.extend(ev for ev in group if ev['protocol_event_id'] not in placed)
         result.extend(sorted_group)
     return result
+
+
+def _topo_descendants_first(events, event_defs):
+    """Re-order a list of events so that dependents appear BEFORE their parents
+    (reverse of the parents-before-dependents topo used for overdue/upcoming).
+    Edges come from `depends_on` + `comes_after` on each event_def. Events with
+    no topo relationship to anything else in the list keep their input order
+    (stable sort by negative depth)."""
+    if len(events) <= 1:
+        return list(events)
+    ids_in_group = {ev.get('protocol_event_id') for ev in events}
+    depth_cache  = {}
+
+    def depth(pid):
+        if pid in depth_cache:
+            return depth_cache[pid]
+        defn = event_defs.get(pid) or {}
+        deps = list(defn.get('depends_on') or []) + list(defn.get('comes_after') or [])
+        rel  = [depth(d) for d in deps if d in ids_in_group and d != pid]
+        depth_cache[pid] = (max(rel) + 1) if rel else 0
+        return depth_cache[pid]
+
+    return sorted(events, key=lambda ev: -depth(ev.get('protocol_event_id')))
+
+
+def _topo_groups_apply_descendants_first(events, event_defs):
+    """In-place: within runs of consecutive entries sharing (completion_date,
+    filed_by), apply `_topo_descendants_first`. Assumes the input is already
+    sorted by (completion_date desc, filed_at desc) — within each topo'd run,
+    same-depth events preserve their filed_at-desc order via stable sort."""
+    i = 0
+    n = len(events)
+    while i < n:
+        ck = events[i].get('completion_date')
+        fb = events[i].get('filed_by')
+        j = i + 1
+        while j < n and events[j].get('completion_date') == ck and events[j].get('filed_by') == fb:
+            j += 1
+        if j - i > 1:
+            events[i:j] = _topo_descendants_first(events[i:j], event_defs)
+        i = j
 
 
 def _apply_ordering_rules(events):
@@ -444,8 +515,15 @@ def api_patient_events(homer_id):
 
     is_broken_protocol = bool(patient and derive_status(patient) == 'broken_protocol')
 
-    # Build set of completed event IDs for dependency checking
+    # Build set of completed event IDs for dependency checking. Includes both
+    # `complete[]` (regular protocol events) AND any non-empty `free.<id>[]`
+    # bucket (chained / unscheduled free events such as `watch_record`), so that
+    # depends_on can reference free-event types. Satisfied-by-any-completion:
+    # one filed entry of the right type is enough to clear the dependency.
     completed_ids = {e['protocol_event_id'] for e in events_data.get('complete', [])}
+    for free_type, free_list in (events_data.get('free') or {}).items():
+        if free_list:
+            completed_ids.add(free_type)
     # Build set of all known event IDs (incomplete + complete) — only these can block
     known_ids = completed_ids | {e['protocol_event_id'] for e in events_data.get('incomplete', [])}
 
@@ -683,7 +761,30 @@ def api_patient_events(homer_id):
         item['protocol_event_id'] = 'discontinuation'
         complete_list.append(item)
 
-    complete_list.sort(key=lambda x: x.get('completion_date') or x.get('filed_at') or '', reverse=True)
+    # free.device_return is also a singleton dict (only ever one return per patient).
+    dr = events_data.get('free', {}).get('device_return')
+    if dr and isinstance(dr, dict):
+        item = dict(dr)
+        item['event_name']        = 'Device Return'
+        item['protocol_event_id'] = 'device_return'
+        complete_list.append(item)
+
+    # Primary sort: completion_date descending (newest clinical date first),
+    # with filed_at as the fallback when completion_date is absent. Tiebreaker:
+    # filed_at descending (last filed at the top within same clinical date).
+    complete_list.sort(
+        key=lambda x: (x.get('completion_date') or x.get('filed_at') or '',
+                       x.get('filed_at') or ''),
+        reverse=True,
+    )
+
+    # Within any run of consecutive entries that share BOTH completion_date AND
+    # filed_by, re-order so dependents appear above their parents (reverse of
+    # the parents-before-dependents topo used for overdue/upcoming). When
+    # filed_by differs across a same-date group the topo pass is skipped and
+    # filed_at desc from the primary sort stands. See CLAUDE.md → "Completed-
+    # event ordering".
+    _topo_groups_apply_descendants_first(complete_list, event_defs)
 
     # Retrospective event notes are role-private — never expose their content here. Emit
     # only a role-filtered count (therapist/engineer: own bucket; admin: all), then strip
@@ -801,7 +902,7 @@ def api_complete_device_install(homer_id):
     data = request.get_json() or {}
     event_id   = data.get('event_id')
     event_date = data.get('eventDate', '').strip()
-    if r := _bad_date(patient, event_date): return r
+    if r := _bad_date(patient, event_date, event_id='exp_device_install'): return r
     pluto_id   = data.get('plutoId', '').strip()
     mars_id    = data.get('marsId', '').strip()
     modem_id   = data.get('modemId', '').strip()
@@ -1444,8 +1545,10 @@ def api_activate_patient(homer_id):
     session_start   = (data.get('sessionStart') or '').strip()
     session_end     = (data.get('sessionEnd') or '').strip()
     triggered_items = data.get('triggered', [])
+    no_issue        = bool(data.get('no_issue', False))
     if not isinstance(triggered_items, list):
         triggered_items = []
+    if r := _bad_outcome(no_issue, triggered_items): return r
     if not activation_date:
         return jsonify({'error': 'activationDate is required'}), 400
     try:
@@ -1472,8 +1575,10 @@ def api_activate_patient(homer_id):
         return jsonify({'error': 'Patient not found'}), 404
     if derive_status(patient) != 'inactive':
         return jsonify({'error': 'Patient must be inactive to activate'}), 409
-    if r := _bad_date(patient, activation_date): return r
-    if r := _bad_date(patient, session_start):   return r
+    # Per-event rule needs events_data to dereference event:exp_device_install.
+    _ed = read_protocol_events(folder, homer_id)
+    if r := _bad_date(patient, activation_date, event_id='activation', events_data=_ed): return r
+    if r := _bad_date(patient, session_start,   event_id='activation', events_data=_ed): return r
 
     # Control patients must have a VCG group selected at activation
     if patient.get('group') == 'control':
@@ -1510,6 +1615,11 @@ def api_activate_patient(homer_id):
     events_data = read_protocol_events(folder, homer_id)
     if dep_ids:
         completed_ids = {e['protocol_event_id'] for e in (events_data or {}).get('complete', [])}
+        # Free-event types count as completed once at least one entry is filed
+        # (matches the rule used in api_patient_events / dashboard events).
+        for ftype, flist in ((events_data or {}).get('free') or {}).items():
+            if flist:
+                completed_ids.add(ftype)
         known_ids = completed_ids | {e['protocol_event_id'] for e in (events_data or {}).get('incomplete', [])}
         blocking = [d for d in dep_ids if d in known_ids and d not in completed_ids]
         if blocking:
@@ -1533,7 +1643,7 @@ def api_activate_patient(homer_id):
             filed_at = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
             complete_entry = {**entry, 'completion_date': activation_date, 'filed_at': filed_at, 'filed_by': _filer(),
                               'session_start': session_start, 'session_end': session_end, 'notes': notes,
-                              'triggered': []}
+                              'no_issue': no_issue, 'triggered': []}
             events_data['incomplete'] = [e for e in incomplete if e.get('id') != entry['id']]
             events_data.setdefault('complete', []).append(complete_entry)
             write_protocol_events(folder, homer_id, events_data)
@@ -1665,7 +1775,10 @@ def api_log_activation_attempt(homer_id):
         return jsonify({'error': 'Patient not found'}), 404
     if derive_status(patient) != 'inactive':
         return jsonify({'error': 'Patient must be inactive to log an activation attempt'}), 409
-    if r := _bad_date(patient, visit_date): return r
+    # The attempt is part of activation — bounded by the same per-event rule
+    # (within 5 days of enrollment, after device setup for experimental).
+    _ed_attempt = read_protocol_events(folder, homer_id)
+    if r := _bad_date(patient, visit_date, event_id='activation', events_data=_ed_attempt): return r
 
     is_experimental = patient.get('group') == 'experimental'
     if primary_reason in ('robot_issue_call', 'other_device_issue_call') and not is_experimental:
@@ -2295,6 +2408,7 @@ def api_complete_home_visit(homer_id):
     event_id          = body.get('event_id')
     protocol_event_id = (body.get('protocol_event_id') or '').strip()
     training_not_done = bool(body.get('training_not_done'))
+    no_issue          = bool(body.get('no_issue', False))
 
     if protocol_event_id not in _HOME_VISIT_IDS:
         return jsonify({'error': 'Invalid protocol event ID.'}), 400
@@ -2450,6 +2564,7 @@ def api_complete_home_visit(homer_id):
         session_end   = (body.get('session_end') or '').strip()
         notes         = (body.get('notes') or '').strip()
 
+        if r := _bad_outcome(no_issue, triggered_items): return r
         if not session_start or not session_end:
             return jsonify({'error': 'Session start and end are required.'}), 400
         if r := _bad_date(patient, session_start): return r
@@ -2488,6 +2603,7 @@ def api_complete_home_visit(homer_id):
             'filed_at':        filed_at,
             'filed_by':   _filer(),
             'notes':           notes,
+            'no_issue':        no_issue,
             'triggered':       triggered_refs,
         }
         events_data['incomplete'] = [e for e in incomplete if e.get('id') != entry['id']]
@@ -4671,9 +4787,11 @@ def api_complete_followup_call(homer_id):
     protocol_event_id  = (body.get('protocol_event_id') or '').strip()
     completion_date    = (body.get('completion_date') or '').strip()
     duration_str       = str(body.get('duration_minutes', '')).strip()
+    call_mode          = (body.get('call_mode') or '').strip()
     notes              = (body.get('notes') or '').strip()
     date_change_reason = (body.get('date_change_reason') or '').strip()
     triggered_items    = body.get('triggered', [])
+    no_issue           = bool(body.get('no_issue', False))
     if not isinstance(triggered_items, list):
         triggered_items = []
 
@@ -4681,7 +4799,9 @@ def api_complete_followup_call(homer_id):
         return jsonify({'error': 'Invalid protocol event ID.'}), 400
     if not completion_date:
         return jsonify({'error': 'Call date is required.'}), 400
-    if r := _bad_date(patient, completion_date): return r
+    if r := _bad_date(patient, completion_date):    return r
+    if r := _bad_call_mode(call_mode):              return r
+    if r := _bad_outcome(no_issue, triggered_items): return r
     try:
         if datetime.strptime(completion_date, '%Y-%m-%dT%H:%M') > datetime.now():
             return jsonify({'error': 'Call date cannot be in the future.'}), 400
@@ -4792,6 +4912,8 @@ def api_complete_followup_call(homer_id):
         'filed_at':         filed_at,
         'filed_by':   _filer(),
         'duration_minutes': duration_minutes,
+        'call_mode':        call_mode,
+        'no_issue':         no_issue,
         'notes':            notes,
         'triggered':        triggered_refs,
         **({'date_change_reason': date_change_reason} if date_change_reason else {}),
@@ -5653,10 +5775,15 @@ def api_log_patient_call(homer_id):
     duration_str     = str(body.get('duration_minutes', '')).strip()
     notes            = (body.get('notes') or '').strip()
     call_type        = (body.get('call_type') or 'patient_initiated').strip()
+    call_mode        = (body.get('call_mode') or '').strip()
     reason           = (body.get('reason') or '').strip()
     triggered_items  = body.get('triggered', [])
+    no_issue         = bool(body.get('no_issue', False))
     if not isinstance(triggered_items, list):
         triggered_items = []
+
+    if r := _bad_call_mode(call_mode): return r
+    if r := _bad_outcome(no_issue, triggered_items): return r
 
     if not completion_date:
         return jsonify({'error': 'Call date is required.'}), 400
@@ -5765,7 +5892,9 @@ def api_log_patient_call(homer_id):
         'filed_by':   _filer(),
         'duration_minutes': duration_minutes,
         'call_type':        call_type,
+        'call_mode':        call_mode,
         'reason':           reason if call_type == 'therapist_initiated' else None,
+        'no_issue':         no_issue,
         'notes':            notes,
         'triggered':        triggered_refs,
     })

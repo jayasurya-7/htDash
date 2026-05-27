@@ -524,7 +524,7 @@
     </div>
     <div class="mb-4">
       <label class="block text-sm font-medium text-slate-700 mb-2">Event Date <span class="text-red-500">*</span></label>
-      <input type="datetime-local" id="device-setup-date" required
+      <input type="datetime-local" id="device-setup-date" required data-event-id="exp_device_install"
              class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
     </div>
     <div class="mb-4">
@@ -617,12 +617,12 @@
     <div id="act-training-yes-section" class="hidden">
       <div class="mb-4">
         <label class="block text-sm font-medium text-slate-700 mb-2">Session Start <span class="text-red-500">*</span></label>
-        <input type="datetime-local" id="activation-session-start"
+        <input type="datetime-local" id="activation-session-start" data-event-id="activation"
                class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
       </div>
       <div class="mb-4">
         <label class="block text-sm font-medium text-slate-700 mb-2">Session End <span class="text-red-500">*</span></label>
-        <input type="datetime-local" id="activation-session-end"
+        <input type="datetime-local" id="activation-session-end" data-event-id="activation"
                class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
       </div>
       <div id="activation-vcg-group-row" class="mb-4 hidden">
@@ -643,10 +643,19 @@
       </div>
       <div class="mb-4">{{ attachment_section('activation') }}</div>
       <div class="mb-4 border-t border-slate-100 pt-4">
-        <p class="text-sm font-semibold text-slate-700 mb-3">What came out of this visit?</p>
+        <p class="text-sm font-semibold text-slate-700 mb-3">What came out of this visit? <span class="text-red-500">*</span></p>
         <div class="mb-3">
           <label class="flex items-center gap-2 cursor-pointer select-none">
-            <input type="checkbox" id="act-trigger-adverse" onchange="_actToggleSubform('adverse')" class="w-4 h-4 rounded border-slate-300 text-red-500 focus:ring-red-300">
+            <input type="checkbox" id="act-trigger-no-issue" onchange="_outcomeChange('act')" class="w-4 h-4 rounded border-slate-300 text-green-600 focus:ring-green-300">
+            <span class="text-sm font-medium text-slate-700">No issue</span>
+          </label>
+          <div id="act-no-issue-note" class="hidden mt-2 ml-6 px-3 py-2 bg-green-50 rounded-xl border border-green-100 text-xs text-slate-600">
+            No downstream record will be created. The visit is logged as "no issue".
+          </div>
+        </div>
+        <div class="mb-3">
+          <label class="flex items-center gap-2 cursor-pointer select-none">
+            <input type="checkbox" id="act-trigger-adverse" onchange="_outcomeChange('act', 'adverse')" class="w-4 h-4 rounded border-slate-300 text-red-500 focus:ring-red-300">
             <span class="text-sm font-medium text-slate-700">Adverse Event</span>
           </label>
           <div id="act-adverse-note" class="hidden mt-2 ml-6 px-3 py-2 bg-red-50 rounded-xl border border-red-100 text-xs text-slate-600">
@@ -655,7 +664,7 @@
         </div>
         <div class="mb-3" id="act-trigger-robot-wrap">
           <label class="flex items-center gap-2 cursor-pointer select-none">
-            <input type="checkbox" id="act-trigger-robot" onchange="_actToggleSubform('robot')" class="w-4 h-4 rounded border-slate-300 text-orange-500 focus:ring-orange-300">
+            <input type="checkbox" id="act-trigger-robot" onchange="_outcomeChange('act', 'robot')" class="w-4 h-4 rounded border-slate-300 text-orange-500 focus:ring-orange-300">
             <span class="text-sm font-medium text-slate-700">Robot Issue</span>
           </label>
           <div id="act-robot-note" class="hidden mt-2 ml-6 px-3 py-2 bg-orange-50 rounded-xl border border-orange-100 text-xs text-slate-600">
@@ -664,7 +673,7 @@
         </div>
         <div class="mb-3" id="act-trigger-watch-wrap">
           <label class="flex items-center gap-2 cursor-pointer select-none">
-            <input type="checkbox" id="act-trigger-watch" onchange="_actToggleSubform('watch')" class="w-4 h-4 rounded border-slate-300 text-blue-500 focus:ring-blue-300">
+            <input type="checkbox" id="act-trigger-watch" onchange="_outcomeChange('act', 'watch')" class="w-4 h-4 rounded border-slate-300 text-blue-500 focus:ring-blue-300">
             <span class="text-sm font-medium text-slate-700">Watch Record Issue</span>
           </label>
           <div id="act-watch-note" class="hidden mt-2 ml-6 px-3 py-2 bg-blue-50 rounded-xl border border-blue-100 text-xs text-slate-600">
@@ -673,7 +682,7 @@
         </div>
         <div id="act-trigger-other-device-wrap">
           <label class="flex items-center gap-2 cursor-pointer select-none">
-            <input type="checkbox" id="act-trigger-other-device" onchange="_actToggleSubform('other-device')" class="w-4 h-4 rounded border-slate-300 text-purple-500 focus:ring-purple-300">
+            <input type="checkbox" id="act-trigger-other-device" onchange="_outcomeChange('act', 'other-device')" class="w-4 h-4 rounded border-slate-300 text-purple-500 focus:ring-purple-300">
             <span class="text-sm font-medium text-slate-700">Other Device Issue</span>
           </label>
           <div id="act-other-device-note" class="hidden mt-2 ml-6 px-3 py-2 bg-purple-50 rounded-xl border border-purple-100 text-xs text-slate-600">
@@ -704,7 +713,7 @@
       </div>
       <div>
         <label class="block text-sm font-medium text-slate-700 mb-2">Visit Date <span class="text-red-500">*</span></label>
-        <input type="datetime-local" id="act-no-visit-date"
+        <input type="datetime-local" id="act-no-visit-date" data-event-id="activation"
                class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
       </div>
       <div>
@@ -1138,10 +1147,19 @@
         </div>
         {{ attachment_section('hv') }}
         <div class="border-t border-slate-100 pt-4">
-          <p class="text-sm font-semibold text-slate-700 mb-3">What came out of this visit?</p>
+          <p class="text-sm font-semibold text-slate-700 mb-3">What came out of this visit? <span class="text-red-500">*</span></p>
           <div class="mb-3">
             <label class="flex items-center gap-2 cursor-pointer select-none">
-              <input type="checkbox" id="hv-trigger-adverse" onchange="_hvToggleSubform('adverse')" class="w-4 h-4 rounded border-slate-300 text-red-500 focus:ring-red-300">
+              <input type="checkbox" id="hv-trigger-no-issue" onchange="_outcomeChange('hv')" class="w-4 h-4 rounded border-slate-300 text-green-600 focus:ring-green-300">
+              <span class="text-sm font-medium text-slate-700">No issue</span>
+            </label>
+            <div id="hv-no-issue-note" class="hidden mt-2 ml-6 px-3 py-2 bg-green-50 rounded-xl border border-green-100 text-xs text-slate-600">
+              No downstream record will be created. The visit is logged as "no issue".
+            </div>
+          </div>
+          <div class="mb-3">
+            <label class="flex items-center gap-2 cursor-pointer select-none">
+              <input type="checkbox" id="hv-trigger-adverse" onchange="_outcomeChange('hv', 'adverse')" class="w-4 h-4 rounded border-slate-300 text-red-500 focus:ring-red-300">
               <span class="text-sm font-medium text-slate-700">Adverse Event</span>
             </label>
             <div id="hv-adverse-note" class="hidden mt-2 ml-6 px-3 py-2 bg-red-50 rounded-xl border border-red-100 text-xs text-slate-600">
@@ -1150,7 +1168,7 @@
           </div>
           <div class="mb-3" id="hv-trigger-robot-wrap">
             <label class="flex items-center gap-2 cursor-pointer select-none">
-              <input type="checkbox" id="hv-trigger-robot" onchange="_hvToggleSubform('robot')" class="w-4 h-4 rounded border-slate-300 text-orange-500 focus:ring-orange-300">
+              <input type="checkbox" id="hv-trigger-robot" onchange="_outcomeChange('hv', 'robot')" class="w-4 h-4 rounded border-slate-300 text-orange-500 focus:ring-orange-300">
               <span class="text-sm font-medium text-slate-700">Robot Issue</span>
             </label>
             <div id="hv-robot-note" class="hidden mt-2 ml-6 px-3 py-2 bg-orange-50 rounded-xl border border-orange-100 text-xs text-slate-600">
@@ -1159,7 +1177,7 @@
           </div>
           <div class="mb-3" id="hv-trigger-watch-wrap">
             <label class="flex items-center gap-2 cursor-pointer select-none">
-              <input type="checkbox" id="hv-trigger-watch" onchange="_hvToggleSubform('watch')" class="w-4 h-4 rounded border-slate-300 text-blue-500 focus:ring-blue-300">
+              <input type="checkbox" id="hv-trigger-watch" onchange="_outcomeChange('hv', 'watch')" class="w-4 h-4 rounded border-slate-300 text-blue-500 focus:ring-blue-300">
               <span class="text-sm font-medium text-slate-700">Watch Record Issue</span>
             </label>
             <div id="hv-watch-note" class="hidden mt-2 ml-6 px-3 py-2 bg-blue-50 rounded-xl border border-blue-100 text-xs text-slate-600">
@@ -1168,7 +1186,7 @@
           </div>
           <div id="hv-trigger-other-device-wrap">
             <label class="flex items-center gap-2 cursor-pointer select-none">
-              <input type="checkbox" id="hv-trigger-other-device" onchange="_hvToggleSubform('other-device')" class="w-4 h-4 rounded border-slate-300 text-purple-500 focus:ring-purple-300">
+              <input type="checkbox" id="hv-trigger-other-device" onchange="_outcomeChange('hv', 'other-device')" class="w-4 h-4 rounded border-slate-300 text-purple-500 focus:ring-purple-300">
               <span class="text-sm font-medium text-slate-700">Other Device Issue</span>
             </label>
             <div class="hidden mt-2 ml-6 px-3 py-2 bg-purple-50 rounded-xl border border-purple-100 text-xs text-slate-600" id="hv-other-device-note">
@@ -1270,9 +1288,22 @@
         <label class="block text-sm font-medium text-amber-700 mb-1">Reason for date change <span class="text-xs font-normal text-slate-500">(scheduled: <span id="followup-call-scheduled-display"></span>)</span></label>
         <textarea id="followup-call-date-reason" rows="2" class="w-full px-3 py-2 border border-amber-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-amber-300 resize-none" placeholder="Why is the call date different from the scheduled date?"></textarea>
       </div>
-      <div>
-        <label class="block text-sm font-medium text-slate-700 mb-1">Duration (minutes)</label>
-        <input id="followup-call-duration" type="number" min="1" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" placeholder="e.g. 20" />
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="block text-sm font-medium text-slate-700 mb-1">Duration (minutes) <span class="text-red-500">*</span></label>
+          <input id="followup-call-duration" type="number" min="1" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" placeholder="e.g. 20" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-slate-700 mb-1">Call Mode <span class="text-red-500">*</span></label>
+          <div class="flex gap-2" id="fc-call-mode-group">
+            <label class="flex-1 flex items-center justify-center gap-2 px-3 py-2 border border-slate-200 rounded-xl text-sm cursor-pointer hover:bg-slate-50">
+              <input type="radio" name="fc-call-mode" value="audio" class="w-4 h-4 text-blue-500"> Audio
+            </label>
+            <label class="flex-1 flex items-center justify-center gap-2 px-3 py-2 border border-slate-200 rounded-xl text-sm cursor-pointer hover:bg-slate-50">
+              <input type="radio" name="fc-call-mode" value="video" class="w-4 h-4 text-blue-500"> Video
+            </label>
+          </div>
+        </div>
       </div>
       <div>
         <label class="block text-sm font-medium text-slate-700 mb-1">Event Notes <span class="text-red-500">*</span></label>
@@ -1298,12 +1329,23 @@
 
       <!-- ── Triggered events ─────────────────────────────────────────── -->
       <div class="border-t border-slate-100 pt-4">
-        <p class="text-sm font-semibold text-slate-700 mb-3">What came out of this call?</p>
+        <p class="text-sm font-semibold text-slate-700 mb-3">What came out of this call? <span class="text-red-500">*</span></p>
+
+        <!-- No Issue — mutually exclusive with every issue toggle below -->
+        <div class="mb-3">
+          <label class="flex items-center gap-2 cursor-pointer select-none">
+            <input type="checkbox" id="fc-trigger-no-issue" onchange="_outcomeChange('fc')" class="w-4 h-4 rounded border-slate-300 text-green-600 focus:ring-green-300">
+            <span class="text-sm font-medium text-slate-700">No issue</span>
+          </label>
+          <div id="fc-no-issue-note" class="hidden mt-2 ml-6 px-3 py-2 bg-green-50 rounded-xl border border-green-100 text-xs text-slate-600">
+            No downstream record will be created. The call is logged as "no issue".
+          </div>
+        </div>
 
         <!-- Adverse Event -->
         <div class="mb-3">
           <label class="flex items-center gap-2 cursor-pointer select-none">
-            <input type="checkbox" id="fc-trigger-adverse" onchange="_fcToggleSubform('adverse')" class="w-4 h-4 rounded border-slate-300 text-red-500 focus:ring-red-300">
+            <input type="checkbox" id="fc-trigger-adverse" onchange="_outcomeChange('fc', 'adverse')" class="w-4 h-4 rounded border-slate-300 text-red-500 focus:ring-red-300">
             <span class="text-sm font-medium text-slate-700">Adverse Event</span>
           </label>
           <div id="fc-adverse-note" class="hidden mt-2 ml-6 px-3 py-2 bg-red-50 rounded-xl border border-red-100 text-xs text-slate-600">
@@ -1314,7 +1356,7 @@
         <!-- Robot Issue (experimental only) -->
         <div class="mb-3" id="fc-trigger-robot-wrap">
           <label class="flex items-center gap-2 cursor-pointer select-none">
-            <input type="checkbox" id="fc-trigger-robot" onchange="_fcToggleSubform('robot')" class="w-4 h-4 rounded border-slate-300 text-orange-500 focus:ring-orange-300">
+            <input type="checkbox" id="fc-trigger-robot" onchange="_outcomeChange('fc', 'robot')" class="w-4 h-4 rounded border-slate-300 text-orange-500 focus:ring-orange-300">
             <span class="text-sm font-medium text-slate-700">Robot Issue</span>
           </label>
           <div id="fc-robot-note" class="hidden mt-2 ml-6 px-3 py-2 bg-orange-50 rounded-xl border border-orange-100 text-xs text-slate-600">
@@ -1325,7 +1367,7 @@
         <!-- Watch Record -->
         <div id="fc-trigger-watch-wrap">
           <label class="flex items-center gap-2 cursor-pointer select-none">
-            <input type="checkbox" id="fc-trigger-watch" onchange="_fcToggleSubform('watch')" class="w-4 h-4 rounded border-slate-300 text-blue-500 focus:ring-blue-300">
+            <input type="checkbox" id="fc-trigger-watch" onchange="_outcomeChange('fc', 'watch')" class="w-4 h-4 rounded border-slate-300 text-blue-500 focus:ring-blue-300">
             <span class="text-sm font-medium text-slate-700">Watch Record Issue</span>
           </label>
           <div id="fc-watch-note" class="hidden mt-2 ml-6 px-3 py-2 bg-blue-50 rounded-xl border border-blue-100 text-xs text-slate-600">
@@ -1335,7 +1377,7 @@
         <!-- Other Device Issue -->
         <div class="mt-3" id="fc-trigger-other-device-wrap">
           <label class="flex items-center gap-2 cursor-pointer select-none">
-            <input type="checkbox" id="fc-trigger-other-device" class="w-4 h-4 rounded border-slate-300 text-purple-500 focus:ring-purple-300">
+            <input type="checkbox" id="fc-trigger-other-device" onchange="_outcomeChange('fc', 'other-device')" class="w-4 h-4 rounded border-slate-300 text-purple-500 focus:ring-purple-300">
             <span class="text-sm font-medium text-slate-700">Other Device Issue</span>
           </label>
           <div class="hidden mt-2 ml-6 px-3 py-2 bg-purple-50 rounded-xl border border-purple-100 text-xs text-slate-600" id="fc-other-device-note">
@@ -1367,9 +1409,22 @@
         <label class="block text-sm font-medium text-slate-700 mb-1">Call Date &amp; Time <span class="text-red-500">*</span></label>
         <input type="datetime-local" id="pc-date" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" />
       </div>
-      <div>
-        <label class="block text-sm font-medium text-slate-700 mb-1">Duration (minutes) <span class="text-red-500">*</span></label>
-        <input id="pc-duration" type="number" min="1" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" placeholder="e.g. 10" />
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="block text-sm font-medium text-slate-700 mb-1">Duration (minutes) <span class="text-red-500">*</span></label>
+          <input id="pc-duration" type="number" min="1" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" placeholder="e.g. 10" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-slate-700 mb-1">Call Mode <span class="text-red-500">*</span></label>
+          <div class="flex gap-2" id="pc-call-mode-group">
+            <label class="flex-1 flex items-center justify-center gap-2 px-3 py-2 border border-slate-200 rounded-xl text-sm cursor-pointer hover:bg-slate-50">
+              <input type="radio" name="pc-call-mode" value="audio" class="w-4 h-4 text-blue-500"> Audio
+            </label>
+            <label class="flex-1 flex items-center justify-center gap-2 px-3 py-2 border border-slate-200 rounded-xl text-sm cursor-pointer hover:bg-slate-50">
+              <input type="radio" name="pc-call-mode" value="video" class="w-4 h-4 text-blue-500"> Video
+            </label>
+          </div>
+        </div>
       </div>
       <div>
         <label class="block text-sm font-medium text-slate-700 mb-1">Event Notes <span class="text-red-500">*</span></label>
@@ -1392,11 +1447,21 @@
 
       <!-- ── Triggered events ─────────────────────────────────────────── -->
       <div class="border-t border-slate-100 pt-4">
-        <p class="text-sm font-semibold text-slate-700 mb-3">What came out of this call?</p>
+        <p class="text-sm font-semibold text-slate-700 mb-3">What came out of this call? <span class="text-red-500">*</span></p>
+        <!-- No Issue — mutually exclusive with every issue toggle below -->
+        <div class="mb-3">
+          <label class="flex items-center gap-2 cursor-pointer select-none">
+            <input type="checkbox" id="pc-trigger-no-issue" onchange="_outcomeChange('pc')" class="w-4 h-4 rounded border-slate-300 text-green-600 focus:ring-green-300">
+            <span class="text-sm font-medium text-slate-700">No issue</span>
+          </label>
+          <div id="pc-no-issue-note" class="hidden mt-2 ml-6 px-3 py-2 bg-green-50 rounded-xl border border-green-100 text-xs text-slate-600">
+            No downstream record will be created. The call is logged as "no issue".
+          </div>
+        </div>
         <!-- Adverse Event -->
         <div class="mb-3">
           <label class="flex items-center gap-2 cursor-pointer select-none">
-            <input type="checkbox" id="pc-trigger-adverse" onchange="_pcToggleSubform('adverse')" class="w-4 h-4 rounded border-slate-300 text-red-500 focus:ring-red-300">
+            <input type="checkbox" id="pc-trigger-adverse" onchange="_outcomeChange('pc', 'adverse')" class="w-4 h-4 rounded border-slate-300 text-red-500 focus:ring-red-300">
             <span class="text-sm font-medium text-slate-700">Adverse Event</span>
           </label>
           <div id="pc-adverse-note" class="hidden mt-2 ml-6 px-3 py-2 bg-red-50 rounded-xl border border-red-100 text-xs text-slate-600">
@@ -1406,7 +1471,7 @@
         <!-- Robot Issue (experimental only) -->
         <div class="mb-3" id="pc-trigger-robot-wrap">
           <label class="flex items-center gap-2 cursor-pointer select-none">
-            <input type="checkbox" id="pc-trigger-robot" onchange="_pcToggleSubform('robot')" class="w-4 h-4 rounded border-slate-300 text-orange-500 focus:ring-orange-300">
+            <input type="checkbox" id="pc-trigger-robot" onchange="_outcomeChange('pc', 'robot')" class="w-4 h-4 rounded border-slate-300 text-orange-500 focus:ring-orange-300">
             <span class="text-sm font-medium text-slate-700">Robot Issue</span>
           </label>
           <div id="pc-robot-note" class="hidden mt-2 ml-6 px-3 py-2 bg-orange-50 rounded-xl border border-orange-100 text-xs text-slate-600">
@@ -1416,7 +1481,7 @@
         <!-- Watch Record -->
         <div id="pc-trigger-watch-wrap">
           <label class="flex items-center gap-2 cursor-pointer select-none">
-            <input type="checkbox" id="pc-trigger-watch" onchange="_pcToggleSubform('watch')" class="w-4 h-4 rounded border-slate-300 text-blue-500 focus:ring-blue-300">
+            <input type="checkbox" id="pc-trigger-watch" onchange="_outcomeChange('pc', 'watch')" class="w-4 h-4 rounded border-slate-300 text-blue-500 focus:ring-blue-300">
             <span class="text-sm font-medium text-slate-700">Watch Record Issue</span>
           </label>
           <div id="pc-watch-note" class="hidden mt-2 ml-6 px-3 py-2 bg-blue-50 rounded-xl border border-blue-100 text-xs text-slate-600">
@@ -1426,7 +1491,7 @@
         <!-- Other Device Issue -->
         <div class="mt-3" id="pc-trigger-other-device-wrap">
           <label class="flex items-center gap-2 cursor-pointer select-none">
-            <input type="checkbox" id="pc-trigger-other-device" class="w-4 h-4 rounded border-slate-300 text-purple-500 focus:ring-purple-300">
+            <input type="checkbox" id="pc-trigger-other-device" onchange="_outcomeChange('pc')" class="w-4 h-4 rounded border-slate-300 text-purple-500 focus:ring-purple-300">
             <span class="text-sm font-medium text-slate-700">Other Device Issue</span>
           </label>
           <div class="hidden mt-2 ml-6 px-3 py-2 bg-purple-50 rounded-xl border border-purple-100 text-xs text-slate-600" id="pc-other-device-note">
@@ -2089,7 +2154,10 @@
 {% block scripts %}
 <script>
 const PATIENT_HOMER_ID = {{ homer_id | tojson }};
-const PATIENT_PLACE = {{ place | tojson }};</script>
+const PATIENT_PLACE = {{ place | tojson }};
+// Date Rule Framework spec — rendered server-side so client resolver stays in
+// lock-step with utils/date_validation.py. See CLAUDE.md → "Date Rule Framework".
+window.DATE_RULES = {{ date_rules | tojson }};</script>
 <!-- PDF generation now uses server-side Puppeteer rendering (no client-side libraries needed) -->
 <link href="https://cdn.jsdelivr.net/npm/quill@2/dist/quill.snow.css" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/quill@2/dist/quill.js"></script>
