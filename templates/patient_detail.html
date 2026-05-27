@@ -642,7 +642,7 @@
                   placeholder="Optional notes…"></textarea>
       </div>
       <div class="mb-4">{{ attachment_section('activation') }}</div>
-      <div class="mb-4 border-t border-slate-100 pt-4">
+      <div id="act-outcome-group" class="mb-4 border-t border-slate-100 pt-4">
         <p class="text-sm font-semibold text-slate-700 mb-3">What came out of this visit? <span class="text-red-500">*</span></p>
         <div class="mb-3">
           <label class="flex items-center gap-2 cursor-pointer select-none">
@@ -653,7 +653,7 @@
             No downstream record will be created. The visit is logged as "no issue".
           </div>
         </div>
-        <div class="mb-3">
+        <div class="mb-3" id="act-trigger-adverse-wrap">
           <label class="flex items-center gap-2 cursor-pointer select-none">
             <input type="checkbox" id="act-trigger-adverse" onchange="_outcomeChange('act', 'adverse')" class="w-4 h-4 rounded border-slate-300 text-red-500 focus:ring-red-300">
             <span class="text-sm font-medium text-slate-700">Adverse Event</span>
@@ -689,6 +689,9 @@
             An Other Device Issue record will be created and appear in overdue events for completion.
           </div>
         </div>
+      </div>
+      <div id="act-outcome-ended-note" class="hidden mb-4 border-t border-slate-100 pt-4">
+        <p class="text-sm text-slate-500 italic">No further events can be triggered for this patient. This entry will be logged as "no issue".</p>
       </div>
     </div>
 
@@ -1146,7 +1149,7 @@
           <textarea id="hv-notes" rows="3" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 resize-none" placeholder="Add any notes…"></textarea>
         </div>
         {{ attachment_section('hv') }}
-        <div class="border-t border-slate-100 pt-4">
+        <div id="hv-outcome-group" class="border-t border-slate-100 pt-4">
           <p class="text-sm font-semibold text-slate-700 mb-3">What came out of this visit? <span class="text-red-500">*</span></p>
           <div class="mb-3">
             <label class="flex items-center gap-2 cursor-pointer select-none">
@@ -1157,7 +1160,7 @@
               No downstream record will be created. The visit is logged as "no issue".
             </div>
           </div>
-          <div class="mb-3">
+          <div class="mb-3" id="hv-trigger-adverse-wrap">
             <label class="flex items-center gap-2 cursor-pointer select-none">
               <input type="checkbox" id="hv-trigger-adverse" onchange="_outcomeChange('hv', 'adverse')" class="w-4 h-4 rounded border-slate-300 text-red-500 focus:ring-red-300">
               <span class="text-sm font-medium text-slate-700">Adverse Event</span>
@@ -1193,6 +1196,9 @@
               An Other Device Issue record will be created and appear in overdue events for completion.
             </div>
           </div>
+        </div>
+        <div id="hv-outcome-ended-note" class="hidden border-t border-slate-100 pt-4">
+          <p class="text-sm text-slate-500 italic">No further events can be triggered for this patient. This entry will be logged as "no issue".</p>
         </div>
         <div class="h-1"></div>
       </div>
@@ -1328,7 +1334,7 @@
       </div>
 
       <!-- ── Triggered events ─────────────────────────────────────────── -->
-      <div class="border-t border-slate-100 pt-4">
+      <div id="fc-outcome-group" class="border-t border-slate-100 pt-4">
         <p class="text-sm font-semibold text-slate-700 mb-3">What came out of this call? <span class="text-red-500">*</span></p>
 
         <!-- No Issue — mutually exclusive with every issue toggle below -->
@@ -1343,7 +1349,7 @@
         </div>
 
         <!-- Adverse Event -->
-        <div class="mb-3">
+        <div class="mb-3" id="fc-trigger-adverse-wrap">
           <label class="flex items-center gap-2 cursor-pointer select-none">
             <input type="checkbox" id="fc-trigger-adverse" onchange="_outcomeChange('fc', 'adverse')" class="w-4 h-4 rounded border-slate-300 text-red-500 focus:ring-red-300">
             <span class="text-sm font-medium text-slate-700">Adverse Event</span>
@@ -1384,6 +1390,9 @@
             An Other Device Issue record will be created and appear in overdue events for completion.
           </div>
         </div>
+      </div>
+      <div id="fc-outcome-ended-note" class="hidden border-t border-slate-100 pt-4">
+        <p class="text-sm text-slate-500 italic">No further events can be triggered for this patient. This call will be logged as "no issue".</p>
       </div>
 
       <div class="h-1"></div>
@@ -1446,7 +1455,7 @@
       {{ attachment_section('pc') }}
 
       <!-- ── Triggered events ─────────────────────────────────────────── -->
-      <div class="border-t border-slate-100 pt-4">
+      <div id="pc-outcome-group" class="border-t border-slate-100 pt-4">
         <p class="text-sm font-semibold text-slate-700 mb-3">What came out of this call? <span class="text-red-500">*</span></p>
         <!-- No Issue — mutually exclusive with every issue toggle below -->
         <div class="mb-3">
@@ -1459,7 +1468,7 @@
           </div>
         </div>
         <!-- Adverse Event -->
-        <div class="mb-3">
+        <div class="mb-3" id="pc-trigger-adverse-wrap">
           <label class="flex items-center gap-2 cursor-pointer select-none">
             <input type="checkbox" id="pc-trigger-adverse" onchange="_outcomeChange('pc', 'adverse')" class="w-4 h-4 rounded border-slate-300 text-red-500 focus:ring-red-300">
             <span class="text-sm font-medium text-slate-700">Adverse Event</span>
@@ -1498,6 +1507,9 @@
             An Other Device Issue record will be created and appear in overdue events for completion.
           </div>
         </div>
+      </div>
+      <div id="pc-outcome-ended-note" class="hidden border-t border-slate-100 pt-4">
+        <p class="text-sm text-slate-500 italic">No further events can be triggered for this patient. This call will be logged as "no issue".</p>
       </div>
       <div class="h-1"></div>
     </div>

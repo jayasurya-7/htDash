@@ -4193,10 +4193,8 @@ async function openActivationModal(evId) {
   if (vcgRow) vcgRow.classList.toggle('hidden', !isControl);
   if (vcgSel) vcgSel.value = '';
 
-  document.getElementById('act-trigger-robot-wrap').classList.toggle('hidden', !isExperimental);
-  document.getElementById('act-trigger-watch-wrap').classList.toggle('hidden',
-    !(patientData?.agWatchRightID || patientData?.agWatchLeftID));
-  document.getElementById('act-trigger-other-device-wrap').classList.toggle('hidden', !isExperimental);
+  // Outcome group visibility (group, watch-assigned, training-ended cutoff)
+  // is centralised in _outcomeReset → _applyOutcomeVisibility.
   _outcomeReset('act');
 
   // Reset NO section fields
@@ -6120,11 +6118,8 @@ function openHomeVisitModal(ev) {
     document.getElementById('hv-date-lock-note').classList.add('hidden');
   }
 
-  const isExpHv = patientData?.group === 'experimental';
-  document.getElementById('hv-trigger-robot-wrap').classList.toggle('hidden', !isExpHv);
-  document.getElementById('hv-trigger-other-device-wrap').classList.toggle('hidden', !isExpHv);
-  document.getElementById('hv-trigger-watch-wrap').classList.toggle('hidden',
-    !(patientData?.agWatchRightID || patientData?.agWatchLeftID));
+  // Outcome group visibility (group, watch-assigned, training-ended cutoff)
+  // is centralised in _outcomeReset → _applyOutcomeVisibility.
   _outcomeReset('hv');
 
   // ── NO section setup ──
@@ -6332,14 +6327,8 @@ function openFollowupCallModal(ev) {
   document.getElementById('followup-call-scheduled-display').textContent = _followupCallScheduledDate || '';
   document.getElementById('followup-call-date').addEventListener('change', _followupCallCheckDateChange, { once: false });
 
-  // Robot Issue and ODI only shown for experimental patients
-  const isExpFc = patientData?.group === 'experimental';
-  const robotWrap = document.getElementById('fc-trigger-robot-wrap');
-  if (robotWrap) robotWrap.classList.toggle('hidden', !isExpFc);
-  document.getElementById('fc-trigger-other-device-wrap').classList.toggle('hidden', !isExpFc);
-  // Watch Record only shown when at least one watch is currently assigned
-  const watchWrap = document.getElementById('fc-trigger-watch-wrap');
-  if (watchWrap) watchWrap.classList.toggle('hidden', !(patientData?.agWatchRightID || patientData?.agWatchLeftID));
+  // Outcome group visibility (group, watch-assigned, training-ended cutoff)
+  // is centralised in _outcomeReset → _applyOutcomeVisibility.
   _outcomeReset('fc');
 
   // Show AE discussion section only when an adverse_event_followup stub exists.
@@ -6508,8 +6497,53 @@ function _outcomeChange(prefix, changedType) {
   }
 }
 
-// Reset every toggle in the outcome group to unchecked and refresh the
-// notes + disabled/dimmed state. Called by each modal's opener.
+// Single source of truth for which issue toggles are hidden, per the current
+// patient state. Returns Map<type, hidden:bool>. Rules in one place rather
+// than duplicated across four modal openers:
+//   - adverse:      hidden when training has permanently ended (any path)
+//   - robot:        hidden for control patients OR training ended
+//   - watch:        hidden when no watch is currently assigned OR training ended
+//   - other-device: hidden for control patients OR training ended
+// See CLAUDE.md → "Trigger toggle visibility cutoff".
+function _outcomeIssueVisibility() {
+  const p        = patientData || {};
+  const isExp    = p.group === 'experimental';
+  const hasWatch = !!(p.agWatchRightID || p.agWatchLeftID);
+  const ended    = _trainingPermanentlyEnded();
+  return {
+    'adverse':       ended,
+    'robot':         !isExp || ended,
+    'watch':         !hasWatch || ended,
+    'other-device':  !isExp || ended,
+  };
+}
+
+// Apply per-toggle visibility to the wrap elements. Each issue toggle has a
+// wrap element with id `{prefix}-trigger-{type}-wrap`; if any wrap is missing
+// in the template the rule is silently skipped (no DOM error).
+//
+// When every issue toggle is hidden (training has permanently ended), the
+// entire outcome group `{prefix}-outcome-group` is hidden and the sibling
+// note `{prefix}-outcome-ended-note` is shown in its place. Required-selection
+// is then satisfied automatically by `_outcomeRead` (returns no_issue: true);
+// no user click needed since there's no meaningful choice to make.
+function _applyOutcomeVisibility(prefix) {
+  const vis = _outcomeIssueVisibility();
+  for (const t of _OUTCOME_ISSUE_TYPES) {
+    const wrap = document.getElementById(`${prefix}-trigger-${t}-wrap`);
+    if (wrap) wrap.classList.toggle('hidden', !!vis[t]);
+  }
+  const allHidden = _OUTCOME_ISSUE_TYPES.every(t => !!vis[t]);
+  const groupEl = document.getElementById(`${prefix}-outcome-group`);
+  const noteEl  = document.getElementById(`${prefix}-outcome-ended-note`);
+  if (groupEl) groupEl.classList.toggle('hidden', allHidden);
+  if (noteEl)  noteEl.classList.toggle('hidden', !allHidden);
+}
+
+// Reset every toggle in the outcome group to unchecked, apply visibility
+// rules, and refresh notes + disabled/dimmed state. Called by each modal's
+// opener — the opener doesn't need to know any of the per-toggle visibility
+// rules, they're all centralised here.
 function _outcomeReset(prefix) {
   const noIssueCb = document.getElementById(`${prefix}-trigger-no-issue`);
   if (noIssueCb) noIssueCb.checked = false;
@@ -6518,6 +6552,7 @@ function _outcomeReset(prefix) {
     if (cb) cb.checked = false;
     _outcomeUpdateNote(prefix, t);
   });
+  _applyOutcomeVisibility(prefix);
   _outcomeChange(prefix);
 }
 
@@ -6525,7 +6560,16 @@ function _outcomeReset(prefix) {
 // Toggles whose visibility wrap (`{prefix}-trigger-{type}-wrap`) is hidden are
 // treated as unchecked, so non-experimental patients don't accidentally send
 // robot/other-device triggers even if the checkbox state survived a re-open.
+//
+// When the entire outcome group is hidden (training permanently ended — every
+// issue toggle is unavailable), auto-confirms `{no_issue: true, triggered: []}`
+// regardless of checkbox state. The user is not asked to click the only
+// remaining option; the system records the outcome on their behalf.
 function _outcomeRead(prefix) {
+  const groupEl = document.getElementById(`${prefix}-outcome-group`);
+  if (groupEl && groupEl.classList.contains('hidden')) {
+    return { no_issue: true, triggered: [] };
+  }
   const noIssue = !!document.getElementById(`${prefix}-trigger-no-issue`)?.checked;
   const triggered = [];
   for (const t of _OUTCOME_ISSUE_TYPES) {
@@ -6565,11 +6609,8 @@ function openPatientCallModal() {
   document.getElementById('pc-reason').value = '';
   _resetAttachment('pc');
 
-  const isExpPc = patientData?.group === 'experimental';
-  document.getElementById('pc-trigger-robot-wrap').classList.toggle('hidden', !isExpPc);
-  document.getElementById('pc-trigger-other-device-wrap').classList.toggle('hidden', !isExpPc);
-  document.getElementById('pc-trigger-watch-wrap').classList.toggle('hidden',
-    !(patientData?.agWatchRightID || patientData?.agWatchLeftID));
+  // Outcome group visibility (group, watch-assigned, training-ended cutoff)
+  // is centralised in _outcomeReset → _applyOutcomeVisibility.
   _outcomeReset('pc');
 
   setError('pc-error', '');
