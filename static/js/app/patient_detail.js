@@ -1216,7 +1216,17 @@ const _TIMELINE_BASE_FIELDS = new Set([
   'id', 'protocol_event_id', 'event_name', 'scheduled_date',
   'completion_date', 'filed_at', 'flagged', '_synthetic',
   'attachment', 'attachment_caption',
+  // UUID-carrying internal references: human users don't need to see these
+  // on the Timeline — they live elsewhere as aliases (AE##, RI##, etc.).
+  'adverse_event_ids', 'related_patient_call_id', 'triggered_by_id',
+  'event_notes',  // role-private; server strips but skip defensively
 ]);
+
+// Matches v4-style UUIDs. Used to defensively skip any row whose value (or
+// every element of whose array value) is just a raw UUID — those are internal
+// references and never useful to show in the Timeline.
+const _UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const _isUuid  = (s) => typeof s === 'string' && _UUID_RE.test(s);
 
 // Preferred display order for known extra fields. 'notes' is always rendered last.
 const _FIELD_ORDER = [
@@ -1286,6 +1296,10 @@ function _timelineExtraFields(ev) {
     if (Array.isArray(val) && val.length === 0) continue;
     // Watch data upload: the download link already shows the filename — skip the dup row.
     if (key === 'original_filename' && ev.data_file) continue;
+    // Suppress any row whose value is just a UUID (or list of UUIDs) — these
+    // are internal references with no human meaning on the Timeline.
+    if (_isUuid(val)) continue;
+    if (Array.isArray(val) && val.every(_isUuid)) continue;
     const label = _FIELD_LABELS[key] || key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
     let display;
     if (typeof val === 'boolean') {
@@ -1576,9 +1590,9 @@ function renderTimelineTab() {
   // Two-pane, centered group (margins on wide screens — not full width). The original
   // rich timeline keeps its width on the left; the detailed notes view sits on the right.
   container.innerHTML = `
-    <div class="flex h-full justify-center gap-8 px-6 py-4 overflow-x-auto">
-      <div class="flex-none w-[640px] max-w-full overflow-y-auto pr-1">${rows}</div>
-      <div id="timeline-detail" class="flex-none w-[400px] max-w-full overflow-y-auto border-l border-slate-200 pl-8">
+    <div class="flex h-full justify-center gap-8 px-6 py-4">
+      <div class="flex-1 min-w-0 max-w-[640px] overflow-y-auto overflow-x-hidden pr-1">${rows}</div>
+      <div id="timeline-detail" class="flex-1 min-w-0 max-w-[400px] overflow-y-auto overflow-x-hidden border-l border-slate-200 pl-8">
         ${_timelineDetailPlaceholder()}
       </div>
     </div>`;
@@ -1743,8 +1757,9 @@ async function renderCallLogsTab() {
 
 function _renderCallLogs(container, data) {
   const all = [
-    ...(data.followup_calls || []).map(c => ({ ...c, _callType: 'followup' })),
-    ...(data.patient_calls  || []).map(c => ({ ...c, _callType: 'patient'  })),
+    ...(data.followup_calls    || []).map(c => ({ ...c, _callType: 'followup'    })),
+    ...(data.patient_calls     || []).map(c => ({ ...c, _callType: 'patient'     })),
+    ...(data.ae_followup_calls || []).map(c => ({ ...c, _callType: 'ae_followup' })),
   ];
   all.sort(_cmpCompletedDesc);
 
@@ -1767,10 +1782,42 @@ const _TRIGGERED_LABELS = {
 
 function _callCard(c) {
   const isFollowup   = c._callType === 'followup';
-  const borderCls    = isFollowup ? 'border-blue-200'   : 'border-violet-200';
-  const headerBg     = isFollowup ? 'bg-blue-50 border-b border-blue-100'   : 'bg-violet-50 border-b border-violet-100';
-  const titleCls     = isFollowup ? 'text-blue-800'     : 'text-violet-800';
-  const dayBadgeCls  = isFollowup ? 'text-blue-500'     : 'text-violet-500';
+  const isAeFollowup = c._callType === 'ae_followup';
+
+  // Theme + type-tag string by call type. headerBg uses solid backgrounds (no
+  // border-b — the meta strip below the header carries its own border) so the
+  // collapsible header reads as a single, tappable surface.
+  let borderCls, headerBg, titleCls, dayBadgeCls, typeTag;
+  if (isAeFollowup) {
+    borderCls   = 'border-rose-200';
+    headerBg    = 'bg-rose-50';
+    titleCls    = 'text-rose-800';
+    dayBadgeCls = 'text-rose-500';
+    typeTag     = 'AE Follow-up';
+  } else if (isFollowup) {
+    borderCls   = 'border-blue-200';
+    headerBg    = 'bg-blue-50';
+    titleCls    = 'text-blue-800';
+    dayBadgeCls = 'text-blue-500';
+    typeTag     = c.protocol_event_id === 'followup_call_d07' ? 'Follow-up Day 07'
+                : c.protocol_event_id === 'followup_call_d21' ? 'Follow-up Day 21'
+                : (c.event_name || 'Follow-up Call');
+  } else {
+    borderCls   = 'border-violet-200';
+    headerBg    = 'bg-violet-50';
+    titleCls    = 'text-violet-800';
+    dayBadgeCls = 'text-violet-500';
+    typeTag     = 'Patient Call';
+  }
+
+  const alias     = c.alias || '';
+  // Small chip surfaces patient-initiated AE follow-ups so the therapist can
+  // distinguish them at a glance from the routine scheduled chain.
+  const patientInitiatedChip = (isAeFollowup && c.patient_initiated)
+    ? `<span class="inline-flex items-center gap-1 text-xs bg-amber-50 text-amber-800 border border-amber-200 rounded-full px-2 py-0.5"><i class="fas fa-phone-volume text-[10px]"></i>Patient-initiated</span>`
+    : '';
+  const titleText = alias ? `${_esc(alias)} <span class="text-slate-400 font-normal">·</span> ${_esc(typeTag)}`
+                          : _esc(typeTag);
 
   const dayNum  = _dayNumber(c.completion_date);
   const dayBadge = dayNum !== null
@@ -1778,6 +1825,13 @@ function _callCard(c) {
   const dateStr  = c.completion_date ? _fmtDateTime(c.completion_date) : '—';
   const filedStr = _showFiledLine(c) ? _fmtDateTime(c.filed_at) : '';
   const duration = c.duration_minutes ? `${c.duration_minutes} min` : '—';
+  const modeStr  = c.call_mode ? ` <span class="text-slate-300">·</span> <i class="fas fa-${c.call_mode === 'video' ? 'video' : 'phone-volume'} mr-0.5"></i>${c.call_mode === 'video' ? 'Video' : 'Audio'}` : '';
+
+  // For AE follow-up, surface the AE aliases the call covered.
+  const aeAliases = (c.ae_aliases || []).filter(Boolean);
+  const aeRef = (isAeFollowup && aeAliases.length)
+    ? `<p class="text-xs text-slate-500"><span class="text-slate-400">Re:</span> ${aeAliases.map(_esc).join(', ')}</p>`
+    : '';
 
   const triggered = (c.triggered || []).map(t =>
     `<span class="inline-flex items-center gap-1 text-xs bg-amber-50 text-amber-700 border border-amber-200 rounded-full px-2 py-0.5">` +
@@ -1785,7 +1839,7 @@ function _callCard(c) {
   ).join('');
 
   const reasonNote = c.date_change_reason
-    ? `<p class="text-xs text-amber-600"><i class="fas fa-info-circle mr-1"></i>Date changed: ${c.date_change_reason}</p>`
+    ? `<p class="text-xs text-amber-600"><i class="fas fa-info-circle mr-1"></i>Date changed: ${_esc(c.date_change_reason)}</p>`
     : '';
 
   const attachmentLink = (c.attachment && c.id)
@@ -1794,26 +1848,120 @@ function _callCard(c) {
       `<i class="fas fa-paperclip"></i>Download attachment</a>`
     : '';
 
+  const cardId    = (c.id || '').replace(/-/g, '');
+  const noteCount = c.event_notes_count || 0;
+  const noteCountBadge = `<span id="call-note-count-${cardId}"
+      class="inline-flex items-center gap-1 text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200 rounded-full px-2 py-0.5${noteCount > 0 ? '' : ' hidden'}"
+      title="Event notes"><i class="fas fa-sticky-note text-[10px]"></i>${noteCount}</span>`;
+
+  // Notes section at the bottom of the body. Target id = call entry's own id —
+  // notes are about that specific call interaction (whatever its type).
+  const notesSection = c.id ? `
+    <div class="mt-3 pt-3 border-t border-slate-200">
+      <div class="flex items-center justify-between mb-2">
+        <span class="text-sm font-semibold text-slate-700 inline-flex items-center gap-1.5">
+          <i class="fas fa-sticky-note text-blue-500"></i> Notes
+        </span>
+        <button type="button" onclick="openEventNoteModal('${c.id}')"
+                class="inline-flex items-center gap-1 px-2.5 py-1 bg-blue-600 text-white rounded-lg text-xs font-medium hover:bg-blue-700">
+          <i class="fas fa-plus text-[10px]"></i> Add Note
+        </button>
+      </div>
+      <div id="call-notes-${cardId}" data-event-id="${c.id}">
+        <p class="text-xs text-slate-400 italic">Loading…</p>
+      </div>
+    </div>` : '';
+
   return `
     <div class="bg-white rounded-xl border ${borderCls} shadow-sm mb-3 overflow-hidden">
-      <div class="${headerBg} px-4 py-2.5 flex items-center justify-between">
-        <span class="text-sm font-semibold ${titleCls}">${c.event_name || 'Patient Call'}</span>
-        <div class="flex flex-col items-end">
-          <div class="flex items-center gap-3">
-            ${dayBadge}
-            <span class="text-xs text-slate-500">${dateStr}</span>
+      <div class="${headerBg} px-4 py-2.5 cursor-pointer select-none flex items-center justify-between"
+           onclick="_toggleCallCard('${cardId}')">
+        <div class="flex items-center gap-2.5 flex-wrap">
+          <span class="text-sm font-semibold ${titleCls}">${titleText}</span>
+          ${patientInitiatedChip}
+          ${noteCountBadge}
+        </div>
+        <div class="flex items-center gap-3">
+          <div class="flex flex-col items-end">
+            <div class="flex items-center gap-3">
+              ${dayBadge}
+              <span class="text-xs text-slate-500">${dateStr}</span>
+            </div>
+            ${filedStr ? `<span class="text-xs text-slate-400">Filed: ${filedStr}</span>` : ''}
           </div>
-          ${filedStr ? `<span class="text-xs text-slate-400">Filed: ${filedStr}</span>` : ''}
+          <i class="fas fa-chevron-down text-xs ${titleCls}" id="call-chevron-${cardId}"
+             style="transition: transform 0.15s"></i>
         </div>
       </div>
-      <div class="px-4 py-3 space-y-1.5">
-        <p class="text-xs text-slate-500"><i class="fas fa-clock mr-1"></i>${duration}</p>
-        ${c.notes ? `<p class="text-sm text-slate-700">${c.notes}</p>` : ''}
+      <div id="call-body-${cardId}" class="hidden bg-white px-4 py-3 space-y-1.5">
+        <p class="text-xs text-slate-500"><i class="fas fa-clock mr-1"></i>${duration}${modeStr}</p>
+        ${aeRef}
+        ${c.notes ? `<p class="text-sm text-slate-700">${_esc(c.notes)}</p>` : ''}
         ${reasonNote}
         ${attachmentLink}
         ${triggered ? `<div class="flex flex-wrap gap-1.5 pt-1">${triggered}</div>` : ''}
+        ${notesSection}
       </div>
     </div>`;
+}
+
+function _toggleCallCard(cardId) {
+  const body    = document.getElementById(`call-body-${cardId}`);
+  const chevron = document.getElementById(`call-chevron-${cardId}`);
+  if (!body) return;
+  const isHidden = body.classList.toggle('hidden');
+  if (chevron) chevron.style.transform = isHidden ? '' : 'rotate(180deg)';
+  if (!isHidden) {
+    const notesBox = document.getElementById(`call-notes-${cardId}`);
+    if (notesBox && !notesBox.dataset.loaded) {
+      const evId = notesBox.dataset.eventId;
+      if (evId) _loadCallCardNotes(evId, cardId);
+    }
+  }
+}
+
+async function _loadCallCardNotes(eventId, cardId) {
+  const box = document.getElementById(`call-notes-${cardId}`);
+  if (!box) return;
+  const { ok, data } = await apiGet(`/api/patients/${PATIENT_HOMER_ID}/events/${eventId}/notes`);
+  if (!ok) {
+    box.innerHTML = `<p class="text-xs text-red-500">${_esc(data.error || 'Failed to load notes.')}</p>`;
+    return;
+  }
+  const notes   = data.notes || [];
+  const isAdmin = !!data.is_admin;
+  box.dataset.loaded = '1';
+  box.innerHTML = notes.length
+    ? notes.map(n => _eventNoteCard(n, isAdmin)).join('')
+    : `<p class="text-xs text-slate-400 italic">No notes on this event yet.</p>`;
+}
+
+function _refreshCallCardNotes(eventId) {
+  if (!eventId) return;
+  const cardId = (eventId || '').replace(/-/g, '');
+  const ev     = (_completeEventsCache || []).find(e => e.id === eventId);
+  const count  = ev?.event_notes_count || 0;
+  // Mirror the bump into _callLogsCache so a tab switch + return doesn't
+  // re-render with a stale count. The two caches are populated from
+  // independent endpoints but represent the same underlying entries.
+  if (_callLogsCache) {
+    for (const bucket of ['followup_calls', 'patient_calls', 'ae_followup_calls']) {
+      const arr = _callLogsCache[bucket];
+      if (!Array.isArray(arr)) continue;
+      const hit = arr.find(c => c.id === eventId);
+      if (hit) hit.event_notes_count = count;
+    }
+  }
+  const badge  = document.getElementById(`call-note-count-${cardId}`);
+  if (badge) {
+    badge.innerHTML = `<i class="fas fa-sticky-note text-[10px]"></i>${count}`;
+    badge.classList.toggle('hidden', count <= 0);
+  }
+  const notesBox = document.getElementById(`call-notes-${cardId}`);
+  if (notesBox) {
+    delete notesBox.dataset.loaded;
+    _loadCallCardNotes(eventId, cardId);
+  }
 }
 
 // ── Adverse Events tab ────────────────────────────────────────────────────────
@@ -1852,6 +2000,54 @@ function _toggleAeCard(cardId) {
   if (!body) return;
   const isHidden = body.classList.toggle('hidden');
   if (chevron) chevron.style.transform = isHidden ? '' : 'rotate(180deg)';
+  // Lazy-load event notes the first time the card opens. Subsequent opens
+  // keep the rendered list (refreshed only after a save via _refreshAeCardNotes).
+  if (!isHidden) {
+    const notesBox = document.getElementById(`ae-notes-${cardId}`);
+    if (notesBox && !notesBox.dataset.loaded) {
+      const evId = notesBox.dataset.eventId;
+      if (evId) _loadAeCardNotes(evId, cardId);
+    }
+  }
+}
+
+// Fetch the role-filtered event-notes for an AE and render them into the
+// card's notes container. Same endpoint and same _eventNoteCard renderer as
+// the Timeline detail pane — one storage path, two surfaces.
+async function _loadAeCardNotes(eventId, cardId) {
+  const box = document.getElementById(`ae-notes-${cardId}`);
+  if (!box) return;
+  const { ok, data } = await apiGet(`/api/patients/${PATIENT_HOMER_ID}/events/${eventId}/notes`);
+  if (!ok) {
+    box.innerHTML = `<p class="text-xs text-red-500">${_esc(data.error || 'Failed to load notes.')}</p>`;
+    return;
+  }
+  const notes   = data.notes || [];
+  const isAdmin = !!data.is_admin;
+  box.dataset.loaded = '1';
+  box.innerHTML = notes.length
+    ? notes.map(n => _eventNoteCard(n, isAdmin)).join('')
+    : `<p class="text-xs text-slate-400 italic">No notes on this event yet.</p>`;
+}
+
+// Called by the save-note handler when an AE card may be on screen. Updates
+// the header note-count badge from the cache and re-loads the notes list so
+// the new note appears immediately. No-op if the card isn't currently rendered.
+function _refreshAeCardNotes(eventId) {
+  if (!eventId) return;
+  const cardId = (eventId || '').replace(/-/g, '');
+  const ev     = (_completeEventsCache || []).find(e => e.id === eventId);
+  const count  = ev?.event_notes_count || 0;
+  const badge  = document.getElementById(`ae-note-count-${cardId}`);
+  if (badge) {
+    badge.innerHTML = `<i class="fas fa-sticky-note text-[10px]"></i>${count}`;
+    badge.classList.toggle('hidden', count <= 0);
+  }
+  const notesBox = document.getElementById(`ae-notes-${cardId}`);
+  if (notesBox) {
+    delete notesBox.dataset.loaded;
+    _loadAeCardNotes(eventId, cardId);
+  }
 }
 
 function _adverseEventCard(ev, followupEvents) {
@@ -1941,6 +2137,9 @@ function _adverseEventCard(ev, followupEvents) {
       + (aeAliases ? `: ${aeAliases}` : '');
     const feDate    = fe.completion_date ? _fmtDateTime(fe.completion_date) : '—';
     const feFiled   = _showFiledLine(fe) ? _fmtDateTime(fe.filed_at) : '';
+    const patientInitiatedChip = (fe.protocol_event_id === 'adverse_event_followup' && fe.patient_initiated)
+      ? ` <span class="inline-flex items-center gap-1 text-[10px] bg-amber-50 text-amber-800 border border-amber-200 rounded-full px-1.5 py-0.5"><i class="fas fa-phone-volume text-[9px]"></i>Patient-initiated</span>`
+      : '';
     const feNotes   = fe.notes   ? `<p class="text-xs text-slate-500 mt-0.5">${fe.notes}</p>`        : '';
     const discNotes = disc?.notes ? `<p class="text-xs text-slate-500 mt-0.5 italic">${disc.notes}</p>` : '';
     const resumeStr = disc?.can_resume_from
@@ -1955,7 +2154,7 @@ function _adverseEventCard(ev, followupEvents) {
     return `
       <div class="py-2 border-t border-slate-100">
         <div class="flex items-center justify-between flex-wrap gap-1 mb-0.5">
-          <span class="text-xs font-medium text-slate-700">${typeLabel}</span>
+          <span class="text-xs font-medium text-slate-700">${typeLabel}${patientInitiatedChip}</span>
           <span class="text-xs text-slate-400">${feDate}${feFiled ? ` <span class="text-slate-300">(filed ${feFiled})</span>` : ''}</span>
         </div>
         ${feNotes}${discNotes}
@@ -1972,6 +2171,33 @@ function _adverseEventCard(ev, followupEvents) {
 
   const cardId = ev.id.replace(/-/g, '');
 
+  // Note-count badge in the header (server-stamped, role-filtered count from
+  // api_patient_events). Hidden when zero so the header stays uncluttered.
+  const noteCount = ev.event_notes_count || 0;
+  const noteCountBadge = `<span id="ae-note-count-${cardId}"
+      class="inline-flex items-center gap-1 text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200 rounded-full px-2 py-0.5${noteCount > 0 ? '' : ' hidden'}"
+      title="Event notes"><i class="fas fa-sticky-note text-[10px]"></i>${noteCount}</span>`;
+
+  // Notes section at the bottom of the body. Lazy-loaded on expand via
+  // _toggleAeCard → _loadAeCardNotes. The "Add Note" button opens the same
+  // shared note-modal used by the Timeline; storage is the same `event_notes`
+  // field on this AE entry.
+  const notesSection = `
+    <div class="mt-3 pt-3 border-t border-slate-200">
+      <div class="flex items-center justify-between mb-2">
+        <span class="text-sm font-semibold text-slate-700 inline-flex items-center gap-1.5">
+          <i class="fas fa-sticky-note text-blue-500"></i> Notes
+        </span>
+        <button type="button" onclick="openEventNoteModal('${ev.id}')"
+                class="inline-flex items-center gap-1 px-2.5 py-1 bg-blue-600 text-white rounded-lg text-xs font-medium hover:bg-blue-700">
+          <i class="fas fa-plus text-[10px]"></i> Add Note
+        </button>
+      </div>
+      <div id="ae-notes-${cardId}" data-event-id="${ev.id}">
+        <p class="text-xs text-slate-400 italic">Loading…</p>
+      </div>
+    </div>`;
+
   return `
     <div class="rounded-xl border ${borderCls} shadow-sm mb-3 overflow-hidden">
       <div class="${headerBg} px-4 py-2.5 cursor-pointer select-none flex items-center justify-between"
@@ -1979,6 +2205,7 @@ function _adverseEventCard(ev, followupEvents) {
         <div class="flex items-center gap-2.5 flex-wrap">
           <span class="text-sm font-bold ${headerText}">${ev.alias || ''}</span>
           ${statusBadge}
+          ${noteCountBadge}
         </div>
         <i class="fas fa-chevron-down text-xs ${headerText}" id="ae-chevron-${cardId}"
            style="transition: transform 0.15s"></i>
@@ -1990,6 +2217,7 @@ function _adverseEventCard(ev, followupEvents) {
         ${triggerStr}
         ${attachmentStr}
         ${followupSection}
+        ${notesSection}
       </div>
     </div>`;
 }
@@ -2004,33 +2232,29 @@ function renderWatchRecordsTab() {
     .filter(e => e.protocol_event_id === 'watch_record')
     .sort(_cmpCompletedDesc);
 
-  // AG Watch data-upload tasks: outstanding (incomplete) + completed (free).
-  const uploadsOpen = (eventsCache || [])
-    .filter(e => e.protocol_event_id === 'watch_data_upload')
-    .sort((a, b) => (a.removed_date || '').localeCompare(b.removed_date || ''));
-  const uploadsDone = (_completeEventsCache || [])
-    .filter(e => e.protocol_event_id === 'watch_data_upload')
-    .sort((a, b) => (b.removed_date || b.completion_date || '')
-      .localeCompare(a.removed_date || a.completion_date || ''));
+  // Build wr-id → uploads map. Each `watch_data_upload` with
+  // `triggered_by.type === 'watch_record'` and a matching id is nested under
+  // its parent watch_record card. `device_return`-triggered uploads (when
+  // that event ships) are intentionally not surfaced on this tab.
+  const uploadsByWr = new Map();
+  const _stash = (ev) => {
+    const tb = ev.triggered_by;
+    if (!tb || tb.type !== 'watch_record' || !tb.id) return;
+    if (!uploadsByWr.has(tb.id)) uploadsByWr.set(tb.id, []);
+    uploadsByWr.get(tb.id).push(ev);
+  };
+  (eventsCache || []).forEach(e => { if (e.protocol_event_id === 'watch_data_upload') _stash(e); });
+  (_completeEventsCache || []).forEach(e => { if (e.protocol_event_id === 'watch_data_upload') _stash(e); });
 
-  const recordsHtml = records.length
-    ? records.map(_watchRecordCard).join('')
-    : `<div class="flex flex-col items-center justify-center py-12 text-slate-300">
-         <i class="fas fa-clock text-3xl mb-3"></i>
-         <p class="text-sm">No watch records yet.</p>
-       </div>`;
-
-  let uploadsHtml = '';
-  if (uploadsOpen.length || uploadsDone.length) {
-    uploadsHtml =
-      `<h3 class="text-sm font-semibold text-slate-600 mt-6 mb-2 flex items-center gap-2">
-         <i class="fas fa-database text-indigo-400"></i> AG Watch Data Uploads
-       </h3>` +
-      uploadsOpen.map(_watchDataUploadOpenCard).join('') +
-      uploadsDone.map(_watchDataUploadDoneCard).join('');
+  if (!records.length) {
+    container.innerHTML = `
+      <div class="flex flex-col items-center justify-center py-12 text-slate-300">
+        <i class="fas fa-clock text-3xl mb-3"></i>
+        <p class="text-sm">No watch records yet.</p>
+      </div>`;
+    return;
   }
-
-  container.innerHTML = recordsHtml + uploadsHtml;
+  container.innerHTML = records.map(wr => _watchRecordCard(wr, uploadsByWr.get(wr.id) || [])).join('');
 }
 
 function _watchDataUploadOpenCard(ev) {
@@ -2109,7 +2333,7 @@ function _watchAssignmentRow(side, wr) {
   </div>`;
 }
 
-function _watchRecordCard(wr) {
+function _watchRecordCard(wr, uploads) {
   const dayNum   = _dayNumber(wr.completion_date);
   const dayBadge = dayNum !== null ? `<span class="text-xs font-semibold text-indigo-500">Day ${dayNum}</span>` : '';
   const dateStr  = wr.completion_date ? _fmtDateTime(wr.completion_date) : '—';
@@ -2132,31 +2356,73 @@ function _watchRecordCard(wr) {
   }
 
   const notesStr = wr.notes
-    ? `<div class="text-xs text-slate-500 mt-1"><span class="text-slate-400">Notes:</span> ${wr.notes}</div>` : '';
+    ? `<div class="text-xs text-slate-500 mt-1"><span class="text-slate-400">Notes:</span> ${_esc(wr.notes)}</div>` : '';
 
   const attachmentStr = (wr.attachment && wr.id)
     ? `<a href="/api/patients/${PATIENT_HOMER_ID}/download-attachment/${wr.id}" target="_blank"
          class="inline-flex items-center gap-1 text-xs text-blue-600 hover:underline mt-1">
          <i class="fas fa-paperclip"></i>Download attachment</a>` : '';
 
+  // Nested data-upload sub-section: sort with pending (no completion_date) first
+  // so the engineer's outstanding work is visually surfaced, then completed
+  // ones newest-first by completion_date.
+  let uploadsSection = '';
+  if (uploads && uploads.length) {
+    const sorted = uploads.slice().sort((a, b) => {
+      const aDone = !!a.completion_date;
+      const bDone = !!b.completion_date;
+      if (aDone !== bDone) return aDone ? 1 : -1;
+      return (b.completion_date || '').localeCompare(a.completion_date || '');
+    });
+    const rows = sorted.map(up =>
+      up.completion_date ? _watchDataUploadDoneCard(up) : _watchDataUploadOpenCard(up)
+    ).join('');
+    uploadsSection = `
+      <div class="mt-3 pt-3 border-t border-slate-200">
+        <p class="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1.5">
+          <i class="fas fa-database mr-1"></i>AG Watch Data Uploads
+        </p>
+        ${rows}
+      </div>`;
+  }
+
+  const alias     = wr.alias || '';
+  const titleText = alias ? `${_esc(alias)} <span class="text-slate-400 font-normal">·</span> Watch Record`
+                          : 'Watch Record';
+  const cardId    = (wr.id || '').replace(/-/g, '');
+
   return `
     <div class="bg-white rounded-xl border border-indigo-200 shadow-sm mb-3 overflow-hidden">
-      <div class="bg-indigo-50 border-b border-indigo-100 px-4 py-2.5 flex items-center justify-between">
-        <span class="text-sm font-semibold text-indigo-800">Watch Record</span>
-        <div class="flex flex-col items-end">
-          <div class="flex items-center gap-3">
-            ${dayBadge}
-            <span class="text-xs text-slate-500">${dateStr}</span>
+      <div class="bg-indigo-50 border-b border-indigo-100 px-4 py-2.5 cursor-pointer select-none flex items-center justify-between"
+           onclick="_toggleWrCard('${cardId}')">
+        <span class="text-sm font-semibold text-indigo-800">${titleText}</span>
+        <div class="flex items-center gap-3">
+          <div class="flex flex-col items-end">
+            <div class="flex items-center gap-3">
+              ${dayBadge}
+              <span class="text-xs text-slate-500">${dateStr}</span>
+            </div>
+            ${filedStr ? `<span class="text-xs text-slate-400">Filed: ${filedStr}</span>` : ''}
           </div>
-          ${filedStr ? `<span class="text-xs text-slate-400">Filed: ${filedStr}</span>` : ''}
+          <i class="fas fa-chevron-down text-xs text-indigo-800" id="wr-chevron-${cardId}"
+             style="transition: transform 0.15s"></i>
         </div>
       </div>
-      <div class="px-4 py-3 space-y-1.5">
+      <div id="wr-body-${cardId}" class="hidden px-4 py-3 space-y-1.5">
         ${rightRow}
         ${leftRow}
         ${syncStr}${wornStr}${nextStr}${triggerStr}${notesStr}${attachmentStr}
+        ${uploadsSection}
       </div>
     </div>`;
+}
+
+function _toggleWrCard(cardId) {
+  const body    = document.getElementById(`wr-body-${cardId}`);
+  const chevron = document.getElementById(`wr-chevron-${cardId}`);
+  if (!body) return;
+  const isHidden = body.classList.toggle('hidden');
+  if (chevron) chevron.style.transform = isHidden ? '' : 'rotate(180deg)';
 }
 
 // ── Device Issues tab (RI + ODI unified) ─────────────────────────────────────
@@ -2222,6 +2488,47 @@ function _toggleDiCard(cardId) {
   if (!body) return;
   const isHidden = body.classList.toggle('hidden');
   if (chevron) chevron.style.transform = isHidden ? '' : 'rotate(180deg)';
+  // Lazy-load event notes on first expand.
+  if (!isHidden) {
+    const notesBox = document.getElementById(`di-notes-${cardId}`);
+    if (notesBox && !notesBox.dataset.loaded) {
+      const evId = notesBox.dataset.eventId;
+      if (evId) _loadDiCardNotes(evId, cardId);
+    }
+  }
+}
+
+async function _loadDiCardNotes(eventId, cardId) {
+  const box = document.getElementById(`di-notes-${cardId}`);
+  if (!box) return;
+  const { ok, data } = await apiGet(`/api/patients/${PATIENT_HOMER_ID}/events/${eventId}/notes`);
+  if (!ok) {
+    box.innerHTML = `<p class="text-xs text-red-500">${_esc(data.error || 'Failed to load notes.')}</p>`;
+    return;
+  }
+  const notes   = data.notes || [];
+  const isAdmin = !!data.is_admin;
+  box.dataset.loaded = '1';
+  box.innerHTML = notes.length
+    ? notes.map(n => _eventNoteCard(n, isAdmin)).join('')
+    : `<p class="text-xs text-slate-400 italic">No notes on this event yet.</p>`;
+}
+
+function _refreshDiCardNotes(eventId) {
+  if (!eventId) return;
+  const cardId = (eventId || '').replace(/-/g, '');
+  const ev     = (_completeEventsCache || []).find(e => e.id === eventId);
+  const count  = ev?.event_notes_count || 0;
+  const badge  = document.getElementById(`di-note-count-${cardId}`);
+  if (badge) {
+    badge.innerHTML = `<i class="fas fa-sticky-note text-[10px]"></i>${count}`;
+    badge.classList.toggle('hidden', count <= 0);
+  }
+  const notesBox = document.getElementById(`di-notes-${cardId}`);
+  if (notesBox) {
+    delete notesBox.dataset.loaded;
+    _loadDiCardNotes(eventId, cardId);
+  }
 }
 
 // Walk the visit chain forward from a call. Returns visits in chronological
@@ -2404,6 +2711,31 @@ function _deviceIssueCard(call) {
   const cardId = (call.id || '').replace(/-/g, '');
   const alias  = call.alias || (isRI ? 'Robot Issue' : 'Other Device Issue');
 
+  // Role-filtered event-note count, server-stamped on the entry. Hidden when zero.
+  const noteCount = call.event_notes_count || 0;
+  const noteCountBadge = `<span id="di-note-count-${cardId}"
+      class="inline-flex items-center gap-1 text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200 rounded-full px-2 py-0.5${noteCount > 0 ? '' : ' hidden'}"
+      title="Event notes"><i class="fas fa-sticky-note text-[10px]"></i>${noteCount}</span>`;
+
+  // Notes section at the bottom of the body. Notes target the call entry (the
+  // whole issue), not individual visits — visit-level notes go on each visit
+  // entry from the Timeline tab. Lazy-loaded on expand via _toggleDiCard.
+  const notesSection = `
+    <div class="mt-3 pt-3 border-t border-slate-200">
+      <div class="flex items-center justify-between mb-2">
+        <span class="text-sm font-semibold text-slate-700 inline-flex items-center gap-1.5">
+          <i class="fas fa-sticky-note text-blue-500"></i> Notes
+        </span>
+        <button type="button" onclick="openEventNoteModal('${call.id}')"
+                class="inline-flex items-center gap-1 px-2.5 py-1 bg-blue-600 text-white rounded-lg text-xs font-medium hover:bg-blue-700">
+          <i class="fas fa-plus text-[10px]"></i> Add Note
+        </button>
+      </div>
+      <div id="di-notes-${cardId}" data-event-id="${call.id}">
+        <p class="text-xs text-slate-400 italic">Loading…</p>
+      </div>
+    </div>`;
+
   return `
     <div class="rounded-xl border ${theme.border} shadow-sm mb-3 overflow-hidden">
       <div class="${theme.headerBg} px-4 py-2.5 cursor-pointer select-none flex items-center justify-between"
@@ -2411,7 +2743,7 @@ function _deviceIssueCard(call) {
         <div class="flex items-center gap-2.5 flex-wrap">
           <span class="text-sm font-bold ${theme.headerText}">${_esc(alias)}</span>
           <span class="text-xs text-slate-500">${theme.label}</span>
-          ${statusBadge}${pausedBadge}
+          ${statusBadge}${pausedBadge}${noteCountBadge}
         </div>
         <i class="fas fa-chevron-down text-xs ${theme.headerText}" id="di-chevron-${cardId}"
            style="transition: transform 0.15s"></i>
@@ -2423,6 +2755,7 @@ function _deviceIssueCard(call) {
         ${call.notes ? `<div class="text-xs text-slate-500"><span class="text-slate-400">Notes:</span> ${_esc(call.notes)}</div>` : ''}
         ${attachmentStr}
         ${visitsSection}
+        ${notesSection}
       </div>
     </div>`;
 }
@@ -2615,6 +2948,7 @@ async function openRobotIssueCallModal(ev) {
   document.getElementById('ric-date').value             = '';
   document.getElementById('ric-issue-occur-date').value = '';
   document.getElementById('ric-notes').value             = '';
+  document.querySelectorAll('input[name="ric-call-mode"]').forEach(r => { r.checked = false; });
   _resetAttachment('ric');
   setError('ric-error', '');
   _attachDateGuard('ric-date', 'ric-error');
@@ -2713,6 +3047,7 @@ function _ricUpdateNotesLabel() {
 async function saveRobotIssueCall() {
   const date           = document.getElementById('ric-date').value;
   let issueOccurDate   = document.getElementById('ric-issue-occur-date').value || null;
+  const callMode       = document.querySelector('input[name="ric-call-mode"]:checked')?.value || '';
   const notes          = document.getElementById('ric-notes').value.trim();
   const saveBtn        = document.getElementById('ric-save');
 
@@ -2722,7 +3057,8 @@ async function saveRobotIssueCall() {
     issueOccurDate = `${parts[2]}-${parts[1]}-${parts[0]}`;
   }
 
-  if (!date) { setError('ric-error', 'Call date is required.'); return; }
+  if (!date)     { setError('ric-error', 'Call date is required.'); return; }
+  if (!callMode) { setError('ric-error', 'Call mode (Audio / Video) is required.'); return; }
 
   const devices = [];
   for (const device of ['pluto', 'mars']) {
@@ -2774,7 +3110,7 @@ async function saveRobotIssueCall() {
   const { ok, data } = await apiPost(
     `/api/patients/${PATIENT_HOMER_ID}/complete-event/robot-issue-call`,
     { event_id: _ricEventId, completion_date: date, issue_occur_date: issueOccurDate,
-      notes: notes || null, devices, broken_protocol_mode: _ricIsBp }
+      call_mode: callMode, notes: notes || null, devices, broken_protocol_mode: _ricIsBp }
   );
   if (!ok) { setError('ric-error', data.error || 'Failed to save.'); saveBtn.disabled = false; return; }
 
@@ -3144,6 +3480,8 @@ function openAdverseEventFollowupModal(ev) {
   document.getElementById('aef-date').value     = '';
   document.getElementById('aef-duration').value  = '';
   document.getElementById('aef-notes').value     = '';
+  document.querySelectorAll('input[name="aef-call-mode"]').forEach(r => { r.checked = false; });
+  document.querySelectorAll('input[name="aef-initiator"]').forEach(r => { r.checked = false; });
   _setupAeSchedulingToggles('aef');
   _resetAttachment('aef');
   setError('aef-error', '');
@@ -3185,16 +3523,20 @@ function _aefToggleResume(i) {
 }
 
 async function saveAdverseEventFollowup() {
-  const date     = document.getElementById('aef-date').value;
-  const durStr   = document.getElementById('aef-duration').value.trim();
-  const notes    = document.getElementById('aef-notes').value.trim();
-  const saveBtn  = document.getElementById('aef-save');
+  const date      = document.getElementById('aef-date').value;
+  const durStr    = document.getElementById('aef-duration').value.trim();
+  const callMode  = document.querySelector('input[name="aef-call-mode"]:checked')?.value || '';
+  const initiator = document.querySelector('input[name="aef-initiator"]:checked')?.value || '';
+  const notes     = document.getElementById('aef-notes').value.trim();
+  const saveBtn   = document.getElementById('aef-save');
 
-  if (!date)   { setError('aef-error', 'Call date is required.'); return; }
-  if (!durStr) { setError('aef-error', 'Duration is required.'); return; }
-  const duration = parseInt(durStr, 10);
+  if (!date)      { setError('aef-error', 'Call date is required.'); return; }
+  if (!durStr)    { setError('aef-error', 'Duration is required.'); return; }
+  const duration  = parseInt(durStr, 10);
   if (!duration || duration <= 0) { setError('aef-error', 'Duration must be a positive number.'); return; }
-  if (!notes)  { setError('aef-error', 'Notes are required.'); return; }
+  if (!callMode)  { setError('aef-error', 'Call mode (Audio / Video) is required.'); return; }
+  if (!initiator) { setError('aef-error', 'Please indicate who initiated this call (Therapist / Patient).'); return; }
+  if (!notes)     { setError('aef-error', 'Notes are required.'); return; }
 
   const ae_discussions = [];
   for (let i = 0; i < _aefAeDetails.length; i++) {
@@ -3219,7 +3561,8 @@ async function saveAdverseEventFollowup() {
   saveBtn.disabled = true;
   const { ok, data } = await apiPost(
     `/api/patients/${PATIENT_HOMER_ID}/complete-event/adverse-event-followup`,
-    { event_id: _aefEventId, completion_date: date, duration_minutes: duration, notes, ae_discussions,
+    { event_id: _aefEventId, completion_date: date, duration_minutes: duration, call_mode: callMode,
+      patient_initiated: initiator === 'patient', notes, ae_discussions,
       scheduled_followup_visit: scheduledFollowupVisit, scheduled_clinical_visit: scheduledClinicalVisit }
   );
   if (!ok) { setError('aef-error', data.error || 'Failed to save.'); saveBtn.disabled = false; return; }
@@ -3302,11 +3645,29 @@ function _loadAeDetails(aeIds) {
 }
 
 function _setupAeSchedulingToggles(prefix) {
-  ['visit', 'clinical'].forEach(kind => {
+  // Exclude the modal's own current event id from the "existing stub" search,
+  // otherwise the AE follow-up VISIT modal would flag the visit stub it is
+  // itself filling in. For the call modal (aef) this resolves to a stub id of
+  // a different type, so the exclusion is a no-op there.
+  const currentEventId =
+    prefix === 'aef'  ? _aefEventId  :
+    prefix === 'aefv' ? _aefvEventId :
+    prefix === 'aecv' ? _aecvEventId : null;
+
+  const kinds = [
+    { kind: 'visit',    pid: 'adverse_event_followup_visit',  endpoint: 'ae-followup-visit',  label: 'Follow-up visit' },
+    { kind: 'clinical', pid: 'adverse_event_clinical_visit',  endpoint: 'ae-clinical-visit',  label: 'Clinical visit'  },
+  ];
+
+  kinds.forEach(({ kind, pid, endpoint, label }) => {
+    const wrap      = document.getElementById(`${prefix}-schedule-${kind}-wrap`);
     const cb        = document.getElementById(`${prefix}-schedule-${kind}`);
+    const cbLabel   = cb?.closest('label');                  // the entire toggle-row label
     const dateWrap  = document.getElementById(`${prefix}-${kind}-date-wrap`);
     const dateInput = document.getElementById(`${prefix}-${kind}-date`);
-    if (!cb) return;
+    if (!wrap || !cb || !cbLabel) return;
+
+    // Always reset the toggle/date to a clean state.
     cb.checked = false;
     if (dateWrap)  dateWrap.classList.add('hidden');
     if (dateInput) dateInput.value = '';
@@ -3314,7 +3675,65 @@ function _setupAeSchedulingToggles(prefix) {
       if (dateWrap) dateWrap.classList.toggle('hidden', !cb.checked);
       if (!cb.checked && dateInput) dateInput.value = '';
     };
+
+    // Look for a currently-pending stub of this kind, excluding the modal's own event.
+    const existing = (eventsCache || []).find(e =>
+      e.protocol_event_id === pid && e.id !== currentEventId
+    );
+
+    // Ensure a notice element exists in the wrap; lazily created once and reused.
+    let notice = document.getElementById(`${prefix}-${kind}-existing-notice`);
+    if (!notice) {
+      notice = document.createElement('div');
+      notice.id = `${prefix}-${kind}-existing-notice`;
+      notice.className = 'hidden';
+      wrap.insertBefore(notice, wrap.firstChild);
+    }
+
+    if (existing) {
+      const dateStr = existing.scheduled_date?.[0] ? _fmtDateTime(existing.scheduled_date[0]) : '—';
+      const aeAliases = (existing.adverse_event_ids || [])
+        .map(aeId => (_completeEventsCache || []).find(e => e.id === aeId)?.alias)
+        .filter(Boolean).join(', ');
+      notice.innerHTML = `
+        <div class="flex items-start gap-2">
+          <i class="fas fa-info-circle text-blue-500 mt-0.5"></i>
+          <div class="flex-1">
+            <p class="text-sm font-medium text-slate-700">${label} already scheduled for ${dateStr}</p>
+            ${aeAliases ? `<p class="text-xs text-slate-500 mt-0.5">Covering: ${_esc(aeAliases)}</p>` : ''}
+          </div>
+          <button type="button"
+                  onclick="_cancelExistingAeStub('${prefix}', '${existing.id}', '${endpoint}')"
+                  class="text-xs px-2.5 py-1 bg-red-50 text-red-700 border border-red-200 rounded-lg hover:bg-red-100 whitespace-nowrap">
+            Cancel scheduled
+          </button>
+        </div>`;
+      notice.classList.remove('hidden');
+      cbLabel.classList.add('hidden');
+      if (dateWrap) dateWrap.classList.add('hidden');
+    } else {
+      notice.classList.add('hidden');
+      cbLabel.classList.remove('hidden');
+    }
   });
+}
+
+// Cancel an existing AE visit/clinical stub from inside a parent modal. Refreshes
+// the events cache, then re-runs the toggle setup so the modal switches back to
+// "Schedule a …" mode without closing.
+async function _cancelExistingAeStub(prefix, stubId, endpoint) {
+  const reason = prompt('Reason for cancellation (required):');
+  if (reason === null) return;
+  if (!reason.trim()) { alert('Cancellation reason is required.'); return; }
+
+  const { ok, data } = await apiPost(
+    `/api/patients/${PATIENT_HOMER_ID}/cancel-event/${endpoint}`,
+    { event_id: stubId, cancellation_reason: reason.trim() }
+  );
+  if (!ok) { alert(data.error || 'Failed to cancel.'); return; }
+
+  await loadPatientEvents();
+  _setupAeSchedulingToggles(prefix);
 }
 
 function _collectAeScheduling(prefix) {
@@ -7585,6 +8004,7 @@ async function openOtherDeviceIssueModal(ev) {
   document.getElementById('odi-issue-occur-date').value = '';
   document.getElementById('odi-issue-occur-date').max   = todayDate;
   document.getElementById('odi-notes').value = '';
+  document.querySelectorAll('input[name="odi-call-mode"]').forEach(r => { r.checked = false; });
   document.getElementById('odi-device-rows').innerHTML =
     '<p class="text-sm text-slate-400 italic">Loading devices…</p>';
 
@@ -7712,6 +8132,7 @@ function _odiBuildSections() {
 async function saveOtherDeviceIssueCall() {
   const completionDate  = document.getElementById('odi-completion-date').value;
   let issueOccurDate    = document.getElementById('odi-issue-occur-date').value;
+  const callMode        = document.querySelector('input[name="odi-call-mode"]:checked')?.value || '';
   const notes           = document.getElementById('odi-notes').value.trim();
 
   // Convert dd-mm-yyyy to YYYY-MM-DD if needed
@@ -7722,6 +8143,7 @@ async function saveOtherDeviceIssueCall() {
 
   if (!completionDate)  { setError('odi-error', 'Call date is required.'); return; }
   if (!issueOccurDate)  { setError('odi-error', 'Issue first occurred date is required.'); return; }
+  if (!callMode)        { setError('odi-error', 'Call mode (Audio / Video) is required.'); return; }
 
   // Validate dates
   const today = new Date().toISOString().split('T')[0];
@@ -7766,8 +8188,8 @@ async function saveOtherDeviceIssueCall() {
   const { ok, data } = await apiPost(
     `/api/patients/${PATIENT_HOMER_ID}/complete-event/other-device-issue-call`,
     { event_id: _odiEventId, completion_date: completionDate,
-      issue_occur_date: issueOccurDate, notes: notes || null, devices,
-      broken_protocol_mode: _odiIsBp }
+      issue_occur_date: issueOccurDate, call_mode: callMode,
+      notes: notes || null, devices, broken_protocol_mode: _odiIsBp }
   );
   setLoading('odi-save', false);
   if (!ok) { setError('odi-error', data.error || 'Failed to save.'); return; }
@@ -8267,6 +8689,12 @@ async function saveNote() {
     const ev = (_completeEventsCache || []).find(e => e.id === targetEventId);
     if (ev) ev.event_notes_count = (ev.event_notes_count || 0) + 1;
     renderTimelineTab();
+    // Also refresh whichever card surface is on screen (no-op when the card
+    // isn't rendered). One save updates every surface that's currently showing
+    // the same `event_notes` data.
+    _refreshAeCardNotes(targetEventId);
+    _refreshDiCardNotes(targetEventId);
+    _refreshCallCardNotes(targetEventId);
   } else {
     renderNotesTab();
   }

@@ -445,6 +445,7 @@ Any event entry — in `complete[]` or in a completed `free.*[]` entry — may c
 **Follow-up call events** (`followup_call_d07`, `followup_call_d21`)
 ```json
 {
+  "alias": "Call-003",
   "duration_minutes": 15,
   "call_mode": "audio | video",
   "no_issue": false,
@@ -457,6 +458,7 @@ Any event entry — in `complete[]` or in a completed `free.*[]` entry — may c
 }
 ```
 
+- `alias`: per-patient `Call-###` sequence shared across `patient_call`, `followup_call_d07`/`d21`, and `adverse_event_followup`. Assigned server-side at completion time. See [Call Logs tab](../CLAUDE.md#call-logs-tab) in CLAUDE.md.
 - `duration_minutes`: positive integer; duration of the call in minutes (required)
 - `call_mode`: `"audio"` or `"video"`. Required, no default — the therapist must explicitly pick one. Same field as on `patient_call`.
 - `no_issue`: `true` when the therapist explicitly selected "No issue" in the "What came out of this call?" section. Mutually exclusive with a non-empty `triggered` list. See [Outcome group convention](#outcome-group-convention) in CLAUDE.md.
@@ -504,6 +506,7 @@ The incomplete stub carries `appointment_date` (the current scheduled appointmen
 **`watch_record`**
 ```json
 {
+  "alias":             "WR03",
   "ag_watch_right":    { "old_id": null, "old_lost": false, "new_id": "" },
   "ag_watch_left":     { "old_id": null, "old_lost": false, "new_id": "" },
   "sync_datetime":     "",
@@ -514,6 +517,7 @@ The incomplete stub carries `appointment_date` (the current scheduled appointmen
 }
 ```
 
+- `alias`: per-patient `WR##` sequence assigned server-side at completion time. Independent of the AE / RI / ODI / Call sequences. See [Watch Records tab](../CLAUDE.md#watch-records-tab) in CLAUDE.md.
 - `old_lost`: *(agwatch only)* `true` if the previously assigned watch was reported lost by the patient. Only meaningful when `old_id` is not null (hidden in UI when `old_id` is null — first assignment). When `true`: the assignment record is closed with `lost: true`, and `lost_date` is set on the inventory record.
 - `sync_datetime`: ISO datetime (`YYYY-MM-DDTHH:MM`) when the watches were synced / data downloaded. Required when the patient has **two watches** assigned; not required when only one watch is assigned; omitted when both `new_id` values are `null`.
 - `worn_datetime`: ISO datetime (`YYYY-MM-DDTHH:MM`) when the patient put the watch(es) on. Required when at least one new watch is assigned; omitted when both `new_id` values are `null`.
@@ -705,6 +709,7 @@ Created directly by triggering modals (activation, home visit, patient call, fol
   "triggered_by": { "type": "activation | home_visit_d02 | home_visit_d03 | home_visit_d15 | patient_call | followup_call_d07 | followup_call_d21", "id": "<uuid>" },
   "completion_date": "YYYY-MM-DDTHH:MM",
   "filed_at": "YYYY-MM-DDTHH:MM:SS",
+  "call_mode": "audio | video",
   "notes": null,
   "devices": [
     { "device": "pluto | mars", "outcome": "resolved | visit_required", "notes": "" }
@@ -716,6 +721,7 @@ Created directly by triggering modals (activation, home visit, patient call, fol
 ```
 
 - `alias`: per-patient, `RI`-prefixed sequence number (`RI01`, `RI02`, …) assigned server-side at filing time. Chronological by `filed_at` within the patient's `free.robot_issue_call` bucket. Counter is **independent of** the ODI sequence (`other_device_issue_call`). Surfaced as the card title in the Device Issues tab. Missing aliases on legacy entries are backfilled on first read of `api_patient_events` (same pattern as the AE alias backfill).
+- `call_mode`: `"audio"` or `"video"`. Required, no default. Same shared convention as on therapist calls.
 - `devices`: one entry per device the engineer explicitly discussed during the call (only checked devices). Empty list `[]` if no specific device was discussed (general call).
 - `notes`: overall call notes; required when `devices` is empty; optional otherwise.
 - `visit_required`: derived boolean — `true` if any device entry has `outcome = "visit_required"`; `false` otherwise. When `true`, a single `robot_issue_visit` stub is auto-created in `incomplete`.
@@ -836,6 +842,7 @@ Engineer call for modem / laptop / SIM problems. Analogous to `robot_issue_call`
   "completion_date": "YYYY-MM-DDTHH:MM",
   "issue_occur_date": "YYYY-MM-DD",
   "filed_at": "YYYY-MM-DDTHH:MM:SS",
+  "call_mode": "audio | video",
   "notes": null,
   "devices": [
     { "device_type": "modems | laptops | sims", "device_id": "<id>", "outcome": "visit_required | resolved_over_call", "notes": null }
@@ -847,6 +854,7 @@ Engineer call for modem / laptop / SIM problems. Analogous to `robot_issue_call`
 ```
 
 - `alias`: per-patient, `ODI`-prefixed sequence (`ODI01`, `ODI02`, …) assigned server-side at filing time. Counter is **independent of** the RI sequence (`robot_issue_call`). Backfilled on first read of `api_patient_events` if missing.
+- `call_mode`: `"audio"` or `"video"`. Required, no default. Same shared convention as on therapist calls.
 - `issue_occur_date`: required — date the issue first occurred (distinct from the call date).
 - `devices`: one entry per device flagged on the call. `outcome = "visit_required"` queues a `other_device_issue_visit` stub.
 - `visit_required`: derived `true` if any device has `outcome = "visit_required"`.
@@ -882,6 +890,7 @@ Stores both the call details and forward references to any downstream events it 
 ```json
 {
   "id": "<uuid>",
+  "alias": "Call-007",
   "completion_date": "YYYY-MM-DDTHH:MM",
   "filed_at": "YYYY-MM-DDTHH:MM:SS",
   "duration_minutes": 15,
@@ -897,6 +906,7 @@ Stores both the call details and forward references to any downstream events it 
 }
 ```
 
+- `alias`: per-patient `Call-###` sequence shared across `patient_call`, `followup_call_d07`/`d21`, and `adverse_event_followup`. Assigned server-side at completion time. See [Call Logs tab](../CLAUDE.md#call-logs-tab) in CLAUDE.md.
 - `call_type`: `"patient_initiated"` (default) or `"therapist_initiated"` (unplanned outbound call by therapist).
 - `call_mode`: `"audio"` or `"video"`. Required, no default — the therapist must explicitly pick one. Same field is recorded on `followup_call_d07` and `followup_call_d21` entries.
 - `reason`: required and non-null when `call_type = "therapist_initiated"`; documents why the call was made outside the normal protocol. `null` for patient-initiated calls.
@@ -927,6 +937,7 @@ Daily follow-up call chain seeded whenever any adverse event is filed. One stub 
 ```json
 {
   "id": "<uuid>",
+  "alias": "Call-005",
   "adverse_event_ids": ["<AE1_id>", "<AE2_id>"],
   "completion_date": "YYYY-MM-DDTHH:MM",
   "filed_at": "YYYY-MM-DDTHH:MM:SS",
@@ -956,7 +967,10 @@ Daily follow-up call chain seeded whenever any adverse event is filed. One stub 
 ```
 
 - `patient_initiated`: `true` if the patient called the therapist; `false` (default) if the therapist initiated the call.
-- `related_patient_call_id`: UUID of the linked `patient_call` entry (only set when `patient_initiated: true` and the therapist links it); `null` otherwise.
+- `alias`: per-patient `Call-###` sequence shared across `patient_call`, `followup_call_d07`/`d21`, and `adverse_event_followup`. Assigned server-side at completion time. See [Call Logs tab](../CLAUDE.md#call-logs-tab) in CLAUDE.md.
+- `call_mode`: `"audio"` or `"video"`. Required, no default. Same field is recorded on every other completed call type (`patient_call`, `followup_call_d07`/`d21`, `robot_issue_call`, `other_device_issue_call`).
+- `patient_initiated`: `true` if the patient called in to discuss the AE; `false` (default) if the therapist made the scheduled follow-up call. Required field — therapist must explicitly pick at filing time.
+- `related_patient_call_id`: UUID of the linked `patient_call` entry (only set when `patient_initiated: true` and the therapist links it); `null` otherwise. Currently not surfaced in the UI — reserved for a future linking flow.
 - `ae_discussions`: one entry per AE in `adverse_event_ids`. `notes` records what was discussed for that specific AE. `can_resume_from` is required when `resolved: true` AND the AE had `training_blocked: true`; `null` otherwise. Date only (`YYYY-MM-DD`).
 - `scheduled_followup_visit` / `scheduled_clinical_visit`: `null` if not scheduled from this call.
 - **Chain continuation:** after save, a new stub is seeded with `adverse_event_ids` = IDs of unresolved AEs and `scheduled_date: [today, today + 1 day]`. If all AEs are resolved, no new stub is seeded.

@@ -61,6 +61,73 @@ def _filer():
     return flask_session.get('loginid', 'unknown')
 
 
+def _apply_event_notes_count(items, priv):
+    """Stamp role-filtered `event_notes_count` on each item and strip the raw
+    `event_notes` field so its content never leaves this endpoint.
+
+    Notes are role-private — admins see all buckets; therapist/engineer see
+    only their own. Content is served by `routes/notes.py` event-note endpoints
+    (role-filtered there too). Used by `api_patient_events` and `api_call_logs`
+    so every event-card surface gets the same badge count on first render."""
+    for item in items:
+        _en = item.get('event_notes') or {}
+        if priv == 'admin':
+            item['event_notes_count'] = sum(len(v) for v in _en.values() if isinstance(v, list))
+        elif priv in ('therapist', 'engineer'):
+            item['event_notes_count'] = len(_en.get(priv) or [])
+        else:
+            item['event_notes_count'] = 0
+        item.pop('event_notes', None)
+
+
+def _next_wr_alias(events_data):
+    """Compute the next `WR##` alias for this patient.
+
+    Watch records are the one chain-style event whose completions land in
+    `events_data['complete']` (not in a `free.*` bucket), so the count comes
+    from filtering complete[] by `protocol_event_id == 'watch_record'`.
+    See CLAUDE.md → "Watch Records tab"."""
+    max_n = 0
+    for e in events_data.get('complete', []) or []:
+        if e.get('protocol_event_id') != 'watch_record':
+            continue
+        a = (e.get('alias') or '')
+        if a.startswith('WR'):
+            try:
+                max_n = max(max_n, int(a[2:]))
+            except ValueError:
+                pass
+    return f"WR{max_n + 1:02d}"
+
+
+def _next_call_alias(events_data):
+    """Compute the next `Call-###` alias for this patient.
+
+    Shared per-patient sequence across all four therapist-conducted call types:
+    `patient_call`, `followup_call_d07`, `followup_call_d21`, and
+    `adverse_event_followup`. Counter is independent of AE/RI/ODI aliases.
+    See CLAUDE.md → "Call Logs tab"."""
+    max_n = 0
+    free = events_data.get('free', {}) or {}
+    for bucket in ('patient_call', 'adverse_event_followup'):
+        for e in free.get(bucket, []) or []:
+            a = (e.get('alias') or '')
+            if a.startswith('Call-'):
+                try:
+                    max_n = max(max_n, int(a[5:]))
+                except ValueError:
+                    pass
+    for e in events_data.get('complete', []) or []:
+        if e.get('protocol_event_id') in ('followup_call_d07', 'followup_call_d21'):
+            a = (e.get('alias') or '')
+            if a.startswith('Call-'):
+                try:
+                    max_n = max(max_n, int(a[5:]))
+                except ValueError:
+                    pass
+    return f"Call-{max_n + 1:03d}"
+
+
 _CALL_MODES = ('audio', 'video')
 
 
@@ -542,6 +609,59 @@ def api_patient_events(homer_id):
                 if not e.get('alias'):
                     e['alias'] = f"{_prefix}{i + 1:02d}"
                     _alias_dirty = True
+
+    # WR## alias: per-patient sequence on completed `watch_record` entries.
+    # Unlike the AE/RI/ODI buckets, watch_record completions land in `complete[]`
+    # (not `free.*`), so filter complete[] by protocol_event_id.
+    _wr_entries = [e for e in (events_data.get('complete', []) or [])
+                   if e.get('protocol_event_id') == 'watch_record']
+    if _wr_entries and any(not (e.get('alias') or '').startswith('WR') for e in _wr_entries):
+        _max_wr = 0
+        for _e in _wr_entries:
+            _a = (_e.get('alias') or '')
+            if _a.startswith('WR'):
+                try:
+                    _max_wr = max(_max_wr, int(_a[2:]))
+                except ValueError:
+                    pass
+        _unaliased = sorted(
+            [_e for _e in _wr_entries if not (_e.get('alias') or '').startswith('WR')],
+            key=lambda e: e.get('completion_date') or e.get('filed_at') or '',
+        )
+        for _i, _e in enumerate(_unaliased):
+            _e['alias'] = f"WR{_max_wr + _i + 1:02d}"
+        _alias_dirty = True
+
+    # Call-### alias: shared sequence across patient_call, followup_call_d07/d21,
+    # and adverse_event_followup. Collect every completed call entry across the
+    # four buckets, sort chronologically, then assign aliases to unaliased ones
+    # starting from one above the highest existing Call-###. Stable for already-
+    # aliased entries; new numbers are appended in chronological order.
+    _call_entries = []
+    for _e in events_data.get('free', {}).get('patient_call', []) or []:
+        _call_entries.append(_e)
+    for _e in events_data.get('free', {}).get('adverse_event_followup', []) or []:
+        _call_entries.append(_e)
+    for _e in events_data.get('complete', []) or []:
+        if _e.get('protocol_event_id') in ('followup_call_d07', 'followup_call_d21'):
+            _call_entries.append(_e)
+    if _call_entries and any(not (e.get('alias') or '').startswith('Call-') for e in _call_entries):
+        _max_call = 0
+        for _e in _call_entries:
+            _a = (_e.get('alias') or '')
+            if _a.startswith('Call-'):
+                try:
+                    _max_call = max(_max_call, int(_a[5:]))
+                except ValueError:
+                    pass
+        _unaliased = sorted(
+            [_e for _e in _call_entries if not (_e.get('alias') or '').startswith('Call-')],
+            key=lambda e: e.get('completion_date') or e.get('filed_at') or '',
+        )
+        for _i, _e in enumerate(_unaliased):
+            _e['alias'] = f"Call-{_max_call + _i + 1:03d}"
+        _alias_dirty = True
+
     if _alias_dirty:
         write_protocol_events(folder, homer_id, events_data)
 
@@ -795,19 +915,7 @@ def api_patient_events(homer_id):
     # event ordering".
     _topo_groups_apply_descendants_first(complete_list, event_defs)
 
-    # Retrospective event notes are role-private — never expose their content here. Emit
-    # only a role-filtered count (therapist/engineer: own bucket; admin: all), then strip
-    # the notes. Content is served, role-filtered, by routes/notes.py event-note endpoints.
-    _priv = flask_session.get('privilege', '')
-    for item in complete_list:
-        _en = item.get('event_notes') or {}
-        if _priv == 'admin':
-            item['event_notes_count'] = sum(len(v) for v in _en.values() if isinstance(v, list))
-        elif _priv in ('therapist', 'engineer'):
-            item['event_notes_count'] = len(_en.get(_priv) or [])
-        else:
-            item['event_notes_count'] = 0
-        item.pop('event_notes', None)
+    _apply_event_notes_count(complete_list, flask_session.get('privilege', ''))
 
     return jsonify({'overdue': overdue, 'upcoming': upcoming, 'complete': complete_list})
 
@@ -2814,6 +2922,10 @@ def api_complete_adverse_event_followup(homer_id):
     event_id                = body.get('event_id')
     completion_date         = (body.get('completion_date') or '').strip()
     duration_str            = str(body.get('duration_minutes', '')).strip()
+    call_mode               = (body.get('call_mode') or '').strip()
+    # patient_initiated must be a real bool — missing/non-bool is rejected so the
+    # therapist can't sidestep the required two-pill radio.
+    patient_initiated_raw   = body.get('patient_initiated', None)
     notes                   = (body.get('notes') or '').strip()
     ae_discussions          = body.get('ae_discussions', [])
     scheduled_followup_visit = (body.get('scheduled_followup_visit') or '').strip() or None
@@ -2824,6 +2936,10 @@ def api_complete_adverse_event_followup(homer_id):
     if not completion_date:
         return jsonify({'error': 'Call date is required.'}), 400
     if r := _bad_date(patient, completion_date): return r
+    if r := _bad_call_mode(call_mode):            return r
+    if not isinstance(patient_initiated_raw, bool):
+        return jsonify({'error': 'Please indicate who initiated this call (Therapist / Patient).'}), 400
+    patient_initiated = patient_initiated_raw
     try:
         if datetime.strptime(completion_date, '%Y-%m-%dT%H:%M') > datetime.now():
             return jsonify({'error': 'Call date cannot be in the future.'}), 400
@@ -2895,10 +3011,13 @@ def api_complete_adverse_event_followup(homer_id):
 
     complete_entry = {
         **entry,
+        'alias':                   _next_call_alias(events_data),
         'completion_date':         completion_date,
         'filed_at':                filed_at,
         'filed_by':   _filer(),
         'duration_minutes':        duration_minutes,
+        'call_mode':               call_mode,
+        'patient_initiated':       patient_initiated,
         'notes':                   notes,
         'ae_discussions':          ae_discussions,
         'scheduled_followup_visit': scheduled_followup_visit,
@@ -3523,6 +3642,7 @@ def api_complete_robot_issue_call(homer_id):
     event_id         = body.get('event_id')
     completion_date  = (body.get('completion_date') or '').strip()
     issue_occur_date = (body.get('issue_occur_date') or '').strip() or None
+    call_mode        = (body.get('call_mode') or '').strip()
     notes            = (body.get('notes') or '').strip() or None
     devices          = body.get('devices', [])  # [{device, outcome, notes}]
 
@@ -3531,6 +3651,7 @@ def api_complete_robot_issue_call(homer_id):
     if not completion_date:
         return jsonify({'error': 'Call date is required.'}), 400
     if r := _bad_date(patient, completion_date): return r
+    if r := _bad_call_mode(call_mode):            return r
     try:
         call_dt = datetime.strptime(completion_date, '%Y-%m-%dT%H:%M')
         if call_dt > datetime.now():
@@ -3634,6 +3755,7 @@ def api_complete_robot_issue_call(homer_id):
             'issue_occur_date':     issue_occur_date,
             'filed_at':             filed_at,
             'filed_by':   _filer(),
+            'call_mode':            call_mode,
             'notes':                notes,
             'devices':              devices,
             'visit_required':       False,
@@ -3655,6 +3777,7 @@ def api_complete_robot_issue_call(homer_id):
         'issue_occur_date': issue_occur_date,
         'filed_at':         filed_at,
         'filed_by':   _filer(),
+        'call_mode':        call_mode,
         'notes':            notes,
         'devices':          devices,
         'visit_required':   visit_required,
@@ -3703,6 +3826,7 @@ def api_complete_other_device_issue_call(homer_id):
     event_id         = body.get('event_id')
     completion_date  = (body.get('completion_date') or '').strip()
     issue_occur_date = (body.get('issue_occur_date') or '').strip() or None
+    call_mode        = (body.get('call_mode') or '').strip()
     notes            = (body.get('notes') or '').strip() or None
     devices_list     = body.get('devices', [])
 
@@ -3711,6 +3835,7 @@ def api_complete_other_device_issue_call(homer_id):
     if not completion_date:
         return jsonify({'error': 'Call date is required.'}), 400
     if r := _bad_date(patient, completion_date):  return r
+    if r := _bad_call_mode(call_mode):            return r
     if r := _bad_date(patient, issue_occur_date): return r
     try:
         call_dt = datetime.strptime(completion_date, '%Y-%m-%dT%H:%M')
@@ -3807,6 +3932,7 @@ def api_complete_other_device_issue_call(homer_id):
             'issue_occur_date':     issue_occur_date,
             'filed_at':             filed_at,
             'filed_by':   _filer(),
+            'call_mode':            call_mode,
             'notes':                notes,
             'devices':              device_results,
             'visit_required':       False,
@@ -3893,6 +4019,7 @@ def api_complete_other_device_issue_call(homer_id):
         'issue_occur_date': issue_occur_date,
         'filed_at':         filed_at,
         'filed_by':   _filer(),
+        'call_mode':        call_mode,
         'notes':            notes,
         'devices':          device_results,
         'visit_required':   visit_required,
@@ -4925,6 +5052,7 @@ def api_complete_followup_call(homer_id):
 
     complete_entry = {
         **entry,
+        'alias':            _next_call_alias(events_data),
         'completion_date':  completion_date,
         'filed_at':         filed_at,
         'filed_by':   _filer(),
@@ -5040,6 +5168,7 @@ def api_complete_watch_record(homer_id):
 
     complete_entry = {
         **entry,
+        'alias':              _next_wr_alias(events_data),
         'completion_date':    completion_date,
         'filed_at':           filed_at,
         'filed_by':   _filer(),
@@ -5904,6 +6033,7 @@ def api_log_patient_call(homer_id):
 
     events_data['free'].setdefault('patient_call', []).append({
         'id':               call_id,
+        'alias':            _next_call_alias(events_data),
         'completion_date':  completion_date,
         'filed_at':         filed_at,
         'filed_by':   _filer(),
@@ -5945,7 +6075,7 @@ def api_call_logs(homer_id):
     patient     = read_patient_meta(folder, homer_id)
     events_data = read_protocol_events(folder, homer_id)
     if not events_data:
-        return jsonify({'followup_calls': [], 'patient_calls': []})
+        return jsonify({'followup_calls': [], 'patient_calls': [], 'ae_followup_calls': []})
 
     event_defs = {}
     for e in protocol.get('shared', []):
@@ -5966,7 +6096,32 @@ def api_call_logs(homer_id):
     patient_calls = list(events_data.get('free', {}).get('patient_call', []))
     patient_calls.sort(key=lambda x: x.get('completion_date') or '', reverse=True)
 
-    return jsonify({'followup_calls': followup_calls, 'patient_calls': patient_calls})
+    # Look up AE aliases so the client can render a "Re: AE02, AE05" line on
+    # each AE follow-up call card without having to walk the AE list itself.
+    ae_alias_by_id = {ae.get('id'): ae.get('alias')
+                      for ae in events_data.get('free', {}).get('adverse_event', [])
+                      if ae.get('id')}
+    ae_followup_calls = []
+    for entry in events_data.get('free', {}).get('adverse_event_followup', []):
+        item = dict(entry)
+        item['ae_aliases'] = [ae_alias_by_id.get(_id) for _id in (entry.get('adverse_event_ids') or [])
+                              if ae_alias_by_id.get(_id)]
+        ae_followup_calls.append(item)
+    ae_followup_calls.sort(key=lambda x: x.get('completion_date') or '', reverse=True)
+
+    # Same role-filtered count + strip pattern used by api_patient_events so the
+    # Call Logs card surface lights up its note-count badge on first render
+    # without exposing per-bucket note content.
+    _priv = flask_session.get('privilege', '')
+    _apply_event_notes_count(followup_calls,    _priv)
+    _apply_event_notes_count(patient_calls,     _priv)
+    _apply_event_notes_count(ae_followup_calls, _priv)
+
+    return jsonify({
+        'followup_calls':     followup_calls,
+        'patient_calls':      patient_calls,
+        'ae_followup_calls':  ae_followup_calls,
+    })
 
 
 @bp.route('/api/patients/<homer_id>/complete-training', methods=['POST'])
