@@ -197,20 +197,23 @@ The script shifts the patient's entire timeline by N days (positive or negative)
         "not_before": ["activationDate", "enrollDate"],
         "not_after":  ["today"]
       },
+      "default_scheduling_rule": {
+        "not_before": ["today"]
+      },
       "events": {
-        "exp_device_install": {
-          "not_before": ["enrollDate"],
-          "not_after":  ["enrollDate + 5d", "today"]
+        "exp_device_install": { ... },
+        "activation":         { ... },
+        "training_completion_d29": {
+          "not_before": ["activationDate + 28d"],
+          "not_after":  ["today"]
         },
-        "activation": {
-          "experimental": {
-            "not_before": ["enrollDate", "event:exp_device_install"],
-            "not_after":  ["enrollDate + 5d", "today"]
-          },
-          "control": {
-            "not_before": ["enrollDate"],
-            "not_after":  ["enrollDate + 5d", "today"]
-          }
+        "a1_assessment": {
+          "not_before": ["activationDate + 28d"],
+          "not_after":  ["today"]
+        },
+        "a2_assessment": {
+          "not_before": ["event:a1_assessment"],
+          "not_after":  ["today"]
         }
       }
     }
@@ -225,8 +228,9 @@ The script shifts the patient's entire timeline by N days (positive or negative)
   - **Per-event override scope** — by default the per-event rule applies to **every clinical-date input in the modal that carries `data-event-id="<event_id>"`**. Inputs without `data-event-id` get the default rule. Inputs with `data-date-rule="scheduling"` are still skipped entirely. Currently tagged: `device-setup-date` (`exp_device_install`); `activation-session-start`, `activation-session-end`, `act-no-visit-date` (`activation`).
   - **Server enforcement:** `utils/date_validation.py` loads the JSON and exports `resolve_bounds(patient, event_id=None, events_data=None) -> (min_dt, max_dt)` and `validate_event_date(patient, value, event_id=None, events_data=None) -> Optional[str]`. Every `complete-event/*` route in `routes/user_management.py` calls the validator (via `_bad_date(patient, value, event_id=..., events_data=...)`) before writing — one line per route. Routes that file events with per-event rules (`exp_device_install`, `activate`, `log-activation-attempt`) pass the relevant `event_id` and the already-loaded `events_data`. Identical error message string is used client-side and server-side.
   - **Client enforcement:** helper `_applyDateBounds(modalEl, errorId)` in `static/js/app/patient_detail.js`, **hooked into `showModal(id)`** — every modal automatically picks up the universal bounds when it opens; nothing per-opener to remember. The helper **sweeps every `<input type="date">` and `<input type="datetime-local">` in the modal** and applies the bounds via `min`/`max` attributes, then attaches the keyboard-validation guard. Bounds resolve purely from `patientData` already on the page — no extra API call. The error element the keyboard validator writes into is named by `data-date-error="<error-id>"` on the modal root (one attribute per modal, paired with the `id="<modal-id>"`). The helper is **additive**: it only sets `min`/`max` when the opener hasn't already set a (stricter) bound, so per-modal custom bounds (e.g. the AE modal's tighter bounds derived from the AE issue date) are preserved.
-  - **Opt-out attribute:** inputs that capture **future/scheduling** dates (`new_appointment_date`, `scheduled_followup_visit`, `scheduled_clinical_visit`, etc.) carry `data-date-rule="scheduling"` in the template, which makes `_applyDateBounds` skip them. Their own (looser) bounds remain handled per-modal until Phase 2 introduces a scheduling rule. Any new scheduling-future input must carry this attribute or it will be wrongly capped at today.
-  - **Phase 1 scope (shipped):** the universal default rule only. **Phase 2 (shipped):** the DSL + per-event overrides for `exp_device_install` and `activation` (both within 5 days of enrollment; activation experimental must be after device setup completion). Phase 3 will fold in soft-confirm windows (A1/A2 out-of-window). Devices-page date inputs are not yet on this framework — they remain wired via `/devices/api/device-validation-dates`.
+  - **Scheduling rule:** inputs that capture **future/scheduling** dates (`new_appointment_date`, `scheduled_followup_visit`, `scheduled_clinical_visit`, etc.) carry `data-date-rule="scheduling"` in the template. The framework now applies `default_scheduling_rule` to them (instead of skipping). Default scheduling rule: `not_before: today` — keeps the therapist from accidentally scheduling a date in the past. Per-event scheduling rules can be added later if needed.
+  - **A1 / A2 out-of-window soft-confirm + reason** *(Phase 3)*: the framework's hard bound for `a1_assessment` is `activationDate + 29d` (i.e., not before D29 is due). The **ideal window** for A1 is `[activationDate + 30d, activationDate + 37d]` and for A2 is `[activationDate + 180d, activationDate + 187d]` — these come from `study_protocol.json` and are surfaced via `window_start` / `window_end` on the stubs. When the therapist picks a date inside the hard bound but **outside the ideal window**, the A1/A2 modal reveals a required reason textarea (`out_of_window_reason`). On save, a double-confirm fires; both the reason and the explicit confirmation are required before submission. Server validates the same rule (reason required when outside ideal window) and persists `out_of_window_reason` on the completed entry. Cards surface the stored reason inline next to the existing "Delayed" badge.
+  - **Phase 1 scope (shipped):** the universal default rule only. **Phase 2 (shipped):** the DSL + per-event overrides for `exp_device_install` and `activation`. **Phase 3 (shipped):** hard bounds on `followup_call_d07` (after D03, before Day 21), `followup_call_d21` (after D07, before Day 28), `training_completion_d29`, `a1_assessment`, `a2_assessment`; the `default_scheduling_rule`; and the A1/A2 out-of-ideal-window reason mechanism. Devices-page date inputs are not yet on this framework — they remain wired via `/devices/api/device-validation-dates`.
 - `scheduled_date` in `protocol_events.json` is always a **two-element list** `[start, end]` (both `"YYYY-MM-DDTHH:MM"`). Point-in-time events have `start == end`. `null` for free/unscheduled events. Categorisation uses `start` for upcoming, `end` for overdue and broken-protocol detection.
 - `window.start_day` / `window.end_day` in `study_protocol.json` use **1-based day numbers**: Day 1 = the reference date itself (a0 for `reference=assignment`, activation for `reference=activation`). Code converts to a 0-based offset with `start_day - 1`. All event IDs (`d1`, `d02`, `d15`, …) reflect this naming convention.
 - Every protocol event has a **`date source`** that determines how `completion_date` is obtained. Four possible values:

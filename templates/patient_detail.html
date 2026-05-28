@@ -377,8 +377,21 @@
     </div>
     <div class="mb-4">
       <label class="block text-sm font-medium text-slate-700 mb-2">Assessment Date <span class="text-red-500">*</span></label>
-      <input type="datetime-local" id="a1-date" required
+      <input type="datetime-local" id="a1-date" data-event-id="a1_assessment" required
              class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500">
+    </div>
+    <!-- Out-of-ideal-window reason — revealed when a1-date falls outside the [AD+30, AD+37] ideal window. -->
+    <div id="a1-out-of-window-section" class="hidden mb-4 px-4 py-3 bg-amber-50 border border-amber-300 rounded-xl">
+      <p class="text-sm font-semibold text-amber-800 mb-1">
+        <i class="fas fa-exclamation-triangle mr-1"></i>Outside ideal A1 window
+      </p>
+      <p class="text-xs text-amber-700 mb-2">
+        The ideal A1 window is <span id="a1-window-display" class="font-medium"></span>. Please explain why this assessment is outside the window.
+      </p>
+      <label class="block text-xs font-medium text-amber-800 mb-1">Reason <span class="text-red-500">*</span></label>
+      <textarea id="a1-out-of-window-reason" rows="2"
+                class="w-full px-3 py-2 bg-white border border-amber-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-amber-300 resize-none"
+                placeholder="e.g. Patient unavailable on ideal window dates"></textarea>
     </div>
     <div class="mb-4">
       <label class="block text-sm font-medium text-slate-700 mb-2">Notes <span class="text-slate-400 font-normal">(optional)</span></label>
@@ -415,8 +428,21 @@
     </div>
     <div class="mb-4">
       <label class="block text-sm font-medium text-slate-700 mb-2">Assessment Date <span class="text-red-500">*</span></label>
-      <input type="datetime-local" id="a2-date" required
+      <input type="datetime-local" id="a2-date" data-event-id="a2_assessment" required
              class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-green-500">
+    </div>
+    <!-- Out-of-ideal-window reason — revealed when a2-date falls outside the [AD+180, AD+187] ideal window. -->
+    <div id="a2-out-of-window-section" class="hidden mb-4 px-4 py-3 bg-amber-50 border border-amber-300 rounded-xl">
+      <p class="text-sm font-semibold text-amber-800 mb-1">
+        <i class="fas fa-exclamation-triangle mr-1"></i>Outside ideal A2 window
+      </p>
+      <p class="text-xs text-amber-700 mb-2">
+        The ideal A2 window is <span id="a2-window-display" class="font-medium"></span>. Please explain why this assessment is outside the window.
+      </p>
+      <label class="block text-xs font-medium text-amber-800 mb-1">Reason <span class="text-red-500">*</span></label>
+      <textarea id="a2-out-of-window-reason" rows="2"
+                class="w-full px-3 py-2 bg-white border border-amber-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-amber-300 resize-none"
+                placeholder="e.g. Patient unavailable on ideal window dates"></textarea>
     </div>
     <div class="mb-4">
       <label class="block text-sm font-medium text-slate-700 mb-2">Notes <span class="text-slate-400 font-normal">(optional)</span></label>
@@ -445,7 +471,7 @@
     </div>
     <div class="mb-4">
       <label class="block text-sm font-medium text-slate-700 mb-2">Call Date/Time <span class="text-red-500">*</span></label>
-      <input type="datetime-local" id="sa1-date" required
+      <input type="datetime-local" id="sa1-date" data-event-id="schedule_a1_call" required
              class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500">
     </div>
     <div class="mb-4">
@@ -484,7 +510,7 @@
     </div>
     <div class="mb-4">
       <label class="block text-sm font-medium text-slate-700 mb-2">Call Date/Time <span class="text-red-500">*</span></label>
-      <input type="datetime-local" id="sa2-date" required
+      <input type="datetime-local" id="sa2-date" data-event-id="schedule_a2_call" required
              class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-green-500">
     </div>
     <div class="mb-4">
@@ -1026,7 +1052,7 @@
       <!-- Event date -->
       <div>
         <label class="block text-sm font-medium text-slate-700 mb-1">Visit Date <span class="text-red-500">*</span></label>
-        <input id="d29-date" type="datetime-local" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" />
+        <input id="d29-date" type="datetime-local" data-event-id="training_completion_d29" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" />
       </div>
       <!-- General notes -->
       <div>
@@ -1841,7 +1867,8 @@
       <div id="aef-context-banner" class="px-4 py-2 rounded-xl text-sm bg-slate-50 text-slate-600 border border-slate-200 space-y-1"></div>
       <div>
         <label class="block text-sm font-medium text-slate-700 mb-1">Call Date/Time <span class="text-red-500">*</span></label>
-        <input type="datetime-local" id="aef-date" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-300">
+        <input type="datetime-local" id="aef-date" data-event-id="adverse_event_followup" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-300">
+        <p id="aef-date-lock-hint" class="hidden mt-1 text-xs text-slate-500"><i class="fas fa-lock text-[10px] mr-1"></i><span id="aef-date-lock-hint-text"></span></p>
       </div>
       <div>
         <label class="block text-sm font-medium text-slate-700 mb-1">Call initiated by <span class="text-red-500">*</span></label>
@@ -1923,12 +1950,16 @@
     </div>
     <div class="overflow-y-auto flex-1 px-6 space-y-4 pb-2">
       <div id="aefv-context-banner" class="px-4 py-2 rounded-xl text-sm bg-slate-50 text-slate-600 border border-slate-200 space-y-1"></div>
-      <div class="grid grid-cols-2 gap-3">
-        <div>
-          <label class="block text-sm font-medium text-slate-700 mb-1">Visit Start <span class="text-red-500">*</span></label>
-          <input type="datetime-local" id="aefv-start" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-300">
+      <!-- Time fields. In normal mode both Visit Start + Visit End show. In
+           ad-hoc/locked mode (e.g., triggered from D29), only the single Visit
+           Date/Time field shows, locked to the parent's completion date. -->
+      <div id="aefv-times-grid" class="grid grid-cols-2 gap-3">
+        <div id="aefv-start-wrap">
+          <label id="aefv-start-label" class="block text-sm font-medium text-slate-700 mb-1">Visit Start <span class="text-red-500">*</span></label>
+          <input type="datetime-local" id="aefv-start" data-event-id="adverse_event_followup_visit" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-300">
+          <p id="aefv-start-lock-hint" class="hidden mt-1 text-xs text-slate-500"><i class="fas fa-lock text-[10px] mr-1"></i><span id="aefv-start-lock-hint-text"></span></p>
         </div>
-        <div>
+        <div id="aefv-end-wrap">
           <label class="block text-sm font-medium text-slate-700 mb-1">Visit End <span class="text-red-500">*</span></label>
           <input type="datetime-local" id="aefv-end" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-300">
         </div>

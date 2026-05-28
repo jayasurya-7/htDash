@@ -180,12 +180,20 @@ function _attachDateGuard(inputId, errorId) {
   input.max = _nowForInput();
   // Remove previously attached listeners to avoid duplicates on modal re-open.
   if (input._dateGuard) {
-    input.removeEventListener('change', input._dateGuard);
-    input.removeEventListener('input',  input._dateGuard);
+    input.removeEventListener('change',   input._dateGuard);
+    input.removeEventListener('input',    input._dateGuard);
+    input.removeEventListener('blur',     input._dateGuard);
+    input.removeEventListener('focusout', input._dateGuard);
   }
   input._dateGuard = () => { _validateDateInput(input, errorId); };
-  input.addEventListener('change', input._dateGuard);
-  input.addEventListener('input',  input._dateGuard);
+  // Safari's native datetime-local picker does not reliably fire `change` or
+  // `input` on commit (the user picks a date and dismisses the popup but the
+  // event doesn't propagate). Listen on `blur` and `focusout` as well so the
+  // error message updates whenever focus leaves the picker.
+  input.addEventListener('change',   input._dateGuard);
+  input.addEventListener('input',    input._dateGuard);
+  input.addEventListener('blur',     input._dateGuard);
+  input.addEventListener('focusout', input._dateGuard);
 }
 
 function _validateDateInput(input, errorId) {
@@ -282,12 +290,18 @@ function _ruleForEvent(eventId, group) {
   return spec;
 }
 
-function _resolveDateBounds(eventId) {
+function _resolveDateBounds(eventId, ruleKind = 'completion') {
   // Returns {min: Date|null, max: Date|null} for the given event_id (or the
-  // default rule when no per-event override exists).
+  // appropriate default rule when no per-event override exists).
+  // `ruleKind === 'scheduling'` is used for future-date inputs marked with
+  // data-date-rule="scheduling" — falls back to default_scheduling_rule
+  // (typically not_before: today) instead of default_completion_rule.
   const rules   = window.DATE_RULES || {};
   const patient = patientData || {};
-  const rule    = _ruleForEvent(eventId, patient.group) || rules.default_completion_rule || {};
+  const defaultRule = ruleKind === 'scheduling'
+    ? rules.default_scheduling_rule
+    : rules.default_completion_rule;
+  const rule = _ruleForEvent(eventId, patient.group) || defaultRule || {};
   const nb = (rule.not_before || []).map(t => _resolveToken(t, patient, _completeEventsCache, 'floor')).filter(Boolean);
   const na = (rule.not_after  || []).map(t => _resolveToken(t, patient, _completeEventsCache, 'ceiling')).filter(Boolean);
   return {
@@ -313,9 +327,9 @@ function _applyDateBounds(modalElOrId, errorId) {
   if (!modalEl) return;
 
   modalEl.querySelectorAll('input[type="date"], input[type="datetime-local"]').forEach(input => {
-    if (input.dataset.dateRule === 'scheduling') return;
+    const ruleKind = input.dataset.dateRule === 'scheduling' ? 'scheduling' : 'completion';
     const isDateTime = input.type === 'datetime-local';
-    const { min: minDt, max: maxDt } = _resolveDateBounds(input.dataset.eventId || null);
+    const { min: minDt, max: maxDt } = _resolveDateBounds(input.dataset.eventId || null, ruleKind);
 
     if (!input.min && minDt) input.min = _toInputValue(minDt, isDateTime);
     if (!input.max && maxDt) input.max = _toInputValue(maxDt, isDateTime);
@@ -323,12 +337,17 @@ function _applyDateBounds(modalElOrId, errorId) {
     const errId = input.dataset.dateError || errorId;
     if (!errId) return;
     if (input._dateGuard) {
-      input.removeEventListener('change', input._dateGuard);
-      input.removeEventListener('input',  input._dateGuard);
+      input.removeEventListener('change',   input._dateGuard);
+      input.removeEventListener('input',    input._dateGuard);
+      input.removeEventListener('blur',     input._dateGuard);
+      input.removeEventListener('focusout', input._dateGuard);
     }
     input._dateGuard = () => { _validateDateInput(input, errId); };
-    input.addEventListener('change', input._dateGuard);
-    input.addEventListener('input',  input._dateGuard);
+    // See _attachDateGuard for the Safari-quirk rationale on blur/focusout.
+    input.addEventListener('change',   input._dateGuard);
+    input.addEventListener('input',    input._dateGuard);
+    input.addEventListener('blur',     input._dateGuard);
+    input.addEventListener('focusout', input._dateGuard);
   });
 }
 
@@ -774,10 +793,13 @@ function _openAssessmentModal(which, ev) {
   document.getElementById(`${which}-date`).value  = '';
   document.getElementById(`${which}-notes`).value = '';
   document.getElementById(`${which}-cancel-reason`).value = '';
+  document.getElementById(`${which}-out-of-window-reason`).value = '';
+  document.getElementById(`${which}-out-of-window-section`).classList.add('hidden');
   setError(`${which}-error`, '');
   const max = new Date().toISOString().slice(0, 16);
   document.getElementById(`${which}-date`).max = max;
   _attachDateGuard(`${which}-date`, `${which}-error`);
+  _setupAssessmentOutOfWindowGuard(which);
 
   const apptDate = ev && ev.appointment_date ? ev.appointment_date : null;
   if (which === 'a1') { _a1ScheduledDate = apptDate; }
@@ -794,6 +816,44 @@ function _openAssessmentModal(which, ev) {
   }
 
   showModal(`${which}-modal`);
+}
+
+// Reveal or hide the out-of-ideal-window reason section based on whether the
+// currently-typed assessment date falls inside the protocol's ideal window
+// (window_start..window_end on the stub, surfaced via _assessmentWindows). The
+// "ideal window" IS the protocol window — same source of truth as the existing
+// Delayed badge and overdue calculation, no duplicate definition.
+function _setupAssessmentOutOfWindowGuard(which) {
+  const dateInput = document.getElementById(`${which}-date`);
+  const section   = document.getElementById(`${which}-out-of-window-section`);
+  const display   = document.getElementById(`${which}-window-display`);
+  const win       = _assessmentWindows[`${which}_assessment`];
+  if (!dateInput || !section) return;
+
+  // Surface the human-readable ideal window in the reason block.
+  if (win && display) {
+    const fmt = (s) => new Date(s + 'T00:00:00').toLocaleDateString('en-GB',
+      { day: 'numeric', month: 'short', year: 'numeric' });
+    display.textContent = `${fmt(win.start)} → ${fmt(win.end)}`;
+  } else if (display) {
+    display.textContent = '—';
+  }
+
+  const evaluate = () => {
+    const v = dateInput.value;
+    const outside = v && _isOutsideAssessmentWindow(which, v);
+    section.classList.toggle('hidden', !outside);
+    if (!outside) document.getElementById(`${which}-out-of-window-reason`).value = '';
+  };
+  // Replace any prior listener so re-opening the modal doesn't stack handlers.
+  if (dateInput._outOfWindowGuard) {
+    dateInput.removeEventListener('change', dateInput._outOfWindowGuard);
+    dateInput.removeEventListener('input',  dateInput._outOfWindowGuard);
+  }
+  dateInput._outOfWindowGuard = evaluate;
+  dateInput.addEventListener('change', evaluate);
+  dateInput.addEventListener('input',  evaluate);
+  evaluate();
 }
 
 function openA1AssessmentModal(ev) { _openAssessmentModal('a1', ev); }
@@ -901,18 +961,32 @@ function _isOutsideAssessmentWindow(which, dateVal) {
   return d < win.start || d > win.end;
 }
 
+// Shared helper for A1/A2: if the date falls outside the ideal window, require
+// an explanation in the reason textarea AND a double-confirm. Returns the
+// reason string when valid, an empty string when the date is in-window, or
+// null when the user cancels or the reason is missing.
+function _gateAssessmentOutOfWindow(which, date, label) {
+  if (!_isOutsideAssessmentWindow(which, date)) return '';
+  const reason = (document.getElementById(`${which}-out-of-window-reason`).value || '').trim();
+  if (!reason) {
+    setError(`${which}-error`, `Reason is required when the ${label} date is outside the ideal window.`);
+    return null;
+  }
+  const ok = window.confirm(
+    `The selected date is outside the ${label} assessment window. Are you sure you want to proceed?`
+  );
+  return ok ? reason : null;
+}
+
 async function saveA1Assessment() {
   const date  = document.getElementById('a1-date').value;
   const notes = document.getElementById('a1-notes').value.trim();
   if (!date) { setError('a1-error', 'Please select an assessment date.'); return; }
   if (_hasDateValidationErrors(['a1-error'])) return;
-  if (_isOutsideAssessmentWindow('a1', date)) {
-    const ok = window.confirm(
-      'The selected date is outside the A1 assessment window. Are you sure you want to proceed?'
-    );
-    if (!ok) return;
-  }
+  const outOfWindowReason = _gateAssessmentOutOfWindow('a1', date, 'A1');
+  if (outOfWindowReason === null) return;
   const payload = { completion_date: date, notes };
+  if (outOfWindowReason) payload.out_of_window_reason = outOfWindowReason;
   if (_a1AssessmentEventId) payload.event_id = _a1AssessmentEventId;
   const { ok, data } = await apiPost(
     `/api/patients/${PATIENT_HOMER_ID}/complete-event/a1-assessment`, payload
@@ -928,15 +1002,12 @@ async function saveA2Assessment() {
   const notes = document.getElementById('a2-notes').value.trim();
   if (!date) { setError('a2-error', 'Please select an assessment date.'); return; }
   if (_hasDateValidationErrors(['a2-error'])) return;
-  if (_isOutsideAssessmentWindow('a2', date)) {
-    const ok = window.confirm(
-      'The selected date is outside the A2 assessment window. Are you sure you want to proceed?'
-    );
-    if (!ok) return;
-  }
+  const outOfWindowReason = _gateAssessmentOutOfWindow('a2', date, 'A2');
+  if (outOfWindowReason === null) return;
   // A1 is auto-missed atomically by the server (only if A2 is actually filed).
   // Send the measured gap from OK-press so the server back-dates A1's filed_at before A2's.
   const payload = { completion_date: date, notes };
+  if (outOfWindowReason) payload.out_of_window_reason = outOfWindowReason;
   if (_a2AssessmentEventId) payload.event_id = _a2AssessmentEventId;
   if (_a2A1MissOkAt != null) payload.a1_miss_gap_seconds = (Date.now() - _a2A1MissOkAt) / 1000;
   const { ok, data } = await apiPost(
@@ -1256,6 +1327,7 @@ const _FIELD_LABELS = {
   description:         'Description',
   action_taken:        'Action Taken',
   date_change_reason:  'Date Change Reason',
+  out_of_window_reason: 'Out-of-window Reason',
   triggered_by:        'Triggered By',
   triggered:           'Triggered',
   faults:              'Faults',
@@ -3420,7 +3492,14 @@ function _trainingPermanentlyEnded() {
   return false;
 }
 
-function openAdverseEventFollowupModal(ev) {
+// `lockedFrom`, when provided, indicates this AE follow-up was opened as a
+// post-save side effect of a parent visit/call (D29, D07, D21) where the AE
+// discussion happened inside that same visit. In that case the call date and
+// duration are sourced from the parent and the date input is made read-only —
+// the AE follow-up isn't really a separate moment in time, it's a captured
+// detail of the parent visit. Shape: `{date, duration?, label}`. When null,
+// the standalone-open path runs with the framework's normal editable bounds.
+function openAdverseEventFollowupModal(ev, lockedFrom = null) {
   _aefEventId   = ev.id;
   const aeIds   = ev.adverse_event_ids || [];
 
@@ -3477,7 +3556,13 @@ function openAdverseEventFollowupModal(ev) {
     </div>`;
   }).join('');
 
-  document.getElementById('aef-date').value     = '';
+  const dateInput = document.getElementById('aef-date');
+  const lockHint  = document.getElementById('aef-date-lock-hint');
+  const lockText  = document.getElementById('aef-date-lock-hint-text');
+  dateInput.value     = '';
+  dateInput.readOnly  = false;            // reset from any previous locked open
+  dateInput.classList.remove('bg-slate-100', 'cursor-not-allowed');
+  if (lockHint) lockHint.classList.add('hidden');
   document.getElementById('aef-duration').value  = '';
   document.getElementById('aef-notes').value     = '';
   document.querySelectorAll('input[name="aef-call-mode"]').forEach(r => { r.checked = false; });
@@ -3486,6 +3571,22 @@ function openAdverseEventFollowupModal(ev) {
   _resetAttachment('aef');
   setError('aef-error', '');
   _attachDateGuard('aef-date', 'aef-error');
+
+  // Apply lock when opened from a parent event: pre-fill date (always) and
+  // duration (when known), and mark the date read-only with a small hint.
+  if (lockedFrom && lockedFrom.date) {
+    dateInput.value    = lockedFrom.date;
+    dateInput.readOnly = true;
+    dateInput.classList.add('bg-slate-100', 'cursor-not-allowed');
+    if (lockHint && lockText) {
+      lockText.textContent = `Synced from ${lockedFrom.label || 'parent visit'} — date cannot be changed.`;
+      lockHint.classList.remove('hidden');
+    }
+    if (lockedFrom.duration) {
+      document.getElementById('aef-duration').value = lockedFrom.duration;
+    }
+  }
+
   showModal('adverse-event-followup-modal');
 }
 
@@ -3764,7 +3865,27 @@ function _buildAeContextBanner(prefix, aeDetails) {
     : '<div class="text-slate-400">No adverse events found.</div>';
 }
 
-function openAeFollowupVisitModal(ev) {
+// `lockedFrom`, when provided, opens the modal in **ad-hoc/locked mode**: the
+// entry is being filed during a parent visit (e.g., D29) rather than against a
+// pre-existing scheduled-visit stub. Visit Start/End collapse to a single
+// "Visit Date/Time" field locked to the parent's `completion_date`. The
+// server treats this as a brand-new entry (no stub to consume) and stamps
+// `triggered_by` on it.
+//
+// Shape: `{date, label, triggeredBy: {type, id}, aeIds: [...]}`.
+//   - date:        parent's completion_date (YYYY-MM-DDTHH:MM)
+//   - label:       human-readable parent name for the lock hint
+//   - triggeredBy: {type: 'training_completion_d29' | …, id: <parent_event_id>}
+//   - aeIds:       AE ids the visit covers (sourced by the caller — typically
+//                  from the daily `adverse_event_followup` call stub)
+let _aefvLockedFrom = null;
+
+function openAeFollowupVisitModal(ev, lockedFrom = null) {
+  _aefvLockedFrom = lockedFrom;
+  // In ad-hoc mode there is no stub — synthesize a minimal `ev` shape so the
+  // rest of the opener stays a single code path.
+  if (!ev && lockedFrom) ev = { id: null, adverse_event_ids: lockedFrom.aeIds || [] };
+
   _aefvEventId   = ev.id;
   _aefvAeDetails = _loadAeDetails(ev.adverse_event_ids || []);
   const aefvAliases = _aefvAeDetails.map(ae => ae.alias).filter(Boolean);
@@ -3774,14 +3895,52 @@ function openAeFollowupVisitModal(ev) {
     : 'Adverse Event Follow-up Visit';
   _buildAeContextBanner('aefv', _aefvAeDetails);
   document.getElementById('aefv-ae-rows').innerHTML = _buildAeVisitRows('aefv', _aefvAeDetails);
-  document.getElementById('aefv-start').value = '';
-  document.getElementById('aefv-end').value   = '';
+
+  const startInput = document.getElementById('aefv-start');
+  const endInput   = document.getElementById('aefv-end');
+  const startLabel = document.getElementById('aefv-start-label');
+  const endWrap    = document.getElementById('aefv-end-wrap');
+  const timesGrid  = document.getElementById('aefv-times-grid');
+  const lockHint   = document.getElementById('aefv-start-lock-hint');
+  const lockText   = document.getElementById('aefv-start-lock-hint-text');
+
+  // Reset both inputs and any prior locked-state styling so a standalone re-open
+  // after a locked open behaves cleanly.
+  startInput.value      = '';
+  startInput.readOnly   = false;
+  startInput.classList.remove('bg-slate-100', 'cursor-not-allowed');
+  endInput.value        = '';
+  endInput.readOnly     = false;
+  endInput.classList.remove('bg-slate-100', 'cursor-not-allowed');
+  endWrap.classList.remove('hidden');
+  timesGrid.classList.remove('grid-cols-1');
+  timesGrid.classList.add('grid-cols-2');
+  startLabel.innerHTML  = 'Visit Start <span class="text-red-500">*</span>';
+  if (lockHint) lockHint.classList.add('hidden');
+
   document.getElementById('aefv-notes').value = '';
   _setupAeSchedulingToggles('aefv');
   _resetAttachment('aefv');
   setError('aefv-error', '');
   _attachSessionEndGuard('aefv-start', 'aefv-end', 'aefv-error');
   _attachDateGuard('aefv-start', 'aefv-error');
+
+  if (lockedFrom && lockedFrom.date) {
+    // Collapse the two-time-field layout into a single locked Visit Date/Time.
+    startInput.value     = lockedFrom.date;
+    startInput.readOnly  = true;
+    startInput.classList.add('bg-slate-100', 'cursor-not-allowed');
+    endInput.value       = lockedFrom.date;  // server gets visit_end = visit_start
+    endWrap.classList.add('hidden');
+    timesGrid.classList.remove('grid-cols-2');
+    timesGrid.classList.add('grid-cols-1');
+    startLabel.innerHTML = 'Visit Date/Time <span class="text-red-500">*</span>';
+    if (lockHint && lockText) {
+      lockText.textContent = `Synced from ${lockedFrom.label || 'parent visit'} — date cannot be changed.`;
+      lockHint.classList.remove('hidden');
+    }
+  }
+
   showModal('ae-followup-visit-modal');
 }
 
@@ -3790,11 +3949,15 @@ async function saveAeFollowupVisit() {
   const end     = document.getElementById('aefv-end').value;
   const notes   = document.getElementById('aefv-notes').value.trim();
   const saveBtn = document.getElementById('aefv-save');
+  const adHoc   = !!_aefvLockedFrom;
 
   if (!start) { setError('aefv-error', 'Visit start is required.'); return; }
   if (!end)   { setError('aefv-error', 'Visit end is required.'); return; }
   if (start.split('T')[0] !== end.split('T')[0]) { setError('aefv-error', 'Start and end must be on the same date.'); return; }
-  if (end <= start) { setError('aefv-error', 'Visit end must be after visit start.'); return; }
+  // Ad-hoc/locked mode uses a single Visit Date/Time field (visit_end is set
+  // equal to visit_start by the opener). Skip the strict "end > start" check
+  // there. The normal path keeps the original constraint.
+  if (!adHoc && end <= start) { setError('aefv-error', 'Visit end must be after visit start.'); return; }
 
   const { discussions, error } = _collectAeDiscussions('aefv', _aefvAeDetails);
   if (error) { setError('aefv-error', error); return; }
@@ -3804,10 +3967,22 @@ async function saveAeFollowupVisit() {
   if (!_validateAttachment('aefv', 'aefv-error')) return;
 
   saveBtn.disabled = true;
+  const payload = {
+    event_id: _aefvEventId,
+    visit_start: start, visit_end: end,
+    notes: notes || null,
+    ae_discussions: discussions,
+    scheduled_followup_visit: scheduledFollowupVisit,
+    scheduled_clinical_visit: scheduledClinicalVisit,
+  };
+  if (adHoc) {
+    // Tell the server this is a brand-new entry filed during a parent visit.
+    // The server sources adverse_event_ids from the daily AE follow-up call
+    // stub (which the user explicitly said stays untouched).
+    payload.triggered_by = _aefvLockedFrom.triggeredBy;
+  }
   const { ok, data } = await apiPost(
-    `/api/patients/${PATIENT_HOMER_ID}/complete-event/ae-followup-visit`,
-    { event_id: _aefvEventId, visit_start: start, visit_end: end, notes: notes || null, ae_discussions: discussions,
-      scheduled_followup_visit: scheduledFollowupVisit, scheduled_clinical_visit: scheduledClinicalVisit }
+    `/api/patients/${PATIENT_HOMER_ID}/complete-event/ae-followup-visit`, payload
   );
   if (!ok) { setError('aefv-error', data.error || 'Failed to save.'); saveBtn.disabled = false; return; }
 
@@ -6461,8 +6636,21 @@ async function saveD29() {
     hideModal('d29-modal');
     await loadPatientEvents();
     if (aeDiscussed === 'yes') {
+      // D29 is a home visit, not a call. The AE discussion happened *during*
+      // the visit, so we file an `adverse_event_followup_visit` entry (not an
+      // `adverse_event_followup` call entry). The daily call stub in
+      // incomplete[] is left untouched — the visit is an additional record
+      // stamped with triggered_by pointing at this D29 entry. AE ids come
+      // from the daily call stub (it tracks the active AE chain).
       const aefStub = eventsCache.find(e => e.protocol_event_id === 'adverse_event_followup');
-      if (aefStub) openAdverseEventFollowupModal(aefStub);
+      if (aefStub) {
+        openAeFollowupVisitModal(null, {
+          date:        completionDate,
+          label:       'D29 visit',
+          triggeredBy: { type: 'training_completion_d29', id: _d29EventId },
+          aeIds:       aefStub.adverse_event_ids || [],
+        });
+      }
     }
   } catch (e) {
     setErr('Network error. Please try again.');
@@ -6922,6 +7110,11 @@ function openFollowupCallModal(ev) {
   _followupCallScheduledDate   = ev.scheduled_date ? ev.scheduled_date[0].slice(0, 10) : null;
 
   document.getElementById('followup-call-title').textContent             = ev.event_name;
+  // Set data-event-id dynamically so the Date Rule Framework picks up the
+  // d07-vs-d21-specific bounds (event:home_visit_d03 / event:followup_call_d07
+  // lower; activationDate + 19d / + 26d upper). Read by _applyDateBounds
+  // when showModal() fires below.
+  document.getElementById('followup-call-date').dataset.eventId          = ev.protocol_event_id || '';
   document.getElementById('followup-call-date').value                    = '';
   document.getElementById('followup-call-duration').value                = '';
   document.querySelectorAll('input[name="fc-call-mode"]').forEach(r => { r.checked = false; });
@@ -7015,10 +7208,12 @@ async function saveFollowupCall() {
   if (fcAeDiscussed === 'yes') {
     const aefStub = eventsCache.find(e => e.protocol_event_id === 'adverse_event_followup');
     if (aefStub) {
-      openAdverseEventFollowupModal(aefStub);
-      // Pre-fill call date and duration from this follow-up call.
-      document.getElementById('aef-date').value     = dateVal;
-      document.getElementById('aef-duration').value = duration;
+      // AE discussion happened during this D07/D21 call — lock the AE follow-up
+      // date to the parent call's completion date and pre-fill duration.
+      const label = _followupCallProtocolEventId === 'followup_call_d07' ? 'Day 07 follow-up call'
+                  : _followupCallProtocolEventId === 'followup_call_d21' ? 'Day 21 follow-up call'
+                  : 'follow-up call';
+      openAdverseEventFollowupModal(aefStub, { date: dateVal, duration, label });
     }
   }
 }

@@ -128,6 +128,36 @@ def _next_call_alias(events_data):
     return f"Call-{max_n + 1:03d}"
 
 
+def _outside_assessment_window(patient, pid, date_str):
+    """Returns True if `date_str` (YYYY-MM-DDTHH:MM or YYYY-MM-DD) falls outside
+    the protocol-defined ideal window for the assessment `pid`. Uses
+    `study_protocol.json` windows (same source as `_assessment_windows` in
+    `api_patient_events`), interpreted 1-based per the protocol convention:
+    Day 1 = activationDate itself, so `start_day - 1` is the offset in days.
+
+    Returns False when the window cannot be computed (missing activation date,
+    missing protocol definition, malformed input), so the caller defaults to
+    "in window" and skips the reason gate."""
+    if not patient or not patient.get('activationDate') or not date_str:
+        return False
+    try:
+        act_dt = datetime.fromisoformat(patient['activationDate']).date()
+        date_d = datetime.strptime(date_str[:10], '%Y-%m-%d').date()
+    except (ValueError, TypeError):
+        return False
+    protocol = load_study_protocol()
+    group = patient.get('group') or ''
+    for entry in (protocol.get(group, []) or []) + (protocol.get('shared', []) or []):
+        if entry.get('id') == pid:
+            win = entry.get('window') or {}
+            if 'start_day' in win and 'end_day' in win:
+                start = act_dt + timedelta(days=win['start_day'] - 1)
+                end   = act_dt + timedelta(days=win['end_day']   - 1)
+                return date_d < start or date_d > end
+            return False
+    return False
+
+
 _CALL_MODES = ('audio', 'video')
 
 
@@ -2360,7 +2390,7 @@ def api_complete_training_completion(homer_id):
 
     if not completion_date:
         return jsonify({'error': 'Event date is required.'}), 400
-    if r := _bad_date(patient, completion_date): return r
+    if r := _bad_date(patient, completion_date, event_id='training_completion_d29'): return r
     try:
         if datetime.strptime(completion_date, '%Y-%m-%dT%H:%M') > datetime.now():
             return jsonify({'error': 'Event date cannot be in the future.'}), 400
@@ -2935,7 +2965,13 @@ def api_complete_adverse_event_followup(homer_id):
         return jsonify({'error': 'event_id is required.'}), 400
     if not completion_date:
         return jsonify({'error': 'Call date is required.'}), 400
-    if r := _bad_date(patient, completion_date): return r
+    # Load events_data up-front so the per-event Date Rule Framework lookup can
+    # resolve `event:adverse_event` (the AE follow-up's `not_before` token).
+    events_data = read_protocol_events(folder, homer_id)
+    if not events_data:
+        return jsonify({'error': 'Protocol events not found.'}), 404
+    if r := _bad_date(patient, completion_date,
+                      event_id='adverse_event_followup', events_data=events_data): return r
     if r := _bad_call_mode(call_mode):            return r
     if not isinstance(patient_initiated_raw, bool):
         return jsonify({'error': 'Please indicate who initiated this call (Therapist / Patient).'}), 400
@@ -2964,10 +3000,6 @@ def api_complete_adverse_event_followup(homer_id):
                 datetime.strptime(sched_field, '%Y-%m-%dT%H:%M')
             except ValueError:
                 return jsonify({'error': f'Invalid date format for {label}.'}), 400
-
-    events_data = read_protocol_events(folder, homer_id)
-    if not events_data:
-        return jsonify({'error': 'Protocol events not found.'}), 404
 
     incomplete = events_data.get('incomplete', [])
     entry = next(
@@ -3287,6 +3319,7 @@ def api_complete_ae_followup_visit(homer_id):
 
     body                     = request.get_json() or {}
     event_id                 = body.get('event_id')
+    triggered_by             = body.get('triggered_by')
     visit_start              = (body.get('visit_start') or '').strip()
     visit_end                = (body.get('visit_end') or '').strip()
     notes                    = (body.get('notes') or '').strip() or None
@@ -3294,7 +3327,18 @@ def api_complete_ae_followup_visit(homer_id):
     scheduled_followup_visit = (body.get('scheduled_followup_visit') or '').strip() or None
     scheduled_clinical_visit = (body.get('scheduled_clinical_visit') or '').strip() or None
 
-    if not event_id:
+    # Two modes:
+    #   1) Stub-driven (default): `event_id` references an existing
+    #      `adverse_event_followup_visit` stub seeded via the "Schedule a
+    #      follow-up visit" toggle. Visit start < end (real time range).
+    #   2) Ad-hoc (`event_id` absent, `triggered_by` present): the AE
+    #      discussion happened during a parent visit (e.g., D29 home visit).
+    #      No stub exists; the entry is created fresh, AE ids are sourced from
+    #      the active `adverse_event_followup` daily call stub, and visit
+    #      start == end is allowed (the parent visit is a point in time).
+    ad_hoc = (not event_id) and isinstance(triggered_by, dict) and triggered_by.get('type')
+
+    if not event_id and not ad_hoc:
         return jsonify({'error': 'event_id is required.'}), 400
     if not visit_start:
         return jsonify({'error': 'Visit start is required.'}), 400
@@ -3308,8 +3352,13 @@ def api_complete_ae_followup_visit(homer_id):
             return jsonify({'error': 'Visit start cannot be in the future.'}), 400
         if start_dt.date() != end_dt.date():
             return jsonify({'error': 'Visit start and end must be on the same date.'}), 400
-        if end_dt <= start_dt:
+        # Ad-hoc mode files at a single instant (parent visit's completion
+        # date), so end == start is valid. The stub-driven path keeps the
+        # strict "end > start" check.
+        if (not ad_hoc) and end_dt <= start_dt:
             return jsonify({'error': 'Visit end must be after visit start.'}), 400
+        if ad_hoc and end_dt < start_dt:
+            return jsonify({'error': 'Visit end cannot be before visit start.'}), 400
     except ValueError:
         return jsonify({'error': 'Invalid date format.'}), 400
     if not isinstance(ae_discussions, list):
@@ -3327,13 +3376,35 @@ def api_complete_ae_followup_visit(homer_id):
         return jsonify({'error': 'Protocol events not found.'}), 404
 
     incomplete = events_data.get('incomplete', [])
-    entry = next(
-        (e for e in incomplete
-         if e.get('protocol_event_id') == 'adverse_event_followup_visit' and e.get('id') == event_id),
-        None
-    )
-    if not entry:
-        return jsonify({'error': 'Follow-up visit stub not found.'}), 404
+    if ad_hoc:
+        # No stub to consume. Source AE ids from the daily call stub (the
+        # active AE-chain register) and synthesize a minimal entry shape so
+        # the rest of the route works unchanged.
+        aef_call_stub = next(
+            (e for e in incomplete if e.get('protocol_event_id') == 'adverse_event_followup'),
+            None
+        )
+        if not aef_call_stub:
+            return jsonify({'error': 'No active AE follow-up to attach this visit to.'}), 400
+        import uuid as _uuid
+        entry = {
+            'id':                str(_uuid.uuid4()),
+            'protocol_event_id': 'adverse_event_followup_visit',
+            'adverse_event_ids': list(aef_call_stub.get('adverse_event_ids', [])),
+            'triggered_by':      triggered_by,
+            'scheduled_date':    [visit_start, visit_start],
+        }
+        # Use this id as the entry's identifier for downstream code paths that
+        # expect `event_id` to point at the entry being written.
+        event_id = entry['id']
+    else:
+        entry = next(
+            (e for e in incomplete
+             if e.get('protocol_event_id') == 'adverse_event_followup_visit' and e.get('id') == event_id),
+            None
+        )
+        if not entry:
+            return jsonify({'error': 'Follow-up visit stub not found.'}), 404
 
     training_ended = bool(patient and (
         patient.get('trainingCompletionDate') or
@@ -4943,7 +5014,14 @@ def api_complete_followup_call(homer_id):
         return jsonify({'error': 'Invalid protocol event ID.'}), 400
     if not completion_date:
         return jsonify({'error': 'Call date is required.'}), 400
-    if r := _bad_date(patient, completion_date):    return r
+    # Load events_data up-front so the per-event Date Rule Framework lookup can
+    # resolve `event:home_visit_d03` (for D07) and `event:followup_call_d07`
+    # (for D21). The same handle is reused later for the actual mutation.
+    events_data = read_protocol_events(folder, homer_id)
+    if not events_data:
+        return jsonify({'error': 'Protocol events not found.'}), 404
+    if r := _bad_date(patient, completion_date,
+                      event_id=protocol_event_id, events_data=events_data): return r
     if r := _bad_call_mode(call_mode):              return r
     if r := _bad_outcome(no_issue, triggered_items): return r
     try:
@@ -4979,10 +5057,6 @@ def api_complete_followup_call(homer_id):
                 return jsonify({'error': 'Other device issue call is only valid for experimental patients.'}), 400
         else:
             return jsonify({'error': f"Unknown triggered type: {t}"}), 400
-
-    events_data = read_protocol_events(folder, homer_id)
-    if not events_data:
-        return jsonify({'error': 'Protocol events not found.'}), 404
 
     incomplete = events_data.get('incomplete', [])
     entry = next(
@@ -6174,10 +6248,11 @@ def api_complete_a1_assessment(homer_id):
     if not folder:
         return jsonify({'error': 'Patient not found'}), 404
 
-    body       = request.get_json() or {}
-    event_id   = (body.get('event_id') or '').strip()
-    a1_date    = (body.get('completion_date') or '').strip()
-    notes      = (body.get('notes') or '').strip()
+    body          = request.get_json() or {}
+    event_id      = (body.get('event_id') or '').strip()
+    a1_date       = (body.get('completion_date') or '').strip()
+    notes         = (body.get('notes') or '').strip()
+    oow_reason    = (body.get('out_of_window_reason') or '').strip()
 
     if not a1_date:
         return jsonify({'error': 'Assessment date is required.'}), 400
@@ -6190,14 +6265,21 @@ def api_complete_a1_assessment(homer_id):
     patient = read_patient_meta(folder, homer_id)
     if not patient:
         return jsonify({'error': 'Patient not found'}), 404
-    if r := _bad_date(patient, a1_date): return r
-    status = derive_status(patient)
-    if status not in ('training_completed', 'broken_protocol', 'discontinued', 'post_training'):
-        return jsonify({'error': 'Patient must have completed training to record A1 assessment.'}), 409
-
     events_data = read_protocol_events(folder, homer_id)
     if not events_data:
         return jsonify({'error': 'Protocol events not found.'}), 404
+    # Per-event hard bound: not_before activationDate + 29d. The framework
+    # needs events_data to resolve event:<id> references (not needed here for
+    # A1, but kept for consistency with A2's event:a1_assessment rule).
+    if r := _bad_date(patient, a1_date, event_id='a1_assessment', events_data=events_data): return r
+    # Out-of-ideal-window reason gate: when the assessment date falls outside
+    # the protocol-defined ideal window, the reason field is required. Same
+    # contract as on the client (see saveA1Assessment).
+    if _outside_assessment_window(patient, 'a1_assessment', a1_date) and not oow_reason:
+        return jsonify({'error': 'Reason is required when the A1 date is outside the ideal window.'}), 400
+    status = derive_status(patient)
+    if status not in ('training_completed', 'broken_protocol', 'discontinued', 'post_training'):
+        return jsonify({'error': 'Patient must have completed training to record A1 assessment.'}), 409
 
     entry = next(
         (e for e in events_data.get('incomplete', [])
@@ -6210,6 +6292,8 @@ def api_complete_a1_assessment(homer_id):
 
     filed_at = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
     complete_entry = {**entry, 'completion_date': a1_date, 'filed_at': filed_at, 'filed_by': _filer(), 'notes': notes}
+    if oow_reason:
+        complete_entry['out_of_window_reason'] = oow_reason
     # Remove the assessment entry and any orphaned schedule-call stubs.
     events_data['incomplete'] = [
         e for e in events_data['incomplete']
@@ -6246,6 +6330,7 @@ def api_complete_a2_assessment(homer_id):
     event_id     = (body.get('event_id') or '').strip()
     a2_date      = (body.get('completion_date') or '').strip()
     notes        = (body.get('notes') or '').strip()
+    oow_reason   = (body.get('out_of_window_reason') or '').strip()
     a1_miss_gap  = body.get('a1_miss_gap_seconds')
 
     if not a2_date:
@@ -6259,14 +6344,19 @@ def api_complete_a2_assessment(homer_id):
     patient = read_patient_meta(folder, homer_id)
     if not patient:
         return jsonify({'error': 'Patient not found'}), 404
-    if r := _bad_date(patient, a2_date): return r
-    status = derive_status(patient)
-    if status not in ('training_completed', 'broken_protocol', 'discontinued', 'post_training', 'a1_completed'):
-        return jsonify({'error': 'Patient must have completed training to record A2 assessment.'}), 409
-
     events_data = read_protocol_events(folder, homer_id)
     if not events_data:
         return jsonify({'error': 'Protocol events not found.'}), 404
+    # Per-event hard bound: not_before event:a1_assessment. The token resolves
+    # to None until A1 is filed, so this rule effectively only blocks A2 from
+    # being earlier than A1 once A1 is completed (the auto-miss-A1 flow writes
+    # A1 missed without a completion_date, so this rule does not block it).
+    if r := _bad_date(patient, a2_date, event_id='a2_assessment', events_data=events_data): return r
+    if _outside_assessment_window(patient, 'a2_assessment', a2_date) and not oow_reason:
+        return jsonify({'error': 'Reason is required when the A2 date is outside the ideal window.'}), 400
+    status = derive_status(patient)
+    if status not in ('training_completed', 'broken_protocol', 'discontinued', 'post_training', 'a1_completed'):
+        return jsonify({'error': 'Patient must have completed training to record A2 assessment.'}), 409
 
     entry = next(
         (e for e in events_data.get('incomplete', [])
@@ -6279,6 +6369,8 @@ def api_complete_a2_assessment(homer_id):
 
     filed_at = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
     complete_entry = {**entry, 'completion_date': a2_date, 'filed_at': filed_at, 'filed_by': _filer(), 'notes': notes}
+    if oow_reason:
+        complete_entry['out_of_window_reason'] = oow_reason
 
     # Auto-miss A1 if still incomplete.
     a1_entry = next(

@@ -142,14 +142,25 @@ def _rule_for_event(event_id: Optional[str], group: Optional[str]) -> Optional[d
 
 def resolve_bounds(patient: dict,
                    event_id: Optional[str] = None,
-                   events_data: Optional[dict] = None
+                   events_data: Optional[dict] = None,
+                   rule_kind: str = 'completion'
                    ) -> Tuple[Optional[datetime], Optional[datetime]]:
     """Return (min_dt, max_dt) for the given event (or the default rule when
     `event_id` is None or has no override). References that resolve to None are
-    dropped; bounds reduce to the strictest defined values."""
+    dropped; bounds reduce to the strictest defined values.
+
+    `rule_kind`:
+      - `'completion'` (default): falls back to `default_completion_rule` for
+        clinical-event date inputs (the universal "between activation and
+        today" floor/ceiling).
+      - `'scheduling'`: falls back to `default_scheduling_rule` for future-date
+        inputs (the `not_before: today` floor that keeps therapists from
+        picking a past date when scheduling a visit/appointment).
+    """
     rules = _load_rules()
     group = (patient or {}).get('group')
-    rule = _rule_for_event(event_id, group) or rules.get('default_completion_rule') or {}
+    default_key = 'default_scheduling_rule' if rule_kind == 'scheduling' else 'default_completion_rule'
+    rule = _rule_for_event(event_id, group) or rules.get(default_key) or {}
 
     nb_tokens = rule.get('not_before') or []
     na_tokens = rule.get('not_after')  or []
