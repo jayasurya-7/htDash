@@ -701,6 +701,7 @@ Created directly by triggering modals (activation, home visit, patient call, fol
 ```json
 {
   "id": "<uuid>",
+  "alias": "RI01",
   "triggered_by": { "type": "activation | home_visit_d02 | home_visit_d03 | home_visit_d15 | patient_call | followup_call_d07 | followup_call_d21", "id": "<uuid>" },
   "completion_date": "YYYY-MM-DDTHH:MM",
   "filed_at": "YYYY-MM-DDTHH:MM:SS",
@@ -714,6 +715,7 @@ Created directly by triggering modals (activation, home visit, patient call, fol
 }
 ```
 
+- `alias`: per-patient, `RI`-prefixed sequence number (`RI01`, `RI02`, …) assigned server-side at filing time. Chronological by `filed_at` within the patient's `free.robot_issue_call` bucket. Counter is **independent of** the ODI sequence (`other_device_issue_call`). Surfaced as the card title in the Device Issues tab. Missing aliases on legacy entries are backfilled on first read of `api_patient_events` (same pattern as the AE alias backfill).
 - `devices`: one entry per device the engineer explicitly discussed during the call (only checked devices). Empty list `[]` if no specific device was discussed (general call).
 - `notes`: overall call notes; required when `devices` is empty; optional otherwise.
 - `visit_required`: derived boolean — `true` if any device entry has `outcome = "visit_required"`; `false` otherwise. When `true`, a single `robot_issue_visit` stub is auto-created in `incomplete`.
@@ -820,6 +822,58 @@ Created when a `robot_issue_visit` swaps a device with no replacement available 
   - `notes`: required when `new_device_id` is null — explains why no replacement was available.
 - `other_device_outcomes`: one entry per other device the engineer attended to during this visit (optional; empty list `[]` if none). Same field semantics as `robot_issue_visit` `device_outcomes` including `swap_type`.
 - Pause clears when no `resolve_robot_issue_visit` stubs remain in `incomplete` AND no `adverse_event_followup` stubs remain.
+
+**`other_device_issue_call`** *(experimental only)*
+
+Engineer call for modem / laptop / SIM problems. Analogous to `robot_issue_call` but for non-robot devices. Triggered by the same set of primary modals.
+
+**Completed record** (in `free.other_device_issue_call`):
+```json
+{
+  "id": "<uuid>",
+  "alias": "ODI01",
+  "triggered_by": { "type": "activation | home_visit_d02 | home_visit_d03 | home_visit_d15 | patient_call | followup_call_d07 | followup_call_d21", "id": "<uuid>" },
+  "completion_date": "YYYY-MM-DDTHH:MM",
+  "issue_occur_date": "YYYY-MM-DD",
+  "filed_at": "YYYY-MM-DDTHH:MM:SS",
+  "notes": null,
+  "devices": [
+    { "device_type": "modems | laptops | sims", "device_id": "<id>", "outcome": "visit_required | resolved_over_call", "notes": null }
+  ],
+  "visit_required": false,
+  "attachment": null,
+  "attachment_caption": null
+}
+```
+
+- `alias`: per-patient, `ODI`-prefixed sequence (`ODI01`, `ODI02`, …) assigned server-side at filing time. Counter is **independent of** the RI sequence (`robot_issue_call`). Backfilled on first read of `api_patient_events` if missing.
+- `issue_occur_date`: required — date the issue first occurred (distinct from the call date).
+- `devices`: one entry per device flagged on the call. `outcome = "visit_required"` queues a `other_device_issue_visit` stub.
+- `visit_required`: derived `true` if any device has `outcome = "visit_required"`.
+
+**`other_device_issue_visit`** *(experimental only)*
+
+Engineer visit to address an other-device issue. Per-device outcomes (`repaired` / `replaced` / `neither`) clear `has_issue` accordingly.
+
+**Completed record** (in `free.other_device_issue_visit`):
+```json
+{
+  "id": "<uuid>",
+  "triggered_by": { "type": "other_device_issue_call", "id": "<uuid>" },
+  "completion_date": "YYYY-MM-DDTHH:MM",
+  "filed_at": "YYYY-MM-DDTHH:MM:SS",
+  "notes": null,
+  "device_outcomes": [
+    { "device_type": "modems | laptops | sims", "device_id": "<id>", "outcome": "repaired | replaced | neither", "new_device_id": null, "notes": null }
+  ],
+  "attachment": null,
+  "attachment_caption": null
+}
+```
+
+- `device_outcomes`: one entry per device addressed on this visit.
+  - `repaired` / `replaced` → clears `has_issue` on the device inventory record.
+  - `neither` → device remains faulty; no automatic re-queue (unlike robot issues, ODIs don't pause training).
 
 **`patient_call`**
 

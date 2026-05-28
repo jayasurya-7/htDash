@@ -527,13 +527,22 @@ def api_patient_events(homer_id):
     # Build set of all known event IDs (incomplete + complete) — only these can block
     known_ids = completed_ids | {e['protocol_event_id'] for e in events_data.get('incomplete', [])}
 
-    # Backfill missing aliases on free.adverse_event entries (one-time repair for pre-alias data)
-    existing_aes = events_data.get('free', {}).get('adverse_event', [])
-    if existing_aes and any(not e.get('alias') for e in existing_aes):
-        sorted_aes = sorted(existing_aes, key=lambda e: e.get('completion_date') or e.get('filed_at') or '')
-        for i, ae in enumerate(sorted_aes):
-            if not ae.get('alias'):
-                ae['alias'] = f"AE{i + 1:02d}"
+    # Backfill missing aliases (one-time repair for pre-alias data). Each
+    # bucket has its own per-patient counter — AE, RI, and ODI are independent
+    # sequences. Re-sort by completion_date/filed_at so backfilled numbers
+    # match chronological order even if the bucket was written out of order.
+    _alias_dirty = False
+    for _bucket, _prefix in (('adverse_event', 'AE'),
+                             ('robot_issue_call', 'RI'),
+                             ('other_device_issue_call', 'ODI')):
+        _entries = events_data.get('free', {}).get(_bucket, [])
+        if _entries and any(not e.get('alias') for e in _entries):
+            _sorted = sorted(_entries, key=lambda e: e.get('completion_date') or e.get('filed_at') or '')
+            for i, e in enumerate(_sorted):
+                if not e.get('alias'):
+                    e['alias'] = f"{_prefix}{i + 1:02d}"
+                    _alias_dirty = True
+    if _alias_dirty:
         write_protocol_events(folder, homer_id, events_data)
 
     # Alias lookup for follow-up event name construction
@@ -3631,7 +3640,9 @@ def api_complete_robot_issue_call(homer_id):
             'broken_protocol_mode': True,
         }
         events_data['incomplete'] = [e for e in incomplete if e.get('id') != event_id]
-        events_data.setdefault('free', {}).setdefault('robot_issue_call', []).append(complete_entry)
+        existing_ris = events_data.setdefault('free', {}).setdefault('robot_issue_call', [])
+        complete_entry['alias'] = f"RI{len(existing_ris) + 1:02d}"
+        existing_ris.append(complete_entry)
         write_protocol_events(folder, homer_id, events_data)
         write_patient_log(folder, homer_id, loginid, session_id, 'Robot issue call recorded (broken protocol).')
         return jsonify({'ok': True})
@@ -3649,7 +3660,9 @@ def api_complete_robot_issue_call(homer_id):
         'visit_required':   visit_required,
     }
     events_data['incomplete'] = [e for e in incomplete if e.get('id') != event_id]
-    events_data.setdefault('free', {}).setdefault('robot_issue_call', []).append(complete_entry)
+    existing_ris = events_data.setdefault('free', {}).setdefault('robot_issue_call', [])
+    complete_entry['alias'] = f"RI{len(existing_ris) + 1:02d}"
+    existing_ris.append(complete_entry)
 
     if visit_required:
         events_data.setdefault('incomplete', []).append({
@@ -3802,7 +3815,9 @@ def api_complete_other_device_issue_call(homer_id):
             'attachment_caption':   None,
         }
         events_data['incomplete'] = [e for e in incomplete if e.get('id') != event_id]
-        events_data.setdefault('free', {}).setdefault('other_device_issue_call', []).append(complete_entry)
+        existing_odis = events_data.setdefault('free', {}).setdefault('other_device_issue_call', [])
+        complete_entry['alias'] = f"ODI{len(existing_odis) + 1:02d}"
+        existing_odis.append(complete_entry)
         write_protocol_events(folder, homer_id, events_data)
         write_patient_log(folder, homer_id, loginid, session_id,
                           'Other device issue call recorded (broken protocol).')
@@ -3885,7 +3900,9 @@ def api_complete_other_device_issue_call(homer_id):
         'attachment_caption': None,
     }
     events_data['incomplete'] = [e for e in incomplete if e.get('id') != event_id]
-    events_data.setdefault('free', {}).setdefault('other_device_issue_call', []).append(complete_entry)
+    existing_odis = events_data.setdefault('free', {}).setdefault('other_device_issue_call', [])
+    complete_entry['alias'] = f"ODI{len(existing_odis) + 1:02d}"
+    existing_odis.append(complete_entry)
 
     if visit_required:
         events_data.setdefault('incomplete', []).append({

@@ -326,11 +326,25 @@ Tabs appear left-to-right in this order. Visibility is per group.
 | Call Logs | ✅ | ✅ |
 | Adverse Events | ✅ | ✅ |
 | Watch Records | ✅ | ✅ |
-| Robot Issues | ✅ | ⬜ hidden |
+| Device Issues | ✅ | ⬜ hidden |
 | Timeline | ✅ | ✅ |
 | Notes | ✅ | ✅ |
 
-Notes is the last tab. It is visible to all three roles (admin, therapist, engineer) — unlike Adverse Events / Robot Issues which are role-restricted — but each role sees only its own notes bucket (admin sees all). See the Notes feature spec below.
+Notes is the last tab. It is visible to all three roles (admin, therapist, engineer) — unlike Adverse Events / Device Issues which are role-restricted — but each role sees only its own notes bucket (admin sees all). See the Notes feature spec below.
+
+### Device Issues tab
+
+Unified tab covering **both** `robot_issue_call` (RI) and `other_device_issue_call` (ODI) entries. Renamed from the previous "Robot Issues" tab. Container id: `device-issues-content`. Renderer: `renderDeviceIssuesTab` → `_deviceIssueCard(ev, visits)`.
+
+- **Card model mirrors the Adverse Events tab**: collapsible cards, header with alias + status badge + chevron, meta strip (Reported / Resolved / Duration / Day), expanded body with faulty devices + triggered-by + visit history rows + attachments.
+- **Aliases**: per-patient sequence `RI01`, `RI02`, … for `robot_issue_call`; `ODI01`, `ODI02`, … for `other_device_issue_call`. Independent counters — RI04 and ODI01 can coexist. Assigned server-side at filing time; missing aliases are backfilled lazily on first read of `api_patient_events` (same mechanism as the AE backfill).
+- **Status derivation** (client-side, per-card):
+  - **Pending visit** — call has `visit_required: true` and no matching visit (`robot_issue_visit` or `other_device_issue_visit`) has been filed yet
+  - **In progress** — visit filed but at least one faulty device on the call still has `has_issue: true`
+  - **Resolved** — all faulty devices have been repaired, swapped, or otherwise cleared
+  - **Training paused** badge (red) — overlaid when any RI on the patient is the reason for an active pause
+- **Visit history**: walks `triggered_by` forward from the call. For RI: `robot_issue_call → robot_issue_visit → resolve_robot_issue_visit` (chain). For ODI: `other_device_issue_call → other_device_issue_visit` (no resolve step — ODIs don't pause training).
+- **Sort order**: newest call first by `completion_date`; tied calls use the shared `_cmpCompletedDesc` comparator. RI and ODI interleave chronologically — they're shown in one list.
 
 ---
 

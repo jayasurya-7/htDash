@@ -76,7 +76,7 @@ function switchTab(tab) {
   if (tab === 'calls')         renderCallLogsTab();
   if (tab === 'adverse')       renderAdverseEventsTab();
   if (tab === 'watch-records') renderWatchRecordsTab();
-  if (tab === 'robot')         renderRobotIssuesTab();
+  if (tab === 'device-issues') renderDeviceIssuesTab();
   if (tab === 'timeline')      renderTimelineTab();
   if (tab === 'notes')         renderNotesTab();
 }
@@ -502,9 +502,9 @@ function renderOverview(p) {
   const vcgBtn = document.getElementById('tab-btn-vcg');
   if (vcgBtn) vcgBtn.classList.toggle('hidden', p.group !== 'control');
 
-  // Robot Issues tab: experimental only
-  const robotBtn = document.getElementById('tab-btn-robot');
-  if (robotBtn) robotBtn.classList.toggle('hidden', p.group !== 'experimental');
+  // Device Issues tab: experimental only (RI + ODI both apply only to experimental devices)
+  const deviceIssuesBtn = document.getElementById('tab-btn-device-issues');
+  if (deviceIssuesBtn) deviceIssuesBtn.classList.toggle('hidden', p.group !== 'experimental');
 
   renderPauseBanner(p);
   _checkD0203AtRisk(p);
@@ -1137,7 +1137,7 @@ async function loadPatientEvents() {
     renderTimelineTab();
     renderAdverseEventsTab();
     renderWatchRecordsTab();
-    renderRobotIssuesTab();
+    renderDeviceIssuesTab();
 
     document.getElementById('patient-completed-count').textContent = (complete || []).length;
     document.getElementById('patient-overdue-count').textContent   = overdue.length;
@@ -2159,84 +2159,270 @@ function _watchRecordCard(wr) {
     </div>`;
 }
 
-// ── Robot Issues tab ──────────────────────────────────────────────────────────
+// ── Device Issues tab (RI + ODI unified) ─────────────────────────────────────
 
-function renderRobotIssuesTab() {
-  const container = document.getElementById('robot-issues-content');
+// Modeled on the Adverse Events tab. One collapsible card per call
+// (`robot_issue_call` or `other_device_issue_call`); the expanded body shows
+// faulty devices + triggered-by + visit history (engineer visit → resolve visit).
+// Aliases (RI01… / ODI01…) are server-assigned and used as the card title.
+//
+// Visit chain walk:
+//   robot_issue_call → robot_issue_visit (triggered_by.id == call.id)
+//                    → resolve_robot_issue_visit (triggered_by.id == visit.id)
+//   other_device_issue_call → other_device_issue_visit (triggered_by.id == call.id)
+// Pending detection: any entry in eventsCache (incomplete) referencing this
+// chain → status "open".
+
+const _DI_DEVICE_OUTCOME_LABEL = {
+  resolved:          'Resolved on call',
+  resolved_over_call:'Resolved on call',
+  visit_required:    'Visit required',
+  repaired:          'Repaired',
+  replaced:          'Replaced',
+  swapped:           'Swapped',
+  repaired_on_site:  'Repaired on site',
+  neither:           'Not repaired / not swapped',
+};
+
+const _DI_TRIGGER_NAMES = {
+  activation:           'Patient Activation',
+  home_visit_d02:       'Home Visit Day 02',
+  home_visit_d03:       'Home Visit Day 03',
+  home_visit_d15:       'Home Visit Day 15',
+  followup_call_d07:    'Follow-up Call Day 07',
+  followup_call_d21:    'Follow-up Call Day 21',
+  patient_call:         'Patient Call',
+  robot_issue_call:     'Robot Issue Call',
+  robot_issue_visit:    'Robot Issue Visit',
+};
+
+function renderDeviceIssuesTab() {
+  const container = document.getElementById('device-issues-content');
   if (!container) return;
 
-  const issues = (_completeEventsCache || [])
-    .filter(e => e.protocol_event_id === 'robot_issue_call')
+  const calls = (_completeEventsCache || [])
+    .filter(e => e.protocol_event_id === 'robot_issue_call'
+              || e.protocol_event_id === 'other_device_issue_call')
     .sort(_cmpCompletedDesc);
 
-  if (!issues.length) {
+  if (!calls.length) {
     container.innerHTML = `
       <div class="flex flex-col items-center justify-center py-16 text-slate-300">
-        <i class="fas fa-robot text-3xl mb-3"></i>
-        <p class="text-sm">No robot issues recorded.</p>
+        <i class="fas fa-screwdriver-wrench text-3xl mb-3"></i>
+        <p class="text-sm">No device issues recorded.</p>
       </div>`;
     return;
   }
-  container.innerHTML = issues.map(_robotIssueCard).join('');
+  container.innerHTML = calls.map(_deviceIssueCard).join('');
 }
 
-function _robotIssueCard(ev) {
-  const dayNum   = _dayNumber(ev.completion_date);
-  const dayBadge = dayNum !== null ? `<span class="text-xs font-semibold text-orange-500">Day ${dayNum}</span>` : '';
-  const dateStr  = ev.completion_date ? _fmtDateTime(ev.completion_date) : '—';
-  const filedStr = _showFiledLine(ev) ? _fmtDateTime(ev.filed_at) : '';
+function _toggleDiCard(cardId) {
+  const body    = document.getElementById(`di-body-${cardId}`);
+  const chevron = document.getElementById(`di-chevron-${cardId}`);
+  if (!body) return;
+  const isHidden = body.classList.toggle('hidden');
+  if (chevron) chevron.style.transform = isHidden ? '' : 'rotate(180deg)';
+}
 
+// Walk the visit chain forward from a call. Returns visits in chronological
+// (filed_at) order: engineer visit(s), then any resolve-visit triggered by
+// those engineer visits (RI only). ODI has no resolve step.
+function _diVisitsForCall(call) {
+  const all = _completeEventsCache || [];
+  const isRI = call.protocol_event_id === 'robot_issue_call';
+  const visitType = isRI ? 'robot_issue_visit' : 'other_device_issue_visit';
+  const visits = all
+    .filter(e => e.protocol_event_id === visitType && e.triggered_by?.id === call.id);
+  let resolves = [];
+  if (isRI) {
+    const visitIds = new Set(visits.map(v => v.id));
+    resolves = all.filter(e =>
+      e.protocol_event_id === 'resolve_robot_issue_visit'
+      && visitIds.has(e.triggered_by?.id)
+    );
+  }
+  // Chronological order (oldest first) by completion_date then filed_at.
+  return [...visits, ...resolves].sort((a, b) => {
+    const ka = (a.completion_date || a.filed_at || '');
+    const kb = (b.completion_date || b.filed_at || '');
+    return ka.localeCompare(kb);
+  });
+}
+
+// Returns 'resolved' | 'pending_visit' | 'in_progress'. Coarse but useful:
+//   - resolved      → no pending stubs in the chain, call had no visit_required or visits cleared everything
+//   - pending_visit → call has visit_required AND no visit filed yet
+//   - in_progress  → visit filed but follow-on stub (e.g. resolve_robot_issue_visit) still open
+function _diStatus(call, visits) {
+  // Pending stubs in eventsCache referencing this chain
+  const visitIds = new Set(visits.map(v => v.id));
+  const hasOpen = (eventsCache || []).some(e => {
+    if (!e.triggered_by) return false;
+    return e.triggered_by.id === call.id || visitIds.has(e.triggered_by.id);
+  });
+  if (hasOpen && visits.length === 0) return 'pending_visit';
+  if (hasOpen) return 'in_progress';
+  return 'resolved';
+}
+
+function _deviceIssueCard(call) {
+  const isRI    = call.protocol_event_id === 'robot_issue_call';
+  const visits  = _diVisitsForCall(call);
+  const status  = _diStatus(call, visits);
+  // "Training paused" overlay is meaningful only for RI; ODI doesn't pause.
+  const showPaused = isRI && !!patientData?.trainingPausedDate
+    && (patientData?.pauseHistory || []).some(epoch =>
+         !epoch.end && (epoch.reasons || []).some(r => r.event_id === call.id));
+
+  // Theme by type. Status badge overlaid by status.
+  const theme = isRI
+    ? { border: 'border-orange-300', headerBg: 'bg-orange-50', headerText: 'text-orange-900', label: 'Robot Issue' }
+    : { border: 'border-purple-300', headerBg: 'bg-purple-50', headerText: 'text-purple-900', label: 'Other Device Issue' };
+
+  let statusBadge;
+  if (status === 'resolved') {
+    statusBadge = `<span class="inline-flex items-center gap-1 text-xs bg-green-100 text-green-800 border border-green-200 rounded-full px-2 py-0.5">
+                     <i class="fas fa-check text-[10px]"></i>Resolved</span>`;
+  } else if (status === 'pending_visit') {
+    statusBadge = `<span class="inline-flex items-center gap-1 text-xs bg-amber-100 text-amber-800 border border-amber-300 rounded-full px-2 py-0.5">
+                     <i class="fas fa-clock text-[10px]"></i>Pending visit</span>`;
+  } else {
+    statusBadge = `<span class="inline-flex items-center gap-1 text-xs bg-amber-100 text-amber-800 border border-amber-300 rounded-full px-2 py-0.5">
+                     <i class="fas fa-clock text-[10px]"></i>In progress</span>`;
+  }
+  const pausedBadge = showPaused
+    ? `<span class="inline-flex items-center gap-1 text-xs bg-red-600 text-white rounded-full px-2 py-0.5 font-medium ml-1">
+         <i class="fas fa-pause text-[10px]"></i>Training paused</span>`
+    : '';
+
+  // Meta strip — Reported / Resolved / Duration / Day
+  const reportDateStr  = call.completion_date ? _fmtDate(call.completion_date) : '—';
+  const filedReportStr = _showFiledLine(call) ? _fmtDateTime(call.filed_at) : '';
+  let resolveDateStr = '';
+  let durationStr    = '';
+  if (status === 'resolved') {
+    const lastVisit = visits[visits.length - 1];
+    const resolvedAt = lastVisit?.completion_date || call.completion_date;
+    if (resolvedAt) {
+      resolveDateStr = _fmtDate(resolvedAt);
+      if (call.completion_date) {
+        const d1 = new Date(call.completion_date);
+        const d2 = new Date(resolvedAt);
+        const days = Math.max(0, Math.round((d2 - d1) / 86400000));
+        durationStr = `${days} day${days !== 1 ? 's' : ''}`;
+      }
+    }
+  } else if (call.completion_date) {
+    const days = Math.max(0, Math.round((Date.now() - new Date(call.completion_date)) / 86400000));
+    durationStr = `${days} day${days !== 1 ? 's' : ''} ongoing`;
+  }
+  const dayNum = _dayNumber(call.completion_date);
+  const sep    = `<span class="text-slate-300 mx-1.5">|</span>`;
+  const metaParts = [
+    `<span class="text-xs text-slate-500"><span class="text-slate-400">Reported:</span> ${reportDateStr}${filedReportStr ? ` <span class="text-slate-300">(filed ${filedReportStr})</span>` : ''}</span>`,
+    resolveDateStr ? `<span class="text-xs text-slate-500"><span class="text-slate-400">Resolved:</span> ${resolveDateStr}</span>` : '',
+    durationStr    ? `<span class="text-xs text-slate-500"><span class="text-slate-400">Duration:</span> ${durationStr}</span>` : '',
+    dayNum !== null ? `<span class="text-xs text-slate-400">Day ${dayNum}</span>` : '',
+  ].filter(Boolean).join(sep);
+
+  // Devices on the call (RI shape: {device, outcome}; ODI shape: {device_type, device_id, outcome})
+  const deviceRowsHtml = (call.devices || []).map(d => {
+    const label = isRI
+      ? d.device
+      : `${d.device_type || ''} ${d.device_id || ''}`.trim();
+    const outcomeLabel = _DI_DEVICE_OUTCOME_LABEL[d.outcome] || d.outcome || '';
+    const noteEl = d.notes ? `<p class="mt-0.5 text-slate-500">${_esc(d.notes)}</p>` : '';
+    return `<div class="text-xs text-slate-600 bg-slate-50 rounded-lg px-3 py-2 border border-slate-100">
+              <span class="font-medium capitalize">${_esc(label)}:</span>
+              <span class="ml-1 text-slate-700">${outcomeLabel}</span>
+              ${noteEl}
+            </div>`;
+  }).join('') || '<p class="text-xs text-slate-400 italic">No devices listed on this call.</p>';
+
+  // Triggered-by row
   let triggerStr = '';
-  if (ev.triggered_by) {
-    const typeLabel   = _WR_TRIGGER_NAMES[ev.triggered_by.type] || (ev.triggered_by.type || '').replace(/_/g, ' ');
-    const triggerEv   = (_completeEventsCache || []).find(e => e.id === ev.triggered_by.id);
+  if (call.triggered_by) {
+    const typeLabel = _DI_TRIGGER_NAMES[call.triggered_by.type]
+      || (call.triggered_by.type || '').replace(/_/g, ' ');
+    const triggerEv = (_completeEventsCache || []).find(e => e.id === call.triggered_by.id);
     const triggerDate = triggerEv?.completion_date ? ` — ${_fmtDateTime(triggerEv.completion_date)}` : '';
     triggerStr = `<div class="text-xs text-slate-500"><span class="text-slate-400">Triggered by:</span> ${typeLabel}${triggerDate}</div>`;
   }
+  if (call.issue_occur_date) {
+    triggerStr += `<div class="text-xs text-slate-500"><span class="text-slate-400">Issue first occurred:</span> ${_fmtDate(call.issue_occur_date)}</div>`;
+  }
 
-  const pausedStr = ev.paused
-    ? `<div class="inline-flex items-center gap-1 text-xs bg-red-50 text-red-700 border border-red-200 rounded-full px-2 py-0.5"><i class="fas fa-pause text-[10px]"></i>Training paused</div>`
+  const attachmentStr = (call.attachment && call.id)
+    ? `<a href="/api/patients/${PATIENT_HOMER_ID}/download-attachment/${call.id}" target="_blank"
+         class="inline-flex items-center gap-1 text-xs text-blue-600 hover:underline">
+         <i class="fas fa-paperclip"></i>Attachment</a>`
     : '';
 
-  const _OUTCOME_LABELS = {
-    resolved_same_day: 'Resolved same day',
-    device_swap:       'Device swap',
-    swap_not_possible: 'Swap not possible',
-  };
-  const faultsStr = (ev.faults || []).map(f => {
-    const outcomeLabel = _OUTCOME_LABELS[f.outcome] || f.outcome || '';
-    const outcomeColor = f.outcome === 'resolved_same_day' ? 'text-green-600'
-                       : f.outcome === 'device_swap'       ? 'text-blue-600'
-                       : 'text-red-600';
-    return `<div class="text-xs text-slate-600 bg-orange-50 rounded-lg px-3 py-2 border border-orange-100">
-      <span class="font-medium capitalize">${f.device}:</span>
-      <span class="ml-1 ${outcomeColor} font-medium">${outcomeLabel}</span>
-      ${f.notes ? `<p class="mt-0.5 text-slate-500">${f.notes}</p>` : ''}
-    </div>`;
+  // Visit history rows (engineer visits + any resolve visits)
+  const visitRows = visits.map(v => {
+    const typeLabel = v.protocol_event_id === 'robot_issue_visit'         ? 'Engineer Visit'
+                    : v.protocol_event_id === 'resolve_robot_issue_visit' ? 'Replacement Visit'
+                    : v.protocol_event_id === 'other_device_issue_visit'  ? 'Engineer Visit'
+                    : v.protocol_event_id;
+    const vDate  = v.completion_date ? _fmtDateTime(v.completion_date) : '—';
+    const vFiled = _showFiledLine(v) ? _fmtDateTime(v.filed_at) : '';
+    const outcomes = (v.device_outcomes || v.device_replacements || v.device_faults || []).map(o => {
+      const label = (o.device || o.device_type || '').toString();
+      const id    = o.device_id ? ` ${o.device_id}` : '';
+      const outcomeLbl = _DI_DEVICE_OUTCOME_LABEL[o.outcome] || o.outcome || '';
+      const newId = o.new_device_id ? ` → ${o.new_device_id}` : '';
+      const note  = o.notes ? ` <span class="text-slate-400">(${_esc(o.notes)})</span>` : '';
+      return `<div class="text-xs text-slate-600">• <span class="capitalize">${_esc(label)}</span>${id}: ${outcomeLbl}${newId}${note}</div>`;
+    }).join('');
+    const vNotes = v.notes ? `<p class="text-xs text-slate-500 mt-0.5 italic">${_esc(v.notes)}</p>` : '';
+    const vResume = v.can_resume_from
+      ? `<div class="text-xs text-slate-400 mt-0.5">Can resume from: ${_fmtDate(v.can_resume_from)}</div>` : '';
+    const vAttach = (v.attachment && v.id)
+      ? `<a href="/api/patients/${PATIENT_HOMER_ID}/download-attachment/${v.id}" target="_blank"
+           class="inline-flex items-center gap-1 text-xs text-blue-600 hover:underline mt-1">
+           <i class="fas fa-paperclip"></i>Attachment</a>` : '';
+    return `
+      <div class="py-2 border-t border-slate-100">
+        <div class="flex items-center justify-between flex-wrap gap-1 mb-0.5">
+          <span class="text-xs font-medium text-slate-700">${typeLabel}</span>
+          <span class="text-xs text-slate-400">${vDate}${vFiled ? ` <span class="text-slate-300">(filed ${vFiled})</span>` : ''}</span>
+        </div>
+        ${outcomes}
+        ${vNotes}
+        ${vResume}
+        ${vAttach}
+      </div>`;
   }).join('');
 
-  const attachmentStr = (ev.attachment && ev.id)
-    ? `<a href="/api/patients/${PATIENT_HOMER_ID}/download-attachment/${ev.id}" target="_blank"
-         class="inline-flex items-center gap-1 text-xs text-blue-600 hover:underline">
-         <i class="fas fa-paperclip"></i>Download attachment</a>` : '';
+  const visitsSection = visits.length
+    ? `<div class="mt-3 pt-2 border-t border-slate-200">
+         <p class="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1">Visit history</p>
+         ${visitRows}
+       </div>`
+    : '';
+
+  const cardId = (call.id || '').replace(/-/g, '');
+  const alias  = call.alias || (isRI ? 'Robot Issue' : 'Other Device Issue');
 
   return `
-    <div class="bg-white rounded-xl border border-orange-200 shadow-sm mb-3 overflow-hidden">
-      <div class="bg-orange-50 border-b border-orange-100 px-4 py-2.5 flex items-center justify-between">
-        <span class="text-sm font-semibold text-orange-800">Robot Issue</span>
-        <div class="flex flex-col items-end">
-          <div class="flex items-center gap-3">
-            ${dayBadge}
-            <span class="text-xs text-slate-500">${dateStr}</span>
-          </div>
-          ${filedStr ? `<span class="text-xs text-slate-400">Filed: ${filedStr}</span>` : ''}
+    <div class="rounded-xl border ${theme.border} shadow-sm mb-3 overflow-hidden">
+      <div class="${theme.headerBg} px-4 py-2.5 cursor-pointer select-none flex items-center justify-between"
+           onclick="_toggleDiCard('${cardId}')">
+        <div class="flex items-center gap-2.5 flex-wrap">
+          <span class="text-sm font-bold ${theme.headerText}">${_esc(alias)}</span>
+          <span class="text-xs text-slate-500">${theme.label}</span>
+          ${statusBadge}${pausedBadge}
         </div>
+        <i class="fas fa-chevron-down text-xs ${theme.headerText}" id="di-chevron-${cardId}"
+           style="transition: transform 0.15s"></i>
       </div>
-      <div class="px-4 py-3 space-y-1.5">
-        ${faultsStr}
-        ${pausedStr}
+      <div class="px-4 py-2 border-b border-slate-100 bg-white flex items-center flex-wrap gap-0">${metaParts}</div>
+      <div id="di-body-${cardId}" class="hidden bg-white px-4 py-3 space-y-1.5">
+        ${deviceRowsHtml}
         ${triggerStr}
+        ${call.notes ? `<div class="text-xs text-slate-500"><span class="text-slate-400">Notes:</span> ${_esc(call.notes)}</div>` : ''}
         ${attachmentStr}
+        ${visitsSection}
       </div>
     </div>`;
 }
