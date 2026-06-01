@@ -5751,12 +5751,14 @@ def api_complete_agwatch_timing(homer_id):
     timing_rel = cfg['timing_file']
     filed_at  = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
     loginid   = flask_session.get('loginid', 'unknown')
+
     timing_content = {
         'filed_at':  filed_at,
         'filed_by':  loginid,
         'timings':   [
             {
                 'exercise_id': t.get('exercise_id'),
+                'type':        'adl' if (t.get('exercise_id') or '').startswith('adl') else 'vcg',
                 'start':       (t.get('start') or '').strip() or None,
                 'end':         (t.get('end')   or '').strip() or None,
                 'notes':       (t.get('notes') or '').strip(),
@@ -8774,7 +8776,7 @@ def api_prescription_pamphlet(homer_id):
 
 @bp.route('/api/patients/<homer_id>/agwatch-timing/<protocol_event_id>', methods=['GET'])
 def api_get_agwatch_timing(homer_id, protocol_event_id):
-    """Return a saved agwatch timing file."""
+    """Return a saved agwatch timing file, or empty data if not yet saved."""
     if not flask_session.get('login_place'):
         return jsonify({'error': 'Not authenticated'}), 401
     cfg = _AGWATCH_TIMING_CONFIG.get(protocol_event_id)
@@ -8783,15 +8785,19 @@ def api_get_agwatch_timing(homer_id, protocol_event_id):
     folder = find_patient_folder(flask_session['login_place'], homer_id)
     if not folder:
         return jsonify({'error': 'Patient not found'}), 404
+
+    # Return empty timings if file doesn't exist yet
+    default_response = {'timings': []}
+
     if Config.USE_S3:
         from utils.s3_store import s3_read_json
         data = s3_read_json(f"{folder}/patients/{homer_id}/{cfg['timing_file']}")
-        if data is None:
-            return jsonify({'error': 'Timing file not found'}), 404
-        return jsonify(data)
+        return jsonify(data if data else default_response)
+
     path = get_patients_path(folder) / homer_id / cfg['timing_file']
     if not path.exists():
-        return jsonify({'error': 'Timing file not found'}), 404
+        return jsonify(default_response)
+
     with open(path, encoding='utf-8') as f:
         return jsonify(json.load(f))
 

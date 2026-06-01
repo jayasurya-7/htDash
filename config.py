@@ -4,7 +4,7 @@ from datetime import timedelta
 class Config:
     # Path configurations
     BASE_DIR = os.path.abspath(os.path.dirname(__file__))
-    META_DATA_PATH = "./META-DATA"
+    META_DATA_PATH = os.path.join(BASE_DIR, "META-DATA")
     LOG_DIR = "user_logs"
     DEVICE_CONFIG_PATH = "./static/data/device_config.json"
 
