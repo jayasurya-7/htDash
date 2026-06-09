@@ -1039,6 +1039,63 @@ def api_available_agwatches(homer_id):
     })
 
 
+@bp.route('/api/patients/<homer_id>/complete-event/informed-consent', methods=['POST'])
+def api_complete_informed_consent(homer_id):
+    """Complete the informed_consent protocol event."""
+    if not flask_session.get('login_place'):
+        return jsonify({'error': 'Not authenticated'}), 401
+
+    folder = find_patient_folder(flask_session['login_place'], homer_id)
+    if not folder:
+        return jsonify({'error': 'Patient not found'}), 404
+
+    # Check if patient is discontinued
+    patient = read_patient_meta(folder, homer_id)
+    if patient and patient.get('discontinuationDate'):
+        return jsonify({'error': 'Patient is discontinued. No further changes are allowed.'}), 403
+
+    data = request.get_json() or {}
+    event_id   = data.get('event_id')
+    event_date = data.get('consentDate', '').strip()
+    if r := _bad_date(patient, event_date, event_id='informed_consent'): return r
+    notes      = data.get('notes', '').strip()
+
+    if not event_date:
+        return jsonify({'error': 'Consent date is required.'}), 400
+
+    events_data = read_protocol_events(folder, homer_id)
+    if not events_data:
+        return jsonify({'error': 'Protocol events not found.'}), 404
+
+    # Find the matching incomplete entry
+    incomplete = events_data.get('incomplete', [])
+    entry = next(
+        (e for e in incomplete
+         if e.get('protocol_event_id') == 'informed_consent'
+         and (event_id is None or e.get('id') == event_id)),
+        None
+    )
+    if not entry:
+        return jsonify({'error': 'Event not found in incomplete list.'}), 404
+
+    filed_at = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
+    complete_entry = {
+        **entry,
+        'completion_date': event_date,
+        'filed_at':        filed_at,
+        'filed_by':        _filer(),
+        'notes':           notes,
+        'attachment':      None,  # Will be set by upload-attachment endpoint
+    }
+
+    events_data['incomplete'] = [e for e in incomplete if e.get('id') != entry['id']]
+    events_data.setdefault('complete', []).append(complete_entry)
+
+    write_protocol_events(folder, homer_id, events_data)
+
+    return jsonify({'success': True, 'id': complete_entry['id']}), 200
+
+
 @bp.route('/api/patients/<homer_id>/complete-event/exp_device_install', methods=['POST'])
 def api_complete_device_install(homer_id):
     """Complete the exp_device_install protocol event."""

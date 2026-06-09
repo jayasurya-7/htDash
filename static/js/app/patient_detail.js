@@ -805,17 +805,93 @@ function _openAssessmentModal(which, ev) {
   if (which === 'a1') { _a1ScheduledDate = apptDate; }
   else                { _a2ScheduledDate = apptDate; }
 
+  const rescheduleSection = document.getElementById(`${which}-reschedule-section`);
   const cancelSection = document.getElementById(`${which}-cancel-section`);
+  const scheduleSection = document.getElementById(`${which}-schedule-section`);
+  const recordSection = document.getElementById(`${which}-record-section`);
+
+  // Clear forms
+  document.getElementById(`${which}-new-appointment-date`).value = '';
+  document.getElementById(`${which}-reschedule-reason`).value = '';
+  document.getElementById(`${which}-schedule-appointment-date`).value = '';
+  document.getElementById(`${which}-date`).value = '';
+
+  const win = _assessmentWindows[`${which}_assessment`];
+  const fmt = (s) => new Date(s + 'T00:00:00').toLocaleDateString('en-GB',
+    { day: 'numeric', month: 'short', year: 'numeric' });
+
   if (apptDate) {
+    // Appointment already scheduled: show reschedule, cancel, record sections
     const d = new Date(apptDate);
-    document.getElementById(`${which}-scheduled-date-display`).textContent =
-      d.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+    const dateStr = d.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+
+    document.getElementById(`${which}-current-appt-display`).textContent = dateStr;
+    document.getElementById(`${which}-scheduled-date-display`).textContent = dateStr;
+    rescheduleSection.classList.remove('hidden');
     cancelSection.classList.remove('hidden');
+    scheduleSection.classList.add('hidden');
+    recordSection.classList.remove('hidden');
+    document.getElementById(`${which}-mark-missed`).classList.remove('hidden');
+
+    // Apply date bounds to reschedule date input and display window
+    const apptInput = document.getElementById(`${which}-new-appointment-date`);
+    const windowDisplay = document.getElementById(`${which}-reschedule-window-display`);
+
+    if (win) {
+      apptInput.min = win.start.slice(0, 10);
+      apptInput.max = win.end.slice(0, 10);
+      windowDisplay.textContent = `${fmt(win.start)} → ${fmt(win.end)}`;
+    } else {
+      apptInput.removeAttribute('min');
+      apptInput.removeAttribute('max');
+      windowDisplay.textContent = 'Unknown window';
+    }
+    _attachDateGuard(`${which}-new-appointment-date`, `${which}-error`);
+    _attachDateGuard(`${which}-date`, `${which}-error`);
+    _setupAssessmentOutOfWindowGuard(which);
   } else {
+    // No appointment scheduled yet: show only schedule section
+    rescheduleSection.classList.add('hidden');
     cancelSection.classList.add('hidden');
+    scheduleSection.classList.remove('hidden');
+    recordSection.classList.add('hidden');
+    document.getElementById(`${which}-mark-missed`).classList.add('hidden');
+
+    // Apply date bounds to schedule date input and display window
+    const apptInput = document.getElementById(`${which}-schedule-appointment-date`);
+    const windowDisplay = document.getElementById(`${which}-schedule-window-display`);
+
+    if (win) {
+      apptInput.min = win.start.slice(0, 10);
+      apptInput.max = win.end.slice(0, 10);
+      windowDisplay.textContent = `${fmt(win.start)} → ${fmt(win.end)}`;
+    } else {
+      apptInput.removeAttribute('min');
+      apptInput.removeAttribute('max');
+      windowDisplay.textContent = 'Unknown window';
+    }
+    _attachDateGuard(`${which}-schedule-appointment-date`, `${which}-error`);
   }
 
   showModal(`${which}-modal`);
+  _autoExpandAssessmentSection(which, apptDate);
+
+  // Show appropriate buttons based on initial state
+  const recordButtons = document.getElementById(`${which}-record-buttons`);
+  const scheduleButtons = document.getElementById(`${which}-schedule-buttons`);
+  const markMissed = document.getElementById(`${which}-mark-missed`);
+
+  if (apptDate) {
+    // Appointment exists: show record buttons
+    if (recordButtons) recordButtons.classList.remove('hidden');
+    if (markMissed) markMissed.classList.remove('hidden');
+    if (scheduleButtons) scheduleButtons.classList.add('hidden');
+  } else {
+    // No appointment: show schedule buttons
+    if (scheduleButtons) scheduleButtons.classList.remove('hidden');
+    if (recordButtons) recordButtons.classList.add('hidden');
+    if (markMissed) markMissed.classList.add('hidden');
+  }
 }
 
 // Reveal or hide the out-of-ideal-window reason section based on whether the
@@ -854,6 +930,52 @@ function _setupAssessmentOutOfWindowGuard(which) {
   dateInput.addEventListener('change', evaluate);
   dateInput.addEventListener('input',  evaluate);
   evaluate();
+}
+
+// Toggle assessment section — collapse all, expand one
+function toggleAssessmentSection(which, section) {
+  const sections = ['reschedule', 'cancel', 'schedule', 'record'];
+  const chevrons = ['reschedule-chevron', 'cancel-chevron', 'schedule-chevron', 'record-chevron'];
+
+  sections.forEach((s, i) => {
+    const body = document.getElementById(`${which}-${s}-body`);
+    const chevron = document.getElementById(`${which}-${chevrons[i]}`);
+    const isOpen = s === section;
+    if (body) body.classList.toggle('hidden', !isOpen);
+    if (chevron) chevron.classList.toggle('fa-chevron-down', isOpen);
+    if (chevron) chevron.classList.toggle('fa-chevron-right', !isOpen);
+  });
+
+  // Show buttons only in the expanded section
+  const recordButtons = document.getElementById(`${which}-record-buttons`);
+  const scheduleButtons = document.getElementById(`${which}-schedule-buttons`);
+  const markMissed = document.getElementById(`${which}-mark-missed`);
+
+  if (section === 'record') {
+    if (recordButtons) recordButtons.classList.remove('hidden');
+    if (markMissed) markMissed.classList.remove('hidden');
+    if (scheduleButtons) scheduleButtons.classList.add('hidden');
+  } else if (section === 'schedule') {
+    if (scheduleButtons) scheduleButtons.classList.remove('hidden');
+    if (recordButtons) recordButtons.classList.add('hidden');
+    if (markMissed) markMissed.classList.add('hidden');
+  } else {
+    // For reschedule and cancel sections, hide all buttons
+    if (recordButtons) recordButtons.classList.add('hidden');
+    if (scheduleButtons) scheduleButtons.classList.add('hidden');
+    if (markMissed) markMissed.classList.add('hidden');
+  }
+}
+
+// Auto-expand the first visible relevant section when modal opens
+function _autoExpandAssessmentSection(which, apptDate) {
+  if (apptDate) {
+    // Appointment exists: auto-expand "Reschedule" section
+    toggleAssessmentSection(which, 'reschedule');
+  } else {
+    // No appointment: auto-expand "Schedule" section
+    toggleAssessmentSection(which, 'schedule');
+  }
 }
 
 function openA1AssessmentModal(ev) { _openAssessmentModal('a1', ev); }
@@ -1072,6 +1194,90 @@ async function cancelAssessmentAppointment(which) {
   document.getElementById(`${which}-cancel-reason`).value = '';
   setError(`${which}-error`, '');
   await loadPatientEvents();
+
+  // Close modal after successful cancellation
+  hideModal(`${which}-modal`);
+}
+
+async function scheduleAssessmentAppointmentDirect(which) {
+  const errId = `${which}-error`;
+  const apptDate = document.getElementById(`${which}-schedule-appointment-date`).value;
+
+  if (!apptDate) { setError(errId, 'Appointment date is required.'); return; }
+
+  const confirmed = window.confirm(
+    `Schedule ${which.toUpperCase()} assessment for ${apptDate}?`
+  );
+  if (!confirmed) return;
+
+  const eventId = which === 'a1' ? _a1AssessmentEventId : _a2AssessmentEventId;
+  const payload = {
+    assessment_type: which,
+    appointment_date: apptDate
+  };
+  if (eventId) payload.event_id = eventId;
+
+  const { ok, data } = await apiPost(
+    `/api/patients/${PATIENT_HOMER_ID}/schedule-assessment-appointment`, payload
+  );
+  if (!ok) { setError(errId, data.error || 'Failed to schedule appointment.'); return; }
+
+  // Update local state
+  if (which === 'a1') { _a1ScheduledDate = apptDate + 'T09:00'; }
+  else { _a2ScheduledDate = apptDate + 'T09:00'; }
+
+  // Clear form
+  document.getElementById(`${which}-schedule-appointment-date`).value = '';
+  setError(errId, '');
+
+  // Refresh events and close modal
+  await loadPatientEvents();
+
+  // Close modal - user can reopen to record the assessment
+  hideModal(`${which}-modal`);
+}
+
+async function rescheduleAssessmentAppointment(which) {
+  const errId = `${which}-error`;
+  const newDate = document.getElementById(`${which}-new-appointment-date`).value;
+  const reason = document.getElementById(`${which}-reschedule-reason`).value.trim();
+
+  if (!newDate) { setError(errId, 'New appointment date is required.'); return; }
+  if (!reason) { setError(errId, 'Reason for rescheduling is required.'); return; }
+
+  const currentApptEl = document.getElementById(`${which}-current-appt-display`);
+  const confirmed = window.confirm(
+    `Reschedule ${which.toUpperCase()} assessment from ${currentApptEl.textContent} to ${newDate}?`
+  );
+  if (!confirmed) return;
+
+  const eventId = which === 'a1' ? _a1AssessmentEventId : _a2AssessmentEventId;
+  const payload = {
+    assessment_type: which,
+    new_appointment_date: newDate,
+    reason
+  };
+  if (eventId) payload.event_id = eventId;
+
+  const { ok, data } = await apiPost(
+    `/api/patients/${PATIENT_HOMER_ID}/reschedule-assessment-appointment`, payload
+  );
+  if (!ok) { setError(errId, data.error || 'Failed to reschedule appointment.'); return; }
+
+  // Update local state
+  if (which === 'a1') { _a1ScheduledDate = newDate + 'T09:00'; }
+  else { _a2ScheduledDate = newDate + 'T09:00'; }
+
+  // Clear form
+  document.getElementById(`${which}-new-appointment-date`).value = '';
+  document.getElementById(`${which}-reschedule-reason`).value = '';
+  setError(errId, '');
+
+  // Refresh events and close modal
+  await loadPatientEvents();
+
+  // Close modal after successful reschedule
+  hideModal(`${which}-modal`);
 }
 
 async function saveScheduleAssessmentCall(which) {
@@ -4583,6 +4789,7 @@ function completedTimeline(events) {
 
 // Map protocol_event_id → opener function name
 const EVENT_OPENERS = {
+  informed_consent:          (ev) => openInformedConsentModal(ev),
   exp_device_install:        (ev) => openDeviceSetupModal(ev.id),
   activation:                (ev) => openActivationModal(ev.id),
   discontinuation_reminder:  (ev) => openDiscontinueModal(ev),
@@ -4690,8 +4897,9 @@ function patientEventRow(ev) {
     'watch_data_upload',
   ]);
   const discontinuedBlocks = _patientDiscontinued && !_DISCONTINUED_VISIBLE.has(ev.protocol_event_id);
-  // Assessment events are always clickable (cancel appointment or complete early).
-  const clickable = hasOpener && !blocked && (isAssessment || !isUpcoming) && !onHold && !discontinuedBlocks;
+  // Assessment events (A1/A2) clickable only when overdue or in active window (not upcoming).
+  // Other upcoming events are non-clickable.
+  const clickable = hasOpener && !blocked && (isAssessment ? (isOverdue || isActiveWindow) : !isUpcoming) && !onHold && !discontinuedBlocks;
   const tag       = clickable ? 'a' : 'div';
   const href      = clickable ? `href="?action=${ev.id}"` : '';
   const extra     = clickable ? 'cursor-pointer hover:shadow-md transition-shadow' : '';
@@ -4728,6 +4936,65 @@ function emptyEventState(icon, colorClass, msg) {
 }
 
 // ── Device setup modal ────────────────────────────────────────────────────────
+
+// ── Informed Consent ───────────────────────────────────────────────────────
+
+let _icEventId = null;
+
+function openInformedConsentModal(ev) {
+  _icEventId = ev ? ev.id : null;
+  document.getElementById('ic-consent-date').value = '';
+  document.getElementById('ic-notes').value = '';
+  document.getElementById('ic-attachment-caption').value = '';
+  document.getElementById('ic-attachment-file').value = '';
+  setError('ic-error', '');
+  _attachDateGuard('ic-consent-date', 'ic-error');
+  showModal('informed-consent-modal');
+}
+
+async function saveInformedConsent() {
+  const consentDate = document.getElementById('ic-consent-date').value;
+  const notes = document.getElementById('ic-notes').value;
+
+  if (!consentDate) {
+    setError('ic-error', 'Please select a consent date.');
+    return;
+  }
+
+  if (_hasDateValidationErrors(['ic-error'])) return;
+
+  // Validate attachment (file required)
+  if (!_validateAttachment('ic', 'ic-error')) {
+    // Also check if file is missing entirely
+    const { file } = _readAttachment('ic');
+    if (!file) {
+      setError('ic-error', 'Please upload the signed consent form PDF.');
+    }
+    return;
+  }
+
+  // Complete event first (without attachment path)
+  const { ok, data } = await apiPost(
+    `/api/patients/${PATIENT_HOMER_ID}/complete-event/informed-consent`,
+    { event_id: _icEventId, consentDate: consentDate, notes: notes }
+  );
+
+  if (!ok) {
+    setError('ic-error', data.error || 'Failed to save informed consent.');
+    return;
+  }
+
+  // Upload attachment after event is created
+  const { file, caption } = _readAttachment('ic');
+  if (file) {
+    const eventId = data.id || _icEventId;
+    const uploaded = await _uploadAttachment(eventId, file, caption, 'ic-error');
+    if (!uploaded) return;
+  }
+
+  hideModal('informed-consent-modal');
+  loadPatientEvents();
+}
 
 let _deviceSetupEventId = null;
 
@@ -5182,7 +5449,7 @@ function renderPrescSelected(prefix) {
           </div>
           <div class="grid grid-cols-2 gap-2 mb-2">
             <div>
-              <label class="block text-xs text-slate-500 mb-1">Blocks</label>
+              <label class="block text-xs text-slate-500 mb-1">Sets</label>
               <input id="${prefix}-blocks-${i}" type="number" min="1" value="${s.blocks}"
                      class="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
             </div>
@@ -5505,7 +5772,7 @@ function _prescriptionCard(data, exercises, dayLabel, headerClass, attachmentPat
           ${notesHtml}
         </div>
         <div class="flex-shrink-0 text-right">
-          <p class="text-xs font-medium text-slate-500 whitespace-nowrap">${pe.blocks} blocks × ${pe.repetitions} reps</p>
+          <p class="text-xs font-medium text-slate-500 whitespace-nowrap">${pe.blocks} sets × ${pe.repetitions} reps</p>
           ${timingLines}
         </div>
       </div>`;
@@ -6890,16 +7157,24 @@ function openHomeVisitModal(ev) {
   _attachSessionEndGuard('hv-session-start', 'hv-session-end', 'hv-error');
 
   if (isLocked) {
-    const d = new Date(patientData.activationDate);
-    d.setDate(d.getDate() + offset);
-    const lockedDate = d.toISOString().slice(0, 10);
+    // Use event's scheduled_date[0] as the authoritative locked date (from protocol_events.json)
+    // Fall back to calculating from activation date if scheduled_date not available
+    let lockedDate;
+    if (ev.scheduled_date && ev.scheduled_date[0]) {
+      lockedDate = ev.scheduled_date[0].slice(0, 10);
+    } else {
+      const d = new Date(patientData.activationDate);
+      d.setDate(d.getDate() + offset);
+      lockedDate = d.toISOString().slice(0, 10);
+    }
+    const dayNum = offset + 1;
     document.getElementById('hv-session-start').value = lockedDate + 'T09:00';
     document.getElementById('hv-session-end').value   = lockedDate + 'T10:00';
     document.getElementById('hv-session-start').min   = lockedDate + 'T00:00';
     document.getElementById('hv-session-start').max   = lockedDate + 'T23:59';
     document.getElementById('hv-session-end').min     = lockedDate + 'T00:00';
     document.getElementById('hv-session-end').max     = lockedDate + 'T23:59';
-    document.getElementById('hv-date-lock-label').textContent = `Day ${offset + 1} (${lockedDate})`;
+    document.getElementById('hv-date-lock-label').textContent = `Day ${dayNum} (${lockedDate})`;
     document.getElementById('hv-date-lock-note').classList.remove('hidden');
   } else {
     document.getElementById('hv-session-start').value = '';

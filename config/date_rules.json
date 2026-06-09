@@ -8,17 +8,21 @@
     "not_before": ["today"]
   },
   "events": {
-    "exp_device_install": {
+    "informed_consent": {
       "not_before": ["a0CompletionDate"],
+      "not_after":  ["today"]
+    },
+    "exp_device_install": {
+      "not_before": ["a0CompletionDate", "event:informed_consent"],
       "not_after":  ["enrollDate + 5d", "today"]
     },
     "activation": {
       "experimental": {
-        "not_before": ["a0CompletionDate", "event:exp_device_install"],
+        "not_before": ["a0CompletionDate", "event:informed_consent", "event:exp_device_install"],
         "not_after":  ["enrollDate + 5d", "today"]
       },
       "control": {
-        "not_before": ["a0CompletionDate"],
+        "not_before": ["a0CompletionDate", "event:informed_consent"],
         "not_after":  ["enrollDate + 5d", "today"]
       }
     },
