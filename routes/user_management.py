@@ -480,6 +480,11 @@ def api_patient_events(homer_id):
                 patient.get('brokenProtocolDate') or
                 patient.get('discontinuationDate')
             ))
+            # Seed schedule_a1_call if:
+            # - appointment_date is null (not scheduled OR cancelled)
+            # - Training has ended (D29 filed, broken protocol, or discontinued)
+            # - Window is open
+            # - Within 7 days of window start
             if (_a1_inc and _a1_inc.get('appointment_date') is None
                     and _a1_training_ended and _a1_window_open and _a1_window_leadtime
                     and _a1_seed_date):
@@ -488,7 +493,7 @@ def api_patient_events(homer_id):
                     'protocol_event_id': 'schedule_a1_call',
                     'scheduled_date':    [_a1_seed_date, _a1_seed_date],
                     'filed_at':          _filed_at,
-                    'filed_by':   _filer(),
+                    'filed_by':          _filer(),
                 })
                 _dirty = True
 
@@ -798,17 +803,20 @@ def api_patient_events(homer_id):
         on_hold = is_paused and pid not in _PAUSE_VISIBLE and start_date <= today
 
         # Compute blocked_by: depends_on entries that are applicable and not yet complete
-        # Special case: for a1_assessment/a2_assessment, if appointment_date is already set,
-        # the dependency on schedule_a1_call/schedule_a2_call is satisfied
+        # Special case: for a1_assessment/a2_assessment, dependency is satisfied if:
+        # - appointment_date is already set (via D29 or other path), OR
+        # - the scheduling call is completed
         dep_ids = event_defs.get(pid, {}).get('depends_on') or []
         blocked_by = []
         for d in dep_ids:
-            if d not in known_ids or d in completed_ids:
+            if d not in known_ids:
                 continue
-            # For assessments, skip the scheduling-call dependency if appointment_date is set
+            # For assessments, check if appointment is scheduled or call is completed
             if pid in ('a1_assessment', 'a2_assessment') and d in ('schedule_a1_call', 'schedule_a2_call'):
-                if entry.get('appointment_date'):
-                    continue
+                if entry.get('appointment_date') or d in completed_ids:
+                    continue  # Dependency satisfied
+            elif d in completed_ids:
+                continue  # Dependency satisfied for all other events
             blocked_by.append(event_defs[d]['name'])
 
         if pid in _AE_FOLLOWUP_LABELS:

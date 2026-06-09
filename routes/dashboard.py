@@ -360,12 +360,14 @@ def events():
             dep_ids    = patient_defs.get(pid, {}).get('depends_on') or []
             blocked_by = []
             for d in dep_ids:
-                if d not in known_ids or d in completed_ids:
+                if d not in known_ids:
                     continue
-                # For assessments, skip the scheduling-call dependency if appointment_date is set
+                # For assessments, check if appointment is scheduled or call is completed
                 if pid in ('a1_assessment', 'a2_assessment') and d in ('schedule_a1_call', 'schedule_a2_call'):
-                    if entry.get('appointment_date'):
-                        continue
+                    if entry.get('appointment_date') or d in completed_ids:
+                        continue  # Dependency satisfied
+                elif d in completed_ids:
+                    continue  # Dependency satisfied for all other events
                 blocked_by.append(event_names.get(d, d))
 
             if pid in _AE_FOLLOWUP_LABELS:
