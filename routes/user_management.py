@@ -6635,6 +6635,92 @@ def api_cancel_assessment_appointment(homer_id):
     return jsonify({'ok': True})
 
 
+@bp.route('/api/patients/<homer_id>/reschedule-assessment-appointment', methods=['POST'])
+def api_reschedule_assessment_appointment(homer_id):
+    """Reschedule a scheduled a1_assessment or a2_assessment appointment.
+
+    Updates appointment_date to the new date and logs the change.
+    """
+    if not flask_session.get('login_place'):
+        return jsonify({'error': 'Not authenticated'}), 401
+    if flask_session.get('privilege') not in ('admin', 'therapist'):
+        return jsonify({'error': 'Forbidden'}), 403
+
+    folder = find_patient_folder(flask_session['login_place'], homer_id)
+    if not folder:
+        return jsonify({'error': 'Patient not found'}), 404
+
+    body                  = request.get_json() or {}
+    assessment_type       = (body.get('assessment_type') or '').strip()
+    event_id              = (body.get('event_id') or '').strip()
+    new_appointment_date  = (body.get('new_appointment_date') or '').strip()
+    reason                = (body.get('reason') or '').strip()
+
+    if assessment_type not in ('a1', 'a2'):
+        return jsonify({'error': 'assessment_type must be a1 or a2'}), 400
+    if not new_appointment_date:
+        return jsonify({'error': 'New appointment date is required.'}), 400
+    if not reason:
+        return jsonify({'error': 'Rescheduling reason is required.'}), 400
+
+    # Validate new date format
+    try:
+        new_dt = datetime.strptime(new_appointment_date, '%Y-%m-%d')
+    except ValueError:
+        return jsonify({'error': 'New appointment date must be in YYYY-MM-DD format.'}), 400
+
+    pid = f'{assessment_type}_assessment'
+    events_data = read_protocol_events(folder, homer_id)
+    if not events_data:
+        return jsonify({'error': 'Protocol events not found.'}), 404
+
+    stub = next(
+        (e for e in events_data.get('incomplete', [])
+         if e.get('protocol_event_id') == pid
+         and (not event_id or e.get('id') == event_id)),
+        None
+    )
+    if not stub:
+        return jsonify({'error': f'{pid} not found in incomplete.'}), 404
+
+    old_appt_date = stub.get('appointment_date')
+    if not old_appt_date:
+        return jsonify({'error': 'No scheduled appointment to reschedule.'}), 400
+
+    # Validate new date is within the protocol window
+    win = stub.get('window_start') and stub.get('window_end')
+    if win:
+        try:
+            win_start = datetime.strptime(stub['window_start'][:10], '%Y-%m-%d')
+            win_end   = datetime.strptime(stub['window_end'][:10], '%Y-%m-%d')
+            if new_dt < win_start or new_dt > win_end:
+                return jsonify({
+                    'error': f'New appointment date must be within the {assessment_type.upper()} window '
+                            f'({stub["window_start"][:10]} to {stub["window_end"][:10]}).'
+                }), 400
+        except ValueError:
+            pass
+
+    # Log the reschedule action
+    stub.setdefault('appointment_reschedules', []).append({
+        'rescheduled_at': datetime.now().strftime('%Y-%m-%dT%H:%M'),
+        'from_date':      old_appt_date,
+        'to_date':        new_appointment_date + 'T09:00',
+        'reason':         reason,
+    })
+
+    # Update appointment_date to new date + 09:00
+    stub['appointment_date'] = new_appointment_date + 'T09:00'
+
+    write_protocol_events(folder, homer_id, events_data)
+
+    loginid    = flask_session.get('loginid', 'unknown')
+    session_id = flask_session.get('session_id', 0)
+    write_patient_log(folder, homer_id, loginid, session_id,
+                      f'{assessment_type.upper()} assessment appointment rescheduled to {new_appointment_date}')
+    return jsonify({'ok': True})
+
+
 @bp.route('/api/patients/<homer_id>/complete-event/schedule-assessment-call', methods=['POST'])
 def api_complete_schedule_assessment_call(homer_id):
     """Complete a schedule_a1_call or schedule_a2_call stub, update assessment appointment_date."""
