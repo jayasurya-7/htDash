@@ -400,7 +400,7 @@
       },
       "cancellable": false,
       "repeatable": false,
-      "depends_on": []
+      "depends_on": ["schedule_a1_call"]
     },
     {
       "id": "a2_assessment",
@@ -414,7 +414,7 @@
       },
       "cancellable": false,
       "repeatable": false,
-      "depends_on": []
+      "depends_on": ["schedule_a2_call"]
     },
     {
       "id": "watch_record",

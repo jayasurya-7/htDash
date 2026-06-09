@@ -358,7 +358,15 @@ def events():
             on_hold = is_paused and pid not in _PAUSE_VISIBLE and start_date <= today
 
             dep_ids    = patient_defs.get(pid, {}).get('depends_on') or []
-            blocked_by = [event_names.get(d, d) for d in dep_ids if d in known_ids and d not in completed_ids]
+            blocked_by = []
+            for d in dep_ids:
+                if d not in known_ids or d in completed_ids:
+                    continue
+                # For assessments, skip the scheduling-call dependency if appointment_date is set
+                if pid in ('a1_assessment', 'a2_assessment') and d in ('schedule_a1_call', 'schedule_a2_call'):
+                    if entry.get('appointment_date'):
+                        continue
+                blocked_by.append(event_names.get(d, d))
 
             if pid in _AE_FOLLOWUP_LABELS:
                 ae_ids   = entry.get('adverse_event_ids') or []

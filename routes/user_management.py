@@ -798,11 +798,18 @@ def api_patient_events(homer_id):
         on_hold = is_paused and pid not in _PAUSE_VISIBLE and start_date <= today
 
         # Compute blocked_by: depends_on entries that are applicable and not yet complete
+        # Special case: for a1_assessment/a2_assessment, if appointment_date is already set,
+        # the dependency on schedule_a1_call/schedule_a2_call is satisfied
         dep_ids = event_defs.get(pid, {}).get('depends_on') or []
-        blocked_by = [
-            event_defs[d]['name'] for d in dep_ids
-            if d in known_ids and d not in completed_ids
-        ]
+        blocked_by = []
+        for d in dep_ids:
+            if d not in known_ids or d in completed_ids:
+                continue
+            # For assessments, skip the scheduling-call dependency if appointment_date is set
+            if pid in ('a1_assessment', 'a2_assessment') and d in ('schedule_a1_call', 'schedule_a2_call'):
+                if entry.get('appointment_date'):
+                    continue
+            blocked_by.append(event_defs[d]['name'])
 
         if pid in _AE_FOLLOWUP_LABELS:
             ae_ids  = entry.get('adverse_event_ids') or []
