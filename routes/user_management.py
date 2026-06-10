@@ -767,7 +767,43 @@ def api_patient_events(homer_id):
 
     _ASSESSMENT_PIDS = frozenset({'a1_assessment', 'a2_assessment'})
 
-    for entry in events_data.get('incomplete', []):
+    # Auto-miss A1/A2 assessments if their window has expired
+    incomplete_entries = events_data.get('incomplete', [])
+    for entry in incomplete_entries[:]:  # iterate over copy
+        pid = entry.get('protocol_event_id')
+        if pid in _ASSESSMENT_PIDS and pid in _assessment_windows:
+            try:
+                _ws_str, _we_str = _assessment_windows[pid]
+                end_date = datetime.fromisoformat(_we_str).date()
+                # If window has ended and assessment not yet completed, auto-mark as missed
+                if today > end_date and not entry.get('appointment_date'):
+                    filed_at = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
+                    missed_at = filed_at[:16]
+                    missed_entry = {
+                        **entry,
+                        'missed': True,
+                        'missed_at': missed_at,
+                        'filed_at': filed_at,
+                        'filed_by': _filer(),
+                    }
+                    events_data['complete'].append(missed_entry)
+                    incomplete_entries.remove(entry)
+                    # Set missed date on patient record
+                    if patient:
+                        if pid == 'a1_assessment':
+                            patient['a1MissedDate'] = missed_at
+                        elif pid == 'a2_assessment':
+                            patient['a2MissedDate'] = missed_at
+            except Exception:
+                pass
+
+    # Write back if any auto-missed entries
+    if len(incomplete_entries) < len(events_data.get('incomplete', [])):
+        write_protocol_events(folder, homer_id, events_data)
+        if patient:
+            write_patient(folder, homer_id, patient)
+
+    for entry in incomplete_entries:
         pid   = entry.get('protocol_event_id')
         sched = entry.get('scheduled_date')
 
