@@ -1592,6 +1592,60 @@ After A2 assessment is completed (all_completed status):
 - ✅ After A2 completion: NO overdue events shown
 - ✅ All other status filters remain unchanged
 
+### Informed Consent Event ✅ (June 10, 2026)
+
+**Feature:** Mandatory informed consent event before device setup and patient activation (both groups).
+
+**Details:**
+- New protocol event: `informed_consent` in shared events (Days 1-5, reference=assignment)
+- Requires: consent date (required), PDF form (required), optional notes
+- Device setup depends on informed_consent
+- Activation depends on: informed_consent + exp_device_install (experimental), or informed_consent (control)
+- Date rules already configured in `date_rules.json`
+- No changes needed to `protocol_events.py` - auto-creates stubs for all patients
+
+**Modal Design:**
+- Consent Date: `datetime-local` input, required, date validation enforced
+- Consent Form PDF: file input (`.pdf` only), required, validates before upload
+- Additional Notes: optional textarea field
+- Error Messages: displayed prominently at bottom of modal before buttons
+- Validations: date required, PDF required, PDF must be valid file type
+
+**Attachment Handling:**
+- PDF stored as `attachments/informed_consent.pdf` in patient folder
+- Caption NOT required (unlike other events)
+- Uses `_uploadAttachmentNoCaption()` helper for PDF-only uploads
+- Backend checks: `if protocol_event_id != 'informed_consent' and not caption: return error`
+
+**Files Modified:**
+- `config/study_protocol.json` — Added informed_consent event with dependencies
+- `templates/patient_detail.html` — Added modal with date, PDF, and notes fields; error message at bottom
+- `static/js/app/patient_detail.js` — Modal functions `openInformedConsentModal()`, `saveInformedConsent()`, `_uploadAttachmentNoCaption()`
+- `routes/user_management.py` — Added `api_complete_informed_consent` endpoint, made caption optional for informed_consent in `api_upload_attachment()`
+- `config/date_rules.json` — Date bounds already configured
+
+**Validation Flow:**
+1. User opens modal
+2. Selects consent date (required, bounded by rules)
+3. Uploads PDF (required, `.pdf` only)
+4. Adds optional notes
+5. Clicks Save:
+   - Validates date is filled
+   - Validates date passes bounds check
+   - Validates PDF is selected
+   - Validates PDF is `.pdf` file
+   - If all valid: saves event and uploads PDF
+   - If invalid: shows error message prominently
+6. Modal closes on success
+
+**Testing Verified:**
+- ✅ Date validation enforced (required, bounds check)
+- ✅ PDF validation enforced (required, must be `.pdf`)
+- ✅ Error messages display clearly at bottom of modal
+- ✅ PDF uploads without caption requirement
+- ✅ Event marked complete in protocol_events.json
+- ✅ Device setup and activation now depend on informed_consent
+
 ---
 
 logconvo-project: htDash
