@@ -750,9 +750,20 @@ def api_patient_events(homer_id):
         'device_return',
         'watch_data_upload',
     })
-    is_paused        = bool(patient and patient.get('trainingPausedDate'))
-    is_discontinued  = bool(patient and patient.get('discontinuationDate'))
-    is_post_training = bool(patient and derive_status(patient) == 'post_training')
+    # For training_completed patients (D29 filed): only AE chains, assessments,
+    # device_return, and watch_data_upload are shown. All training events hidden.
+    _TRAINING_COMPLETED_VISIBLE = frozenset({
+        'adverse_event', 'adverse_event_followup',
+        'adverse_event_followup_visit', 'adverse_event_clinical_visit',
+        'a1_assessment', 'a2_assessment',
+        'schedule_a1_call', 'schedule_a2_call',
+        'device_return',
+        'watch_data_upload',
+    })
+    is_paused           = bool(patient and patient.get('trainingPausedDate'))
+    is_discontinued     = bool(patient and patient.get('discontinuationDate'))
+    is_post_training    = bool(patient and derive_status(patient) == 'post_training')
+    is_training_completed = bool(patient and derive_status(patient) == 'training_completed')
 
     _ASSESSMENT_PIDS = frozenset({'a1_assessment', 'a2_assessment'})
 
@@ -787,6 +798,11 @@ def api_patient_events(homer_id):
                     end_date   = datetime.fromisoformat(_we_str).date()
                 except Exception:
                     pass
+
+        # For training_completed patients (D29 filed): only AE chains, assessments,
+        # device_return, watch_data_upload shown. All training events hidden.
+        if is_training_completed and pid not in _TRAINING_COMPLETED_VISIBLE:
+            continue
 
         # Discontinued patients: only AE follow-up chain + assessments shown.
         if is_discontinued and pid not in _DISCONTINUED_VISIBLE:

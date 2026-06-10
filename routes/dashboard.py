@@ -299,9 +299,18 @@ def events():
             'device_return',
             'watch_data_upload',
         })
-        is_paused        = bool(patient.get('trainingPausedDate'))
-        is_discontinued  = bool(patient.get('discontinuationDate'))
-        is_post_training = (derive_status(patient) == 'post_training')
+        _TRAINING_COMPLETED_VISIBLE = frozenset({
+            'adverse_event', 'adverse_event_followup',
+            'adverse_event_followup_visit', 'adverse_event_clinical_visit',
+            'a1_assessment', 'a2_assessment',
+            'schedule_a1_call', 'schedule_a2_call',
+            'device_return',
+            'watch_data_upload',
+        })
+        is_paused             = bool(patient.get('trainingPausedDate'))
+        is_discontinued       = bool(patient.get('discontinuationDate'))
+        is_post_training      = (derive_status(patient) == 'post_training')
+        is_training_completed = (derive_status(patient) == 'training_completed')
 
         # Precompute A1/A2 window dates for this patient
         _pt_assessment_windows = {}
@@ -348,6 +357,9 @@ def events():
                         end_date   = datetime.fromisoformat(_we_str).date()
                     except Exception:
                         pass
+
+            if is_training_completed and pid not in _TRAINING_COMPLETED_VISIBLE:
+                continue
 
             if is_discontinued and pid not in _DISCONTINUED_VISIBLE:
                 continue
