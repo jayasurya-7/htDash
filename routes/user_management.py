@@ -760,10 +760,25 @@ def api_patient_events(homer_id):
         'device_return',
         'watch_data_upload',
     })
+    # After device_return is completed: only AE chains and assessments remain visible.
+    # Training is fully over, only post-training follow-ups shown.
+    _POST_DEVICE_RETURN_VISIBLE = frozenset({
+        'adverse_event', 'adverse_event_followup',
+        'adverse_event_followup_visit', 'adverse_event_clinical_visit',
+        'a1_assessment', 'a2_assessment',
+        'schedule_a1_call', 'schedule_a2_call',
+    })
     is_paused           = bool(patient and patient.get('trainingPausedDate'))
     is_discontinued     = bool(patient and patient.get('discontinuationDate'))
     is_post_training    = bool(patient and derive_status(patient) == 'post_training')
     is_training_completed = bool(patient and derive_status(patient) == 'training_completed')
+    is_a1_completed     = bool(patient and derive_status(patient) == 'a1_completed')
+    is_all_completed    = bool(patient and derive_status(patient) == 'all_completed')
+    # Check if device_return has been completed
+    is_device_return_completed = bool(
+        is_training_completed and
+        any(e.get('protocol_event_id') == 'device_return' for e in events_data.get('complete', []))
+    )
 
     _ASSESSMENT_PIDS = frozenset({'a1_assessment', 'a2_assessment'})
 
@@ -835,9 +850,17 @@ def api_patient_events(homer_id):
                 except Exception:
                     pass
 
+        # A2 assessment completed (all_completed): no overdue events shown.
+        if is_all_completed:
+            continue
+
+        # After device_return completed or A1 assessment completed: only AE chains and assessments remain visible.
+        if (is_device_return_completed or is_a1_completed) and pid not in _POST_DEVICE_RETURN_VISIBLE:
+            continue
+
         # For training_completed patients (D29 filed): only AE chains, assessments,
         # device_return, watch_data_upload shown. All training events hidden.
-        if is_training_completed and pid not in _TRAINING_COMPLETED_VISIBLE:
+        if is_training_completed and not is_device_return_completed and pid not in _TRAINING_COMPLETED_VISIBLE:
             continue
 
         # Discontinued patients: only AE follow-up chain + assessments shown.

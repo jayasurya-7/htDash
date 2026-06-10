@@ -1545,6 +1545,53 @@ User types invalid date → Gets error message → Clicks Save → Form BLOCKED 
 **Files Modified:**
 - `routes/user_management.py` — Added `api_reschedule_assessment_appointment` endpoint
 
+### Overdue Events Visibility After Device Return & Assessments ✅ (June 10, 2026)
+
+**Feature:** Progressive hiding of overdue events as training progresses through device return and assessments.
+
+**Details:**
+
+After device_return is filed OR A1 assessment is completed:
+- Only AE chains and A2 assessment remain visible
+- All training events (home visits, prescriptions, etc.) are hidden
+- Filter: `_POST_DEVICE_RETURN_VISIBLE` applies
+
+After A2 assessment is completed (all_completed status):
+- NO overdue events displayed
+- Training is fully complete, no further action required
+- Filter: early exit skips all events
+
+**Event Visibility Rules by Status:**
+
+| Status | Visible Overdue Events | Filter Applied |
+|--------|---|---|
+| `active` / `paused` | All events (filtered by pause if paused) | `_PAUSE_VISIBLE` |
+| `post_training` | D29 + AE + A1/A2 + device_return + watch_data_upload | `_POST_TRAINING_VISIBLE` |
+| `training_completed` (without device_return) | AE + A1/A2 + device_return + watch_data_upload | `_TRAINING_COMPLETED_VISIBLE` |
+| `training_completed` (with device_return) | AE + A2 only | `_POST_DEVICE_RETURN_VISIBLE` |
+| `a1_completed` | AE + A2 only | `_POST_DEVICE_RETURN_VISIBLE` |
+| **`all_completed`** | **❌ NO EVENTS** | **early exit (no filter)** |
+| `broken_protocol` | AE/RI/ODI chains + A1/A2 | `_BROKEN_PROTOCOL_INTERACTIVE` |
+| `discontinued` | AE chains + A1/A2 | `_DISCONTINUED_VISIBLE` |
+
+**Implementation:**
+
+- Added `_POST_DEVICE_RETURN_VISIBLE` frozenset containing only AE chains and A1/A2 assessments
+- Added `is_device_return_completed` detection: checks if `device_return` exists in `complete[]` when `training_completed`
+- Added `is_a1_completed` status check
+- Added `is_all_completed` status check with early exit (skips all overdue events)
+- Filter priority: `all_completed` → `device_return_completed` or `a1_completed` → `training_completed` → `post_training` → others
+
+**Files Modified:**
+- `routes/user_management.py` — Added status flags, `_POST_DEVICE_RETURN_VISIBLE` filter, and filter checks in event loop
+- `routes/dashboard.py` — Applied same filters to dashboard events API for consistency
+
+**Testing Verified:**
+- ✅ After device_return: only AE + A2 shown
+- ✅ After A1 completion: only AE + A2 shown
+- ✅ After A2 completion: NO overdue events shown
+- ✅ All other status filters remain unchanged
+
 ---
 
 logconvo-project: htDash

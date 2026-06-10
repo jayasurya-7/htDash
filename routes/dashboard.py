@@ -307,10 +307,25 @@ def events():
             'device_return',
             'watch_data_upload',
         })
+        # After device_return is completed: only AE chains and assessments remain visible.
+        # Training is fully over, only post-training follow-ups shown.
+        _POST_DEVICE_RETURN_VISIBLE = frozenset({
+            'adverse_event', 'adverse_event_followup',
+            'adverse_event_followup_visit', 'adverse_event_clinical_visit',
+            'a1_assessment', 'a2_assessment',
+            'schedule_a1_call', 'schedule_a2_call',
+        })
         is_paused             = bool(patient.get('trainingPausedDate'))
         is_discontinued       = bool(patient.get('discontinuationDate'))
         is_post_training      = (derive_status(patient) == 'post_training')
         is_training_completed = (derive_status(patient) == 'training_completed')
+        is_a1_completed       = (derive_status(patient) == 'a1_completed')
+        is_all_completed      = (derive_status(patient) == 'all_completed')
+        # Check if device_return has been completed
+        is_device_return_completed = bool(
+            is_training_completed and
+            any(e.get('protocol_event_id') == 'device_return' for e in events_data.get('complete', []))
+        )
 
         # Precompute A1/A2 window dates for this patient
         _pt_assessment_windows = {}
@@ -358,7 +373,15 @@ def events():
                     except Exception:
                         pass
 
-            if is_training_completed and pid not in _TRAINING_COMPLETED_VISIBLE:
+            # A2 assessment completed (all_completed): no overdue events shown.
+            if is_all_completed:
+                continue
+
+            # After device_return completed or A1 assessment completed: only AE chains and assessments remain visible.
+            if (is_device_return_completed or is_a1_completed) and pid not in _POST_DEVICE_RETURN_VISIBLE:
+                continue
+
+            if is_training_completed and not is_device_return_completed and pid not in _TRAINING_COMPLETED_VISIBLE:
                 continue
 
             if is_discontinued and pid not in _DISCONTINUED_VISIBLE:
