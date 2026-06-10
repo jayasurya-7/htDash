@@ -1701,6 +1701,20 @@ async function _uploadAttachment(eventId, file, caption, errorId) {
   return true;
 }
 
+async function _uploadAttachmentNoCaption(eventId, file, errorId) {
+  const form = new FormData();
+  form.append('event_id', eventId);
+  form.append('caption',  '');  // Empty caption for informed consent
+  form.append('file',     file);
+  const res  = await fetch(`/api/patients/${PATIENT_HOMER_ID}/upload-attachment`, {
+    method: 'POST',
+    body:   form,
+  });
+  const data = await res.json();
+  if (!res.ok) { setError(errorId, data.error || 'Failed to upload attachment.'); return false; }
+  return true;
+}
+
 function _syntheticPatientEvents() {
   const synthetic = [];
   if (patientData?.enrollDate) {
@@ -4926,7 +4940,6 @@ function openInformedConsentModal(ev) {
   _icEventId = ev ? ev.id : null;
   document.getElementById('ic-consent-date').value = '';
   document.getElementById('ic-notes').value = '';
-  document.getElementById('ic-attachment-caption').value = '';
   document.getElementById('ic-attachment-file').value = '';
   setError('ic-error', '');
   _attachDateGuard('ic-consent-date', 'ic-error');
@@ -4944,13 +4957,10 @@ async function saveInformedConsent() {
 
   if (_hasDateValidationErrors(['ic-error'])) return;
 
-  // Validate attachment (file required)
-  if (!_validateAttachment('ic', 'ic-error')) {
-    // Also check if file is missing entirely
-    const { file } = _readAttachment('ic');
-    if (!file) {
-      setError('ic-error', 'Please upload the signed consent form PDF.');
-    }
+  // Validate that PDF is provided
+  const { file } = _readAttachment('ic');
+  if (!file) {
+    setError('ic-error', 'Please upload the signed consent form PDF.');
     return;
   }
 
@@ -4965,11 +4975,10 @@ async function saveInformedConsent() {
     return;
   }
 
-  // Upload attachment after event is created
-  const { file, caption } = _readAttachment('ic');
+  // Upload attachment after event is created (no caption required for informed consent)
   if (file) {
     const eventId = data.id || _icEventId;
-    const uploaded = await _uploadAttachment(eventId, file, caption, 'ic-error');
+    const uploaded = await _uploadAttachmentNoCaption(eventId, file, 'ic-error');
     if (!uploaded) return;
   }
 
