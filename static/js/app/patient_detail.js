@@ -807,13 +807,12 @@ function _openAssessmentModal(which, ev) {
 
   const rescheduleSection = document.getElementById(`${which}-reschedule-section`);
   const cancelSection = document.getElementById(`${which}-cancel-section`);
-  const scheduleSection = document.getElementById(`${which}-schedule-section`);
   const recordSection = document.getElementById(`${which}-record-section`);
+  const noApptMsg = document.getElementById(`${which}-no-appointment-msg`);
 
   // Clear forms
   document.getElementById(`${which}-new-appointment-date`).value = '';
   document.getElementById(`${which}-reschedule-reason`).value = '';
-  document.getElementById(`${which}-schedule-appointment-date`).value = '';
   document.getElementById(`${which}-date`).value = '';
 
   const win = _assessmentWindows[`${which}_assessment`];
@@ -829,8 +828,8 @@ function _openAssessmentModal(which, ev) {
     document.getElementById(`${which}-scheduled-date-display`).textContent = dateStr;
     rescheduleSection.classList.remove('hidden');
     cancelSection.classList.remove('hidden');
-    scheduleSection.classList.add('hidden');
     recordSection.classList.remove('hidden');
+    noApptMsg.classList.add('hidden');
     document.getElementById(`${which}-mark-missed`).classList.remove('hidden');
 
     // Apply date bounds to reschedule date input and display window
@@ -850,27 +849,12 @@ function _openAssessmentModal(which, ev) {
     _attachDateGuard(`${which}-date`, `${which}-error`);
     _setupAssessmentOutOfWindowGuard(which);
   } else {
-    // No appointment scheduled yet: show only schedule section
+    // No appointment scheduled yet: assessment is locked (cannot be recorded)
     rescheduleSection.classList.add('hidden');
     cancelSection.classList.add('hidden');
-    scheduleSection.classList.remove('hidden');
     recordSection.classList.add('hidden');
+    noApptMsg.classList.remove('hidden');
     document.getElementById(`${which}-mark-missed`).classList.add('hidden');
-
-    // Apply date bounds to schedule date input and display window
-    const apptInput = document.getElementById(`${which}-schedule-appointment-date`);
-    const windowDisplay = document.getElementById(`${which}-schedule-window-display`);
-
-    if (win) {
-      apptInput.min = win.start.slice(0, 10);
-      apptInput.max = win.end.slice(0, 10);
-      windowDisplay.textContent = `${fmt(win.start)} → ${fmt(win.end)}`;
-    } else {
-      apptInput.removeAttribute('min');
-      apptInput.removeAttribute('max');
-      windowDisplay.textContent = 'Unknown window';
-    }
-    _attachDateGuard(`${which}-schedule-appointment-date`, `${which}-error`);
   }
 
   showModal(`${which}-modal`);
@@ -878,17 +862,14 @@ function _openAssessmentModal(which, ev) {
 
   // Show appropriate buttons based on initial state
   const recordButtons = document.getElementById(`${which}-record-buttons`);
-  const scheduleButtons = document.getElementById(`${which}-schedule-buttons`);
   const markMissed = document.getElementById(`${which}-mark-missed`);
 
   if (apptDate) {
     // Appointment exists: show record buttons
     if (recordButtons) recordButtons.classList.remove('hidden');
     if (markMissed) markMissed.classList.remove('hidden');
-    if (scheduleButtons) scheduleButtons.classList.add('hidden');
   } else {
-    // No appointment: show schedule buttons
-    if (scheduleButtons) scheduleButtons.classList.remove('hidden');
+    // No appointment: hide all buttons - assessment is locked
     if (recordButtons) recordButtons.classList.add('hidden');
     if (markMissed) markMissed.classList.add('hidden');
   }
