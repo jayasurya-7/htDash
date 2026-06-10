@@ -2140,6 +2140,7 @@ def api_log_activation_attempt(homer_id):
 
 
 _PRINTOUT_PDF_FILES = {
+    'informed_consent': 'attachments/informed_consent.pdf',
     'prescription_printout_d01': 'attachments/prescription_d01.pdf',
     'prescription_printout_d15': 'attachments/prescription_d15.pdf',
 }
@@ -5972,10 +5973,8 @@ def api_upload_attachment(homer_id):
         return jsonify({'error': 'No file provided'}), 400
     if not pdf_file.filename.lower().endswith('.pdf'):
         return jsonify({'error': 'Attachment must be a PDF file'}), 400
-    if not caption:
-        return jsonify({'error': 'Caption is required'}), 400
 
-    # Find event — search complete list first, then all free arrays
+    # Find event first to determine if caption is required
     events_data = read_protocol_events(folder, homer_id)
     if not events_data:
         return jsonify({'error': 'Protocol events not found'}), 404
@@ -5992,9 +5991,13 @@ def api_upload_attachment(homer_id):
                     break
     if not entry:
         return jsonify({'error': 'Event not found'}), 404
-    
-    # Use predefined filename based on protocol_event_id
+
+    # Caption is required for most events, but optional for informed_consent
     protocol_event_id = entry.get('protocol_event_id', '')
+    if protocol_event_id != 'informed_consent' and not caption:
+        return jsonify({'error': 'Caption is required'}), 400
+
+    # Use predefined filename based on protocol_event_id
     pdf_path_mapping = _PRINTOUT_PDF_FILES.get(protocol_event_id, 'prescription_attachment.pdf')
 
 #     # Save PDF as attachments/<event_id>.pdf
