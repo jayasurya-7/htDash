@@ -1462,4 +1462,89 @@ User types invalid date → Gets error message → Clicks Save → Form BLOCKED 
 4. ✅ Data Folder Structure — Unified path construction (META-DATA/ranipet/patients/ID/Pluto/)
 5. ✅ Node.js & Puppeteer Installation — Server-side PDF generation with multi-language support
 
+### Assessment Appointment Dependency Lock ✅ (June 10, 2026)
+
+**Feature:** A1/A2 assessments locked until appointment date is scheduled via either D29 modal or schedule call stub.
+
+**Details:**
+- Added `schedule_a1_call` and `schedule_a2_call` to `depends_on` for a1/a2_assessment in protocol
+- Assessment unlocks when: `appointment_date` is set OR scheduling call is completed
+- When appointment cancelled → lock reactivates automatically
+- Therapist must complete schedule call again to unlock assessment
+- Applied to both `api_patient_events` and `api_dashboard/events` endpoints
+- Lock shows as "Needs: Schedule A1/A2 Assessment" badge
+
+**Files Modified:**
+- `config/study_protocol.json` — Added dependencies for a1/a2_assessment
+- `routes/user_management.py` — Updated `_get_blocked_by` logic with special assessment handling
+- `routes/dashboard.py` — Applied same dependency logic
+
+### Informed Consent Event ✅ (June 10, 2026)
+
+**Feature:** Mandatory informed consent event before device setup and patient activation (both groups).
+
+**Details:**
+- New protocol event: `informed_consent` in shared events (Days 1-5, reference=assignment)
+- Requires: consent date (required), PDF form (required), caption (required), optional notes
+- Device setup depends on informed_consent
+- Activation depends on: informed_consent + exp_device_install (experimental), or informed_consent (control)
+- Date rules already configured in `date_rules.json`
+- No changes needed to `protocol_events.py` - auto-creates stubs for all patients
+- Endpoint: `POST /api/patients/<homer_id>/complete-event/informed-consent`
+- PDF saved as `informed_consent.pdf` with caption
+
+**Files Modified:**
+- `config/study_protocol.json` — Added informed_consent event with dependencies
+- `templates/patient_detail.html` — Added modal with labeled sections
+- `static/js/app/patient_detail.js` — Modal functions already existed
+- `routes/user_management.py` — Added `api_complete_informed_consent` endpoint
+- `config/date_rules.json` — Date bounds already configured
+
+### A1/A2 Assessment Modal Simplification ✅ (June 10, 2026)
+
+**Feature:** Removed scheduling modal from A1/A2 assessment - therapists must use schedule call stub instead.
+
+**Details:**
+- Removed "Schedule Appointment" section from both A1 and A2 modals
+- Assessment locked when `appointment_date` is null (shows "Assessment is locked" message)
+- Can only record assessment when appointment exists (via schedule_a1_call/a2_call stub)
+- Reschedule, cancel, and record sections only shown when appointment exists
+- All schedule-related modal buttons removed
+- Simplifies workflow: appointment scheduling is only via the dedicated schedule call event
+
+**Files Modified:**
+- `templates/patient_detail.html` — Removed schedule sections, added locked message
+- `static/js/app/patient_detail.js` — Simplified `_openAssessmentModal()` logic
+
+### Training Events Hidden After D29 Completion ✅ (June 10, 2026)
+
+**Feature:** After D29 completion (`training_completed` status), all training protocol events are hidden.
+
+**Details:**
+- New filter: `_TRAINING_COMPLETED_VISIBLE` (AE chains, assessments, device_return, watch_data_upload only)
+- Previous filter `_POST_TRAINING_VISIBLE` still used for post_training (D28+, D29 not filed) - includes D29
+- Hidden events after D29: home visits, followup calls, agwatch timings, prescriptions, etc.
+- Applied to both `api_patient_events` and `api_dashboard/events` endpoints
+- Distinction: post_training shows D29 (not yet filed), training_completed hides it (already filed)
+
+**Files Modified:**
+- `routes/user_management.py` — Added `_TRAINING_COMPLETED_VISIBLE` filter and status check
+- `routes/dashboard.py` — Applied same filter logic
+
+### Assessment Reschedule Appointment Endpoint ✅ (June 10, 2026)
+
+**Feature:** New API endpoint for rescheduling already-scheduled A1/A2 assessments.
+
+**Details:**
+- Endpoint: `POST /api/patients/<homer_id>/reschedule-assessment-appointment`
+- Validates new date is within protocol window
+- Logs rescheduling action with reason and old/new dates
+- Appends to `appointment_reschedules` array on the stub
+- Returns 400 if no scheduled appointment exists to reschedule
+
+**Files Modified:**
+- `routes/user_management.py` — Added `api_reschedule_assessment_appointment` endpoint
+
+---
+
 logconvo-project: htDash
