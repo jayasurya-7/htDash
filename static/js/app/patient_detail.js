@@ -4949,6 +4949,8 @@ function openInformedConsentModal(ev) {
 async function saveInformedConsent() {
   const consentDate = document.getElementById('ic-consent-date').value;
   const notes = document.getElementById('ic-notes').value;
+  const fileInput = document.getElementById('ic-attachment-file');
+  const file = fileInput?.files?.[0] || null;
 
   if (!consentDate) {
     setError('ic-error', 'Please select a consent date.');
@@ -4958,9 +4960,14 @@ async function saveInformedConsent() {
   if (_hasDateValidationErrors(['ic-error'])) return;
 
   // Validate that PDF is provided
-  const { file } = _readAttachment('ic');
   if (!file) {
     setError('ic-error', 'Please upload the signed consent form PDF.');
+    return;
+  }
+
+  // Validate file is PDF
+  if (!file.name.toLowerCase().endsWith('.pdf')) {
+    setError('ic-error', 'Please upload a PDF file.');
     return;
   }
 
