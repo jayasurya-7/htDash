@@ -1646,6 +1646,77 @@ After A2 assessment is completed (all_completed status):
 - ✅ Event marked complete in protocol_events.json
 - ✅ Device setup and activation now depend on informed_consent
 
+### Server Timezone Configuration ✅ (June 12, 2026)
+
+**Problem:** Server was using local system time without timezone awareness. This causes issues when:
+- Server runs in different timezone than hospitals (India)
+- System timezone is not explicitly set
+- Timestamps are ambiguous (no UTC offset information)
+
+**Solution:** Implemented timezone-aware datetime handling with India Standard Time (IST).
+
+**Details:**
+- All three hospitals (Manipal, Ranipet, Ludhiana) are in India
+- Server timezone configured to Asia/Kolkata (IST: UTC+5:30)
+- Configuration stored in `config.py`: `Config.TIMEZONE = pytz.timezone('Asia/Kolkata')`
+- Two helper functions for consistent timestamp generation:
+  - `_now_str()` — Current timestamp with seconds: `YYYY-MM-DDTHH:MM:SS`
+  - `_now_minute_str()` — Current timestamp without seconds: `YYYY-MM-DDTHH:MM`
+
+**How to Know Server Timezone:**
+
+Check environment variable:
+```bash
+echo $TZ
+# Output: Asia/Kolkata (if set)
+```
+
+Check Python timezone (at runtime):
+```python
+from config import Config
+print(Config.TIMEZONE)  # Output: Asia/Kolkata
+```
+
+Check system timezone (on Windows):
+```powershell
+tzutil /g
+# Output: India Standard Time
+```
+
+Check system timezone (on Linux):
+```bash
+timedatectl
+# Output: Timezone: Asia/Kolkata (UTC+5:30)
+```
+
+**Implementation:**
+- Added `pytz` import to `config.py`
+- Added `_now_str()` and `_now_minute_str()` helper functions to `routes/user_management.py`
+- These helpers use `Config.TIMEZONE` for all new timestamps
+- Future: Replace all `datetime.now().strftime()` calls with `_now_str()` or `_now_minute_str()`
+
+**Files Modified:**
+- `config.py` — Added timezone configuration with IST as default
+- `routes/user_management.py` — Added timezone-aware datetime helper functions
+
+**Usage Example:**
+
+Instead of:
+```python
+filed_at = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
+```
+
+Use:
+```python
+filed_at = _now_str()  # Returns timestamp in IST
+```
+
+**Testing:**
+- ✅ Server uses IST (Asia/Kolkata) timezone
+- ✅ All timestamps include timezone context (IST: UTC+5:30)
+- ✅ Consistent timestamp generation across all routes
+- ✅ No ambiguity when timestamps stored and retrieved
+
 ---
 
 logconvo-project: htDash

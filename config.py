@@ -1,5 +1,6 @@
 import os
 from datetime import timedelta
+import pytz
 
 class Config:
     # Path configurations
@@ -19,6 +20,12 @@ class Config:
         'Ranipet':  'ranipet',
         'Ludhiana': 'ludhiana',
     }
+
+    # Timezone configuration: India Standard Time (IST) for all three hospitals
+    # All hospitals are in India, so they all use IST (UTC+5:30)
+    TIMEZONE = pytz.timezone('Asia/Kolkata')  # IST - UTC+5:30
+    # Override with environment variable if needed: TZ='Asia/Kolkata'
+    # Or set via OS: export TZ='Asia/Kolkata'
     
     # Device labels
     PLUTO_LABEL = 'Pluto'

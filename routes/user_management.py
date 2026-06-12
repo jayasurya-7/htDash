@@ -61,6 +61,24 @@ def _filer():
     return flask_session.get('loginid', 'unknown')
 
 
+def _now_str():
+    """Get current timestamp in server timezone (IST) as ISO 8601 string with seconds.
+    Format: YYYY-MM-DDTHH:MM:SS"""
+    from pytz import timezone
+    tz = Config.TIMEZONE
+    now = datetime.now(tz)
+    return now.strftime('%Y-%m-%dT%H:%M:%S')
+
+
+def _now_minute_str():
+    """Get current timestamp in server timezone (IST) as ISO 8601 string without seconds.
+    Format: YYYY-MM-DDTHH:MM"""
+    from pytz import timezone
+    tz = Config.TIMEZONE
+    now = datetime.now(tz)
+    return now.strftime('%Y-%m-%dT%H:%M')
+
+
 def _apply_event_notes_count(items, priv):
     """Stamp role-filtered `event_notes_count` on each item and strip the raw
     `event_notes` field so its content never leaves this endpoint.
