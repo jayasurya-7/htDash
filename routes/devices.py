@@ -558,6 +558,9 @@ def api_device_inventory():
     """Return the full device inventory with current assignment info for the user's site."""
     if not flask_session.get('login_place'):
         return jsonify({'error': 'Not authenticated'}), 401
+    # Device inventory visible only to engineers and admins
+    if flask_session.get('privilege') not in ('admin', 'engineer'):
+        return jsonify({'error': 'Forbidden — device management requires engineer or admin privilege'}), 403
 
     folder = get_hospital_folder(flask_session['login_place'])
     if not folder:
@@ -826,8 +829,8 @@ def api_toggle_clinic():
     """
     if not flask_session.get('login_place'):
         return jsonify({'error': 'Not authenticated'}), 401
-    if flask_session.get('privilege') != 'admin':
-        return jsonify({'error': 'Forbidden — admin only'}), 403
+    if flask_session.get('privilege') not in ('admin', 'engineer'):
+        return jsonify({'error': 'Forbidden — device management requires engineer or admin privilege'}), 403
 
     folder = get_hospital_folder(flask_session['login_place'])
     if not folder:
@@ -929,11 +932,11 @@ def api_device_validation_dates():
 
 @bp.route('/api/toggle-issue', methods=['POST'])
 def api_toggle_issue():
-    """Mark/unmark device issue. Admin or engineer (privilege != 'user')."""
+    """Mark/unmark device issue. Admin or engineer."""
     if not flask_session.get('login_place'):
         return jsonify({'error': 'Not authenticated'}), 401
-    if flask_session.get('privilege') == 'user':
-        return jsonify({'error': 'Forbidden'}), 403
+    if flask_session.get('privilege') not in ('admin', 'engineer'):
+        return jsonify({'error': 'Forbidden — device management requires engineer or admin privilege'}), 403
 
     folder = get_hospital_folder(flask_session['login_place'])
     if not folder:
@@ -1071,11 +1074,11 @@ def api_lose_device():
 
 @bp.route('/api/recharge-sim', methods=['POST'])
 def api_recharge_sim():
-    """Record a SIM recharge — updates rechargeDate, expiryDate, dataPlan. Admin only."""
+    """Record a SIM recharge — updates rechargeDate, expiryDate, dataPlan. Admin or engineer."""
     if not flask_session.get('login_place'):
         return jsonify({'error': 'Not authenticated'}), 401
-    if flask_session.get('privilege') != 'admin':
-        return jsonify({'error': 'Forbidden — admin only'}), 403
+    if flask_session.get('privilege') not in ('admin', 'engineer'):
+        return jsonify({'error': 'Forbidden — device management requires engineer or admin privilege'}), 403
 
     folder = get_hospital_folder(flask_session['login_place'])
     if not folder:
@@ -1106,11 +1109,11 @@ def api_recharge_sim():
 
 @bp.route('/api/link-sim', methods=['POST'])
 def api_link_sim():
-    """Link a SIM card to a modem. Admin only."""
+    """Link a SIM card to a modem. Admin or engineer."""
     if not flask_session.get('login_place'):
         return jsonify({'error': 'Not authenticated'}), 401
-    if flask_session.get('privilege') != 'admin':
-        return jsonify({'error': 'Forbidden — admin only'}), 403
+    if flask_session.get('privilege') not in ('admin', 'engineer'):
+        return jsonify({'error': 'Forbidden — device management requires engineer or admin privilege'}), 403
 
     folder = get_hospital_folder(flask_session['login_place'])
     if not folder:
@@ -1160,8 +1163,8 @@ def api_swap_device():
     """
     if not flask_session.get('login_place'):
         return jsonify({'error': 'Not authenticated'}), 401
-    if flask_session.get('privilege') == 'user':
-        return jsonify({'error': 'Forbidden'}), 403
+    if flask_session.get('privilege') not in ('admin', 'engineer'):
+        return jsonify({'error': 'Forbidden — device management requires engineer or admin privilege'}), 403
 
     folder = get_hospital_folder(flask_session['login_place'])
     if not folder:
@@ -1339,12 +1342,15 @@ def api_assign_device():
 
 @bp.route('/api/unassign-device', methods=['POST'])
 def api_unassign_device():
-    """Return a modem or laptop from a patient. Admin only.
+    """Return a modem or laptop from a patient. Admin or engineer.
 
     Body: { device_type: 'modem'|'laptop', device_id: '...' }
     """
     if not flask_session.get('login_place'):
         return jsonify({'error': 'Not authenticated'}), 401
+    # Unassign visible only to engineers and admins
+    if flask_session.get('privilege') not in ('admin', 'engineer'):
+        return jsonify({'error': 'Forbidden — device management requires engineer or admin privilege'}), 403
     if flask_session.get('privilege') != 'admin':
         return jsonify({'error': 'Forbidden — admin only'}), 403
 
@@ -1385,6 +1391,9 @@ def api_device_events():
     """Fetch device events. ?type=<type> for all devices of a type, or add &device_id=<id> for one."""
     if not flask_session.get('login_place'):
         return jsonify({'error': 'Not authenticated'}), 401
+    # Device events visible only to engineers and admins
+    if flask_session.get('privilege') not in ('admin', 'engineer'):
+        return jsonify({'error': 'Forbidden — device management requires engineer or admin privilege'}), 403
 
     folder = get_hospital_folder(flask_session['login_place'])
     if not folder:
@@ -1410,8 +1419,8 @@ def api_log_device_event():
     """Manually log a device event (retire, discarded, repair, etc.). Admin or engineer."""
     if not flask_session.get('login_place'):
         return jsonify({'error': 'Not authenticated'}), 401
-    if flask_session.get('privilege') == 'user':
-        return jsonify({'error': 'Forbidden'}), 403
+    if flask_session.get('privilege') not in ('admin', 'engineer'):
+        return jsonify({'error': 'Forbidden — device management requires engineer or admin privilege'}), 403
 
     folder = get_hospital_folder(flask_session['login_place'])
     if not folder:
