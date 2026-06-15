@@ -545,6 +545,9 @@ def devices_page():
     if not flask_session.get('login_place'):
         from flask import redirect, url_for
         return redirect(url_for('login'))
+    # Devices page visible only to engineers and admins
+    if flask_session.get('privilege') not in ('admin', 'engineer'):
+        return jsonify({'error': 'Forbidden — device management requires engineer or admin privilege'}), 403
     return render_template('devices.html', active_page='devices')
 
 
