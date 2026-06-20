@@ -46,6 +46,10 @@
       "not_before": ["event:a1_assessment"],
       "not_after":  ["today"]
     },
+    "watch_record": {
+      "not_before": ["a0CompletionDate"],
+      "not_after":  ["today"]
+    },
     "adverse_event_followup": {
       "not_before": ["event:adverse_event"],
       "not_after":  ["today"]
