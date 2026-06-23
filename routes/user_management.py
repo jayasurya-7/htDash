@@ -8963,9 +8963,10 @@ def _get_exercise_text(exercise: dict, language: str) -> dict:
 
 
 def _build_dosage_from_prescription(prescribed: dict, labels: dict) -> str:
-    """Build a dosage string from actual prescription values (repetitions and sets/blocks).
+    """Build a dosage string from actual prescription values (sets and reps).
 
-    Returns a string like "10 repetitions, 3 sets" using language-specific labels.
+    Returns a string like "3 sets × 10 reps" or "3 சுற்றுகள் × 10 முறை" using
+    language-specific labels from translations.
     If values are missing, returns empty string.
     """
     reps = prescribed.get('repetitions')
@@ -8974,13 +8975,16 @@ def _build_dosage_from_prescription(prescribed: dict, labels: dict) -> str:
     if reps is None and sets is None:
         return ''
 
-    parts = []
-    if reps is not None:
-        parts.append(f"{reps} {labels.get('repetitions', 'repetitions')}")
-    if sets is not None:
-        parts.append(f"{sets} {labels.get('sets', 'sets')}")
+    # Build in the format: "N sets × M reps"
+    sets_label = labels.get('sets', 'sets')
+    reps_label = labels.get('reps', 'reps')
 
-    return ', '.join(parts)
+    if sets is not None and reps is not None:
+        return f"{sets} {sets_label} × {reps} {reps_label}"
+    elif sets is not None:
+        return f"{sets} {sets_label}"
+    else:
+        return f"{reps} {reps_label}"
 
 
 @bp.route('/api/patients/<homer_id>/prescription-pamphlet', methods=['GET'])
