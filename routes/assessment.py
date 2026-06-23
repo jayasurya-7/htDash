@@ -1,14 +1,20 @@
 """Assessment therapist PDF upload routes."""
 
-from flask import Blueprint, jsonify, request, send_file
-from flask_session import session as flask_session
+from flask import Blueprint, jsonify, request, send_file, session as flask_session
 from pathlib import Path
+from datetime import datetime
 import os
 
-from utils.data_access import get_patients_for_user, read_patient, write_patient, _now_str
+from utils.data_access import get_patients_for_user, read_patient_meta, write_patient_meta
 from config import Config
 
 bp = Blueprint('assessment', __name__, url_prefix='/assessment-api')
+
+
+def _now_str():
+    """Get current timestamp in server timezone as ISO 8601 string with seconds."""
+    tz = Config.TIMEZONE
+    return datetime.now(tz).strftime('%Y-%m-%dT%H:%M:%S')
 
 
 def _is_assessment_therapist():
@@ -62,7 +68,7 @@ def api_upload_assessment_pdf(homer_id, assess_type):
 
     # Read patient to check completion and prior upload
     folder = Config.get_patient_folder(login_place)
-    patient = read_patient(folder, homer_id)
+    patient = read_patient_meta(folder, homer_id)
     if not patient:
         return jsonify({'error': 'Patient not found'}), 404
 
@@ -116,7 +122,7 @@ def api_upload_assessment_pdf(homer_id, assess_type):
 
     # Stamp upload timestamp
     patient[uploaded_at_field] = _now_str()
-    write_patient(folder, homer_id, patient)
+    write_patient_meta(folder, homer_id, patient)
 
     return jsonify({
         'uploaded_at': patient[uploaded_at_field],
