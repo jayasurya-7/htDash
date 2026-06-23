@@ -56,6 +56,15 @@ def _parse_date_flex(date_str):
 bp = Blueprint("user_management", __name__)
 
 
+@bp.before_request
+def _block_supervisor_writes():
+    """Supervisors are view-only — reject all write requests."""
+    from flask import request as _req
+    if _req.method not in ('GET', 'HEAD', 'OPTIONS'):
+        if flask_session.get('privilege') == 'supervisor':
+            return jsonify({'error': 'View-only account — no modifications allowed.'}), 403
+
+
 def _filer():
     """loginid of the current request's user — stamped as `filed_by` on every filed event."""
     return flask_session.get('loginid', 'unknown')
@@ -228,6 +237,8 @@ def _wdu_event_name(entry, fallback='AG Watch Data Upload'):
 def patients_page():
     if not flask_session.get('login_place'):
         return redirect(url_for('login'))
+    if flask_session.get('privilege') == 'assessment_therapist':
+        return redirect(url_for('assessment'))
     return render_template('patients.html', active_page='patients')
 
 
@@ -235,6 +246,8 @@ def patients_page():
 def patient_detail_page(homer_id):
     if not flask_session.get('login_place'):
         return redirect(url_for('login'))
+    if flask_session.get('privilege') == 'assessment_therapist':
+        return redirect(url_for('assessment'))
     return render_template('patient_detail.html', homer_id=homer_id, place=flask_session.get('login_place'),
                            active_page='patients', date_rules=get_date_rules())
 
@@ -1509,8 +1522,6 @@ def api_discontinue_patient(homer_id):
     """Complete the discontinuation modal — step 2 of the two-step flow."""
     if not flask_session.get('login_place'):
         return jsonify({'error': 'Not authenticated'}), 401
-    if flask_session.get('privilege') != 'admin':
-        return jsonify({'error': 'Forbidden'}), 403
 
     folder = find_patient_folder(flask_session['login_place'], homer_id)
     if not folder:
@@ -1527,6 +1538,16 @@ def api_discontinue_patient(homer_id):
     reason          = (data.get('reason') or '').strip()
     notes           = (data.get('notes') or '').strip() or None
     stub_id         = data.get('event_id')
+
+    # Admin can always discontinue
+    # Therapist can discontinue broken_protocol patients via the discontinuation_reminder event (stub_id provided)
+    privilege = flask_session.get('privilege')
+    if privilege == 'admin':
+        pass  # Admin allowed
+    elif privilege == 'therapist' and patient.get('brokenProtocolDate') and stub_id:
+        pass  # Therapist allowed for broken_protocol via synthetic event
+    else:
+        return jsonify({'error': 'Forbidden — insufficient privilege'}), 403
 
     if not completion_date:
         return jsonify({'error': 'Discontinuation date is required.'}), 400
@@ -7124,7 +7145,7 @@ def get_hospital_ids():
 
     if user_data:
         current_session.login_place = user_data.get("place")
-        current_session.privilege = user_data.get("privilege", "user")
+        current_session.privilege = user_data.get("privilege", "therapist")
 
     # login_place must be a real place at this point
     if not current_session.login_place:

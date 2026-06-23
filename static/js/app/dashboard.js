@@ -141,24 +141,43 @@
                       : 'text-slate-500';
 
       const blocked = ev.blocked_by && ev.blocked_by.length > 0;
-      const nonClickable = blocked || isUpcoming;
+
+      // Role-based gating — mirrors _ENGINEER_STUBS in patient_detail.js
+      const _ENGINEER_STUBS_DB = new Set([
+        'exp_device_install', 'watch_record', 'watch_data_upload',
+        'robot_issue_call', 'robot_issue_visit', 'resolve_robot_issue_visit',
+        'other_device_issue_call', 'other_device_issue_visit', 'device_return',
+      ]);
+      const _priv = (currentUser && currentUser.privilege) || '';
+      const roleBlocked = _priv === 'supervisor'
+        || (_priv === 'therapist' && _ENGINEER_STUBS_DB.has(ev.protocol_event_id))
+        || (_priv === 'engineer'  && !_ENGINEER_STUBS_DB.has(ev.protocol_event_id));
+
+      const nonClickable = roleBlocked || blocked || isUpcoming;
       const tag     = nonClickable ? 'div' : 'a';
       const href    = nonClickable ? '' : `href="/patients/${ev.homer_id}?action=${ev.id}"`;
-      const extra   = nonClickable ? '' : 'hover:shadow-md transition-shadow';
+      const extra   = nonClickable ? '' : 'hover:shadow-md transition-shadow cursor-pointer';
+      const rowOpacity = roleBlocked ? 'opacity-60' : '';
       const lockIcon = blocked ? `<i class="fas fa-lock text-slate-400 text-[10px] mr-1"></i>` : '';
+      const nameColor = roleBlocked ? 'text-slate-500' : 'text-slate-800';
       const mainLine = `
         <div class="text-sm truncate flex items-center gap-1">
           ${lockIcon}<span class="font-semibold text-blue-700">${ev.homer_id}</span>
           <span class="text-slate-400">·</span>
-          <span class="font-medium text-slate-800">${ev.event_name}</span>
+          <span class="font-medium ${nameColor}">${ev.event_name}</span>
         </div>`;
-      const rightLabel = blocked
+      const roleBlockedLabel = _priv === 'therapist' ? 'Engineer only'
+                             : _priv === 'engineer'   ? 'Therapist only'
+                             : 'View only';
+      const rightLabel = roleBlocked
+        ? `<span class="text-xs font-medium text-slate-400 bg-slate-100 border border-slate-200 rounded-full px-2 py-0.5 whitespace-nowrap flex-shrink-0">${roleBlockedLabel}</span>`
+        : blocked
         ? `<span class="text-xs font-semibold text-amber-600 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5 whitespace-nowrap flex-shrink-0">Needs: ${ev.blocked_by[0]}</span>`
         : onHold
         ? `<span class="text-xs font-semibold text-slate-600 bg-white border border-slate-300 rounded-full px-2 py-0.5 whitespace-nowrap flex-shrink-0">On hold</span>`
         : `<span class="text-xs font-semibold ${textColor} whitespace-nowrap">${whenLabel}</span>`;
       return `
-        <${tag} ${href} class="flex items-center justify-between px-3 py-2.5 rounded-xl border ${urgency} gap-3 ${extra}">
+        <${tag} ${href} class="flex items-center justify-between px-3 py-2.5 rounded-xl border ${urgency} gap-3 ${extra} ${rowOpacity}">
           <div class="min-w-0">
             ${mainLine}
             <div class="text-xs text-slate-500 mt-0.5">${dateStr}</div>

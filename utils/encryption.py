@@ -127,7 +127,7 @@ class CredentialsManager:
         return True
     
     @staticmethod
-    def create_user(loginid: str, default_password: str, place: str, privilege: str = "user") -> tuple:
+    def create_user(loginid: str, default_password: str, place: str, privilege: str = "therapist") -> tuple:
         """Create a new user - called by LAB admin"""
         credentials = CredentialsManager.get_or_create_credentials()
         
@@ -200,7 +200,7 @@ class CredentialsManager:
             config_user = Config.LOGIN_CREDENTIALS[loginid]
             credentials[loginid] = {
                 "place": config_user["place"],
-                "privilege": config_user.get("privilege", "user"),
+                "privilege": config_user.get("privilege", "therapist"),
                 "password": config_user["password"],
                 "password_hash": EncryptionUtils.hash_password(config_user["password"]),
                 "created_by": "system",

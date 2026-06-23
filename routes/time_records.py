@@ -21,7 +21,7 @@ def resolve_login_place(data=None):
         user_data = Config.LOGIN_CREDENTIALS.get(login_id)
         if user_data:
             current_session.login_place = user_data.get("place")
-            current_session.privilege = user_data.get("privilege", "user")
+            current_session.privilege = user_data.get("privilege", "therapist")
             return current_session.login_place
     return None
 

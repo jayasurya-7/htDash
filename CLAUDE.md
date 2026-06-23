@@ -26,6 +26,31 @@ HOMER Therapy Dashboard (htDash) is a Flask-based clinical dashboard for managin
 
 ---
 
+## Role-Based Access Control (RBAC) — Implemented June 2026
+
+**5 Roles** with separate credentials (13 login IDs across 3 hospital sites + global supervisor):
+
+| Role | Credentials | Access |
+|------|---|---|
+| **Overall Supervisor** | `LAB-HS-DATA` (global) | View all 3 centres' data (read-only). Cannot modify any event. |
+| **Site Admin** | `MP/RP/LD-HS-ADMIN` (1 per site) | Full access to all stubs, devices, patient management for their site. |
+| **Therapist** | `MP/RP/LD-HS-1002` (1 per site) | File clinical events (home visits, calls, prescriptions, assessments, AE). Cannot access Devices page. Cannot discontinue normal patients but CAN discontinue broken_protocol patients via synthetic `discontinuation_reminder` event. |
+| **Engineer** | `MP/RP/LD-HS-ENG` (1 per site) | Full device inventory & assignment management, watch records, device issue handling. Cannot file clinical events but sees them greyed (non-clickable). |
+| **Assessment Therapist** | `MP/RP/LD-HS-ASSESS` (1 per site) | Placeholder structure only — redirects to `/assessment` (coming soon). Will upload assessment PDFs. |
+
+**Stub Visibility Rules:**
+- **Therapist sees engineer stubs greyed** (not clickable): device setup, watch record, device issues, device return, watch data upload
+- **Engineer sees therapy stubs greyed** (not clickable): home visits, calls, prescriptions, assessments
+- **Supervisor sees all stubs greyed** (view-only)
+- **Admin sees all stubs clickable**
+
+**Broken Protocol Discontinuation:**
+- Normal discontinuation → admins only (button hidden for non-admins)
+- Broken protocol patients → therapist can ONLY discontinue via synthetic `discontinuation_reminder` event + requires stub_id in request
+- All discontinuations must include: date, reason, notes (optional), attachment (optional)
+
+---
+
 ## Documentation
 
 | Document                      | Contents                                                                                                  |
@@ -860,6 +885,56 @@ Extended device setup (`exp_device_install`) to include modem, laptop, and SIM c
 - `routes/user_management.py` — Extended `api_available_devices`, updated `api_complete_device_install` with SIM assignment logic
 - `templates/patient_detail.html` — Added modem, laptop, and SIM select fields
 - `static/js/app/patient_detail.js` — Updated `openDeviceSetupModal()` to fetch available SIMs, `submitDeviceSetup()` with SIM validation, field labels
+
+## Bug Fixes & Role-Based Access Control Refinements (June 2026)
+
+### Role-Based Access Control Implementation ✅
+
+**Added 5-role RBAC system** with proper credentials, route guards, and UI visibility rules:
+- Supervisor (view-only across all centres)
+- Site Admin (full access per site)
+- Therapist (clinical events only, cannot access Devices page)
+- Engineer (device management only, cannot file clinical events)
+- Assessment Therapist (structure only, coming soon)
+
+**Files Modified:**
+- `config.py` — 13 login credentials (1 supervisor + 3 admins + 3 therapists + 3 engineers + 3 assessment therapists)
+- `models/user.py` — Added `is_supervisor()`, `is_therapist()`, `is_engineer()`, `is_assessment_therapist()` helpers; fixed `is_admin()` to exclude supervisor
+- `routes/auth.py`, `routes/devices.py`, `routes/user_management.py`, `routes/adl_exercises.py`, `routes/exercises.py`, `routes/time_records.py`, `utils/encryption.py` — Renamed `'user'` → `'therapist'` privilege
+- `routes/user_management.py` — Added `before_request` hook blocking supervisor writes; added assessment_therapist redirects to `/assessment`; added therapist-only discontinuation for broken_protocol via stub_id
+- `routes/devices.py` — Added `before_request` supervisor write-block; fixed add device, assign device, unassign device to allow engineer access
+- `static/js/app/app.js` — Supervisor shows Devices link (view-only) + "View Only" badge
+- `static/js/app/devices.js` — Engineer sees Manage dropdowns, clinic toggles, SIM recharge buttons
+- `static/js/app/patient_detail.js` — Added `_ENGINEER_STUBS` set; role-based greying with "Engineer only"/"Therapist only"/"View only" badges in `patientEventRow()`
+- `static/js/app/dashboard.js` — Same role-based greying in `eventRow()`
+- `templates/base.html` — Added `#view-only-badge` in sidebar
+- `templates/assessment_placeholder.html` — New placeholder page for assessment therapists
+- `main.py` — Added `/assessment` route; block therapist/assessment_therapist from `/devices`
+
+### Broken Protocol Discontinuation Fix ✅
+
+**Issue:** Therapists couldn't discontinue broken_protocol patients through any flow.
+
+**Root causes:**
+1. Regular "Discontinue Patient" button was visible/clickable for broken_protocol (should be hidden)
+2. `saveDiscontinuation()` wasn't passing `event_id` to backend when using synthetic `discontinuation_reminder` event
+3. Backend was rejecting all non-admin discontinuations (too strict)
+
+**Fixes:**
+- `static/js/app/patient_detail.js:1312-1314` — Always pass `event_id` if available (was incorrectly filtering it out)
+- `static/js/app/patient_detail.js:8399` — Fixed button visibility logic to hide button for broken_protocol
+- `routes/user_management.py:api_discontinue_patient()` — Therapist can now discontinue broken_protocol patients IF `stub_id` (event_id) is provided AND patient is broken_protocol
+
+**New Flow for Broken Protocol Discontinuation:**
+1. Patient enters `broken_protocol` status
+2. System auto-creates synthetic `discontinuation_reminder` event
+3. Therapist clicks that event (not the hidden button)
+4. Modal opens, therapist fills: date, reason, notes, attachment
+5. `event_id` passed to backend
+6. Backend validates: therapist + broken_protocol + stub_id present → allowed
+7. Patient marked discontinued with full documentation
+
+---
 
 ## Issues pd-ds
 

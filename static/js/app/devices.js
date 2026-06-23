@@ -11,7 +11,7 @@ let _canManage  = false;   // admin or engineer
 function initPage() {
   if (currentUser) {
     _isAdmin   = currentUser.privilege === 'admin';
-    _canManage = currentUser.privilege !== 'user';
+    _canManage = currentUser.privilege !== 'therapist';
     const label = document.getElementById('devices-location-label');
     if (label) label.textContent = currentUser.place || '—';
   }
@@ -52,7 +52,7 @@ async function _refreshInventory() {
 }
 
 function _showButtonVisibility() {
-  // Admin-only: Manage dropdowns
+  // Admin or engineer: Manage dropdowns
   const manageWrappers = [
     'manage-pluto-dropdown-wrapper', 'manage-mars-dropdown-wrapper',
     'manage-agwatch-dropdown-wrapper',
@@ -60,12 +60,12 @@ function _showButtonVisibility() {
     'manage-sims-dropdown-wrapper',
   ];
   manageWrappers.forEach(id => {
-    if (_isAdmin) document.getElementById(id)?.classList.remove('hidden');
+    if (_canManage) document.getElementById(id)?.classList.remove('hidden');
   });
 
-  // Clinic toggle — admin only (pluto/mars only)
+  // Clinic toggle — admin or engineer (pluto/mars only)
   ['clinic-pluto-btn','clinic-mars-btn'].forEach(id => {
-    if (_isAdmin) document.getElementById(id)?.classList.remove('hidden');
+    if (_canManage) document.getElementById(id)?.classList.remove('hidden');
   });
 
   // Issue report — admin or engineer
@@ -363,7 +363,7 @@ function _loadSimIssues() {
             <span class="font-mono text-sm font-medium text-slate-800">${_esc(s.phoneNumber)}</span>
             <span class="text-xs text-slate-500">${_esc(s.network || '—')}</span>
             ${_simExpiryBadge(s)}
-            ${_isAdmin ? `<button onclick="openRechargeSimModal('${_esc(s.id)}')" class="ml-auto px-3 py-1.5 text-xs font-semibold bg-sky-600 text-white rounded-lg hover:bg-sky-700 active:scale-95 transition-all"><i class="fas fa-bolt mr-1"></i>Recharge</button>` : ''}
+            ${_canManage ? `<button onclick="openRechargeSimModal('${_esc(s.id)}')" class="ml-auto px-3 py-1.5 text-xs font-semibold bg-sky-600 text-white rounded-lg hover:bg-sky-700 active:scale-95 transition-all"><i class="fas fa-bolt mr-1"></i>Recharge</button>` : ''}
           </div>`).join('')}
       </div>
     </div>`;
@@ -565,7 +565,7 @@ function _renderSims(sims) {
                   ? '<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-slate-100 text-slate-400"><i class="fas fa-archive"></i>Retired</span>'
                   : `<div class="flex items-center gap-3">
                       ${_simCycleWidget(s)}
-                      ${_isAdmin ? `<button onclick="openRechargeSimModal('${_esc(s.id)}')" class="ml-auto flex-shrink-0 px-2.5 py-1 text-xs font-semibold text-white bg-sky-600 rounded-lg hover:bg-sky-700 active:scale-95 transition-all"><i class="fas fa-bolt mr-1"></i>Recharge</button>` : ''}
+                      ${_canManage ? `<button onclick="openRechargeSimModal('${_esc(s.id)}')" class="ml-auto flex-shrink-0 px-2.5 py-1 text-xs font-semibold text-white bg-sky-600 rounded-lg hover:bg-sky-700 active:scale-95 transition-all"><i class="fas fa-bolt mr-1"></i>Recharge</button>` : ''}
                     </div>`}
               </td>
             </tr>`;

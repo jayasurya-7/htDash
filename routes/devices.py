@@ -34,6 +34,15 @@ from pathlib import Path
 
 bp = Blueprint('devices', __name__)
 
+
+@bp.before_request
+def _block_supervisor_writes():
+    """Supervisors are view-only — reject all write requests on the devices blueprint."""
+    from flask import request as _req
+    if _req.method not in ('GET', 'HEAD', 'OPTIONS'):
+        if flask_session.get('privilege') == 'supervisor':
+            return jsonify({'error': 'View-only account — no modifications allowed.'}), 403
+
 def get_devices_file_path(place=None):
     if not place:
         place = current_session.login_place
@@ -720,15 +729,15 @@ def api_device_inventory():
     return jsonify(result)
 
 
-# ── Add device (admin only) ───────────────────────────────────────────────────
+# ── Add device (admin or engineer) ───────────────────────────────────────────
 
 @bp.route('/api/add', methods=['POST'])
 def api_add_device():
-    """Add a new device or SIM to inventory. Admin only."""
+    """Add a new device or SIM to inventory. Admin or engineer."""
     if not flask_session.get('login_place'):
         return jsonify({'error': 'Not authenticated'}), 401
-    if flask_session.get('privilege') != 'admin':
-        return jsonify({'error': 'Forbidden — admin only'}), 403
+    if flask_session.get('privilege') not in ('admin', 'engineer'):
+        return jsonify({'error': 'Forbidden — device management requires engineer or admin privilege'}), 403
 
     folder = get_hospital_folder(flask_session['login_place'])
     if not folder:
@@ -1031,7 +1040,7 @@ def api_lose_device():
     """Permanently retire a device as lost. Sets removal_date and appends lost event."""
     if not flask_session.get('login_place'):
         return jsonify({'error': 'Not authenticated'}), 401
-    if flask_session.get('privilege') == 'user':
+    if flask_session.get('privilege') == 'therapist':
         return jsonify({'error': 'Forbidden'}), 403
 
     folder = get_hospital_folder(flask_session['login_place'])
@@ -1267,14 +1276,14 @@ def api_swap_device():
 
 @bp.route('/api/assign-device', methods=['POST'])
 def api_assign_device():
-    """Manually assign a modem or laptop to a patient. Admin only.
+    """Manually assign a modem or laptop to a patient. Admin or engineer.
 
     Body: { device_type: 'modem'|'laptop', device_id: '...', homer_id: '...' }
     """
     if not flask_session.get('login_place'):
         return jsonify({'error': 'Not authenticated'}), 401
-    if flask_session.get('privilege') != 'admin':
-        return jsonify({'error': 'Forbidden — admin only'}), 403
+    if flask_session.get('privilege') not in ('admin', 'engineer'):
+        return jsonify({'error': 'Forbidden — device management requires engineer or admin privilege'}), 403
 
     folder = get_hospital_folder(flask_session['login_place'])
     if not folder:
@@ -1351,8 +1360,6 @@ def api_unassign_device():
     # Unassign visible only to engineers and admins
     if flask_session.get('privilege') not in ('admin', 'engineer'):
         return jsonify({'error': 'Forbidden — device management requires engineer or admin privilege'}), 403
-    if flask_session.get('privilege') != 'admin':
-        return jsonify({'error': 'Forbidden — admin only'}), 403
 
     folder = get_hospital_folder(flask_session['login_place'])
     if not folder:
@@ -1444,7 +1451,7 @@ def api_log_device_event():
     if event_type not in valid_events:
         return jsonify({'error': f'event_type {event_type!r} is not valid for {dtype}'}), 400
 
-    privilege = flask_session.get('privilege', 'user')
+    privilege = flask_session.get('privilege', 'therapist')
     allowed_roles = protocol[dtype]['events'][event_type].get('roles', [])
     if privilege not in allowed_roles:
         return jsonify({'error': 'Forbidden — insufficient role for this event type'}), 403
@@ -1520,7 +1527,7 @@ def api_upload_event_attachment():
     """Upload a PDF or image attachment for a device event. Admin or engineer."""
     if not flask_session.get('login_place'):
         return jsonify({'error': 'Not authenticated'}), 401
-    if flask_session.get('privilege') == 'user':
+    if flask_session.get('privilege') == 'therapist':
         return jsonify({'error': 'Forbidden'}), 403
 
     folder = get_hospital_folder(flask_session['login_place'])

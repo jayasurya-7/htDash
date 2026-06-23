@@ -1310,7 +1310,7 @@ async function saveDiscontinuation() {
   btn.disabled = true;
   setError('discontinue-error', '');
   const payload = { completion_date: date, reason, notes: notes || null };
-  if (_discEventId && _discEventId !== 'discontinuation_reminder') {
+  if (_discEventId) {
     payload.event_id = _discEventId;
   }
 
@@ -4823,6 +4823,13 @@ const EVENT_OPENERS = {
   device_return:                (ev) => openDeviceReturnModal(ev),
 };
 
+// Stubs that only engineers (+ admin) can file. Therapists can see but not open them.
+const _ENGINEER_STUBS = new Set([
+  'exp_device_install', 'watch_record', 'watch_data_upload',
+  'robot_issue_call', 'robot_issue_visit', 'resolve_robot_issue_visit',
+  'other_device_issue_call', 'other_device_issue_visit', 'device_return',
+]);
+
 function patientEventRow(ev) {
   const sched = ev.scheduled_date;
   const onHold = !!ev.on_hold;
@@ -4892,17 +4899,34 @@ function patientEventRow(ev) {
     'watch_data_upload',
   ]);
   const discontinuedBlocks = _patientDiscontinued && !_DISCONTINUED_VISIBLE.has(ev.protocol_event_id);
+
+  // Role-based stub gating: therapists cannot file engineer stubs and vice versa;
+  // supervisors cannot file any stub.
+  const _priv = (currentUser && currentUser.privilege) || '';
+  const roleBlocked = _priv === 'supervisor'
+    || (_priv === 'therapist' && _ENGINEER_STUBS.has(ev.protocol_event_id))
+    || (_priv === 'engineer'  && !_ENGINEER_STUBS.has(ev.protocol_event_id));
+
   // Assessment events (A1/A2) clickable only when overdue or in active window (not upcoming).
   // Other upcoming events are non-clickable.
-  const clickable = hasOpener && !blocked && (isAssessment ? (isOverdue || isActiveWindow) : !isUpcoming) && !onHold && !discontinuedBlocks;
+  const clickable = !roleBlocked && hasOpener && !blocked && (isAssessment ? (isOverdue || isActiveWindow) : !isUpcoming) && !onHold && !discontinuedBlocks;
   const tag       = clickable ? 'a' : 'div';
   const href      = clickable ? `href="?action=${ev.id}"` : '';
   const extra     = clickable ? 'cursor-pointer hover:shadow-md transition-shadow' : '';
+
+  const roleBlockedLabel = _priv === 'therapist' ? 'Engineer'
+                         : _priv === 'engineer'   ? 'Therapist'
+                         : 'View only';
+  const rowOpacity = roleBlocked ? 'opacity-60' : '';
+  const nameColor  = roleBlocked ? 'text-slate-500' : 'text-slate-800';
+
   const subtitle  = `<div class="text-xs text-slate-500 mt-0.5">${dateStr}</div>`;
   const eventName = blocked
-    ? `<div class="font-medium text-slate-800 text-sm truncate flex items-center gap-1"><i class="fas fa-lock text-slate-400 text-[10px]"></i>${ev.event_name}</div>`
-    : `<div class="font-medium text-slate-800 text-sm truncate">${ev.event_name}</div>`;
-  const rightLabel = blocked
+    ? `<div class="font-medium ${nameColor} text-sm truncate flex items-center gap-1"><i class="fas fa-lock text-slate-400 text-[10px]"></i>${ev.event_name}</div>`
+    : `<div class="font-medium ${nameColor} text-sm truncate">${ev.event_name}</div>`;
+  const rightLabel = roleBlocked
+    ? `<span class="text-xs font-medium text-slate-400 bg-slate-100 border border-slate-200 rounded-full px-2 py-0.5 whitespace-nowrap flex-shrink-0">${roleBlockedLabel} only</span>`
+    : blocked
     ? `<span class="text-xs font-semibold text-amber-600 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5 whitespace-nowrap flex-shrink-0">Needs: ${ev.blocked_by[0]}</span>`
     : onHold
     ? `<span class="text-xs font-semibold text-slate-600 bg-white border border-slate-300 rounded-full px-2 py-0.5 whitespace-nowrap flex-shrink-0">On hold</span>`
@@ -4914,7 +4938,7 @@ function patientEventRow(ev) {
     : `<span class="text-xs font-semibold ${textColor} whitespace-nowrap flex-shrink-0">${whenLabel}</span>`;
 
   return `
-    <${tag} ${href} class="flex items-center justify-between px-3 py-2.5 rounded-xl border ${urgency} ${extra} gap-3">
+    <${tag} ${href} class="flex items-center justify-between px-3 py-2.5 rounded-xl border ${urgency} ${extra} ${rowOpacity} gap-3">
       <div class="min-w-0">
         ${eventName}
         ${subtitle}
@@ -8370,9 +8394,12 @@ async function loadPatient() {
     }
 
     // Show "Discontinue" button for admin only when patient is inactive, active, or paused.
+    // Hidden for broken_protocol (use discontinuation_reminder event instead), discontinued, and all other statuses.
     const discBtn = document.getElementById('discontinue-btn');
-    const _DISC_BTN_STATUSES = new Set(['inactive', 'active', 'paused']);
-    if (discBtn && isAdmin && _DISC_BTN_STATUSES.has(patientData.status) && !_hasDiscontinuationStub) {
+    const canShowDisc = isAdmin
+      && (patientData.status === 'inactive' || patientData.status === 'active' || patientData.status === 'paused')
+      && !_hasDiscontinuationStub;
+    if (discBtn && canShowDisc) {
       discBtn.classList.remove('hidden');
       discBtn.classList.add('flex');
     } else if (discBtn) {

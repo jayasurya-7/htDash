@@ -141,10 +141,10 @@ def validate_login():
         flask_session.clear()
         current_session.set_session(
             login_place=user_data["place"],
-            privilege=user_data.get("privilege", "user")
+            privilege=user_data.get("privilege", "therapist")
         )
         flask_session['loginid']   = loginid
-        flask_session['privilege'] = user_data.get('privilege', 'user')
+        flask_session['privilege'] = user_data.get('privilege', 'therapist')
         session_id = -1
         try:
             from utils.data_access import open_session, get_hospital_folder
@@ -159,7 +159,7 @@ def validate_login():
             "status": "success",
             "loginid": loginid,
             "place": user_data["place"],
-            "privilege": user_data.get("privilege", "user")
+            "privilege": user_data.get("privilege", "therapist")
         }), 200
     else:
         _record_failure(ip)
@@ -176,7 +176,7 @@ def me():
         "status": "success",
         "loginId": flask_session.get('loginid', login_place),
         "place": login_place,
-        "privilege": flask_session.get('privilege', 'user')
+        "privilege": flask_session.get('privilege', 'therapist')
     })
 
 

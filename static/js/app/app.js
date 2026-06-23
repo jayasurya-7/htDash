@@ -58,13 +58,25 @@
         const locationName = document.getElementById('location-name');
         if (locationName) locationName.textContent = currentUser.place;
         const locationPrivilege = document.getElementById('location-privilege');
-        if (locationPrivilege) locationPrivilege.textContent = currentUser.privilege === 'admin' ? 'Full Administrative Access' : 'Site Access';
+        if (locationPrivilege) {
+          if (currentUser.privilege === 'admin') locationPrivilege.textContent = 'Full Administrative Access';
+          else if (currentUser.privilege === 'supervisor') locationPrivilege.textContent = 'View Only — All Centres';
+          else locationPrivilege.textContent = 'Site Access';
+        }
         if (currentUser.privilege === 'admin') {
           document.getElementById('add-patient-btn')?.classList.remove('hidden');
           document.getElementById('filter-unassigned')?.classList.remove('hidden');
         }
-        // Hide Devices nav link for therapists (only engineers and admins)
-        if (currentUser.privilege !== 'admin' && currentUser.privilege !== 'engineer') {
+        // Show a "View Only" badge in the header for supervisors
+        if (currentUser.privilege === 'supervisor') {
+          const badge = document.getElementById('view-only-badge');
+          if (badge) badge.classList.remove('hidden');
+        }
+        // Hide Devices nav link for therapists and assessment therapists only
+        // (engineers, admins, and supervisors can access the Devices page)
+        const hideDevices = currentUser.privilege === 'therapist'
+                         || currentUser.privilege === 'assessment_therapist';
+        if (hideDevices) {
           document.querySelector('a[href="/devices"]')?.classList.add('hidden');
         }
       }

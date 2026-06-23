@@ -39,14 +39,31 @@ class _SessionProxy:
         flask_session.modified = True
 
     def is_admin(self):
-        """True only for the global lab admin (place == 'admin').
+        """True only for the global lab admin (place == 'admin') who is NOT the supervisor.
         Site admins (RP-HS-ADMIN etc.) have privilege==admin but a real place,
         so they should see ONLY their own site — not all centres."""
-        return flask_session.get("login_place") == "admin"
+        return (flask_session.get("login_place") == "admin"
+                and flask_session.get("privilege") != "supervisor")
 
     def is_site_admin(self):
         """True for site-level admins who can do admin actions but only for their site."""
         return (flask_session.get("privilege") or "").lower() == "admin"
+
+    def is_supervisor(self):
+        """True for the global supervisor — view-only across all centres."""
+        return (flask_session.get("privilege") or "") == "supervisor"
+
+    def is_therapist(self):
+        """True for therapists — file clinical events, no device management."""
+        return (flask_session.get("privilege") or "") == "therapist"
+
+    def is_engineer(self):
+        """True for engineers — file device events, no clinical events."""
+        return (flask_session.get("privilege") or "") == "engineer"
+
+    def is_assessment_therapist(self):
+        """True for assessment therapists — separate assessment upload section only."""
+        return (flask_session.get("privilege") or "") == "assessment_therapist"
 
 
 current_session = _SessionProxy()

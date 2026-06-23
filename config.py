@@ -64,13 +64,24 @@ class Config:
     
     # Login credentials
     LOGIN_CREDENTIALS = {
-        "MP-HS-1001": {"place": "Manipal", "privilege": "user", "password": "manipal@123"},
-        "RP-HS-1002": {"place": "Ranipet", "privilege": "user", "password": "ranipet@123"},
-        "LD-HS-1003": {"place": "Ludhiana", "privilege": "user", "password": "ludhiana@123"},
-        "LAB-HS-DATA": {"place": "admin", "privilege": "admin", "password": "lab@123"},
-        "MP-HS-ADMIN": {"place": "Manipal", "privilege": "admin", "password": "manipaladmin@123"},
-        "RP-HS-ADMIN": {"place": "Ranipet", "privilege": "admin", "password": "ranipetadmin@123"},
-        "LD-HS-ADMIN": {"place": "Ludhiana", "privilege": "admin", "password": "ludhianaadmin@123"},
+        # Therapists (1 per site)
+        "MP-HS-1001":   {"place": "Manipal",  "privilege": "therapist",           "password": "manipal@123"},
+        "RP-HS-1002":   {"place": "Ranipet",  "privilege": "therapist",           "password": "ranipet@123"},
+        "LD-HS-1003":   {"place": "Ludhiana", "privilege": "therapist",           "password": "ludhiana@123"},
+        # Engineers (1 per site)
+        "MP-HS-ENG":    {"place": "Manipal",  "privilege": "engineer",            "password": "manipaleng@123"},
+        "RP-HS-ENG":    {"place": "Ranipet",  "privilege": "engineer",            "password": "ranipeteng@123"},
+        "LD-HS-ENG":    {"place": "Ludhiana", "privilege": "engineer",            "password": "ludhianaeng@123"},
+        # Site Admins (1 per site)
+        "MP-HS-ADMIN":  {"place": "Manipal",  "privilege": "admin",               "password": "manipaladmin@123"},
+        "RP-HS-ADMIN":  {"place": "Ranipet",  "privilege": "admin",               "password": "ranipetadmin@123"},
+        "LD-HS-ADMIN":  {"place": "Ludhiana", "privilege": "admin",               "password": "ludhianaadmin@123"},
+        # Overall Supervisor (global view-only across all centres)
+        "LAB-HS-DATA":  {"place": "admin",    "privilege": "supervisor",          "password": "lab@123"},
+        # Assessment Therapists (structure only — not yet implemented)
+        "MP-HS-ASSESS": {"place": "Manipal",  "privilege": "assessment_therapist","password": "manipalassess@123"},
+        "RP-HS-ASSESS": {"place": "Ranipet",  "privilege": "assessment_therapist","password": "ranipetassess@123"},
+        "LD-HS-ASSESS": {"place": "Ludhiana", "privilege": "assessment_therapist","password": "ludhianaassess@123"},
     }
     
     # Exercise Library

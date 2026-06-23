@@ -82,7 +82,23 @@ def devices():
     from flask import session as flask_session
     if not flask_session.get('login_place'):
         return redirect(url_for('login'))
+    privilege = flask_session.get('privilege', '')
+    if privilege in ('therapist', 'assessment_therapist'):
+        return redirect(url_for('index'))
     return render_template('devices.html', active_page='devices')
+
+
+@app.route('/assessment')
+def assessment():
+    """Placeholder for the Assessment Therapist section (not yet implemented)."""
+    from flask import session as flask_session
+    if not flask_session.get('login_place'):
+        return redirect(url_for('login'))
+    privilege = flask_session.get('privilege', '')
+    if privilege != 'assessment_therapist':
+        return redirect(url_for('index'))
+    return render_template('assessment_placeholder.html')
+
 
 if __name__ == '__main__':
     # Ensure necessary directories exist
