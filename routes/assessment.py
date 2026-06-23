@@ -5,7 +5,7 @@ from pathlib import Path
 from datetime import datetime
 import os
 
-from utils.data_access import get_patients_for_user, read_patient_meta, write_patient_meta, get_hospital_folder
+from utils.data_access import get_patients_for_user, read_patient_meta, write_patient_meta, get_hospital_folder, get_patients_path
 from config import Config
 
 bp = Blueprint('assessment', __name__, url_prefix='/assessment-api')
@@ -23,7 +23,7 @@ def _is_assessment_therapist():
 
 def _get_assessment_pdf_path(folder, homer_id, assess_type):
     """Full path to assessment PDF file in Assessment Documents folder."""
-    return Path(folder) / 'patients' / homer_id / 'Assessment Documents' / f'{homer_id}_{assess_type.upper()}.pdf'
+    return get_patients_path(folder) / homer_id / 'Assessment Documents' / f'{homer_id}_{assess_type.upper()}.pdf'
 
 
 @bp.route('/patients', methods=['GET'])
