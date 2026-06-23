@@ -457,6 +457,19 @@ function renderOverview(p) {
     groupEl.className = `text-sm font-semibold ${GROUP_CLASS[p.group] || 'text-slate-800'}`;
   }
 
+  // VCG Group (experimental patients only)
+  const vcgGroupRow = document.getElementById('info-vcg-group-row');
+  const vcgGroupEl = document.getElementById('info-vcg-group');
+  if (p.group === 'experimental') {
+    if (vcgGroupRow) vcgGroupRow.classList.remove('hidden');
+    if (vcgGroupEl) {
+      const vcgMap = { 'vcg2': 'VCG 2', 'vcg3': 'VCG 3', 'vcg4_5': 'VCG 4–5' };
+      vcgGroupEl.textContent = p.vcgGroup ? vcgMap[p.vcgGroup] || p.vcgGroup : '—';
+    }
+  } else {
+    if (vcgGroupRow) vcgGroupRow.classList.add('hidden');
+  }
+
   const statusEl = document.getElementById('info-status');
   if (statusEl) {
     const label = STATUS_LABEL[p.status] || p.status;
@@ -5270,7 +5283,7 @@ async function openActivationModal(evId) {
   const isExperimental = patientData?.group === 'experimental';
   const vcgRow = document.getElementById('activation-vcg-group-row');
   const vcgSel = document.getElementById('activation-vcg-group');
-  if (vcgRow) vcgRow.classList.toggle('hidden', !isControl);
+  if (vcgRow) vcgRow.classList.toggle('hidden', !(isControl || isExperimental));
   if (vcgSel) vcgSel.value = '';
 
   // Outcome group visibility (group, watch-assigned, training-ended cutoff)
@@ -5344,7 +5357,7 @@ async function submitActivation() {
   }
 
   const body = { activationDate: sessionStart, sessionStart, sessionEnd, notes };
-  if (patientData?.group === 'control') {
+  if (patientData?.group === 'control' || patientData?.group === 'experimental') {
     const vcgGroup = document.getElementById('activation-vcg-group').value;
     if (!vcgGroup) { setError('activation-error', 'Please select a VCG group.'); return; }
     body.vcgGroup = vcgGroup;
