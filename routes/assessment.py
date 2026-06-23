@@ -149,7 +149,7 @@ def api_preview_assessment_pdf(homer_id, assess_type):
 
     if Config.USE_S3:
         # Download from S3
-        s3_key = f'{login_place}/patients/{homer_id}/assessments/{assess_type}_assessment.pdf'
+        s3_key = f'{login_place}/patients/{homer_id}/Assessment Documents/{homer_id}_{assess_type.upper()}.pdf'
         try:
             response = Config.s3_client.get_object(Bucket=Config.S3_BUCKET, Key=s3_key)
             file_content = response['Body'].read()
