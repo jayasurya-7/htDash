@@ -8887,10 +8887,10 @@ def _get_field_labels(language: str) -> dict:
         },
         'tamil': {
             'description': 'விளக்கம்',
-            'dosage': 'தீவிரம்',
+            'dosage': 'டோஸ்',
             'items': 'தேவையான பொருட்கள்',
-            'repetitions': 'மறுநிகழ்வுகள்',
-            'sets': 'தொகுப்புகள்',
+            'repetitions': 'முறை',
+            'sets': 'சுற்றுகள்',
             'adl_section': 'நாளாந்த வாழ்க்கை நடவடிக்கைகள் (ADL)',
             'vcg_section': 'மெய்ம் ஈர்ப்பு மையம் (VCG)',
             'scan_video': 'வீடியோவுக்கு ஸ்கேன் செய்யவும்',
@@ -8966,7 +8966,7 @@ def _build_dosage_from_prescription(prescribed: dict, labels: dict) -> str:
     """Build a dosage string from actual prescription values (sets and reps).
 
     Returns a string like "3 sets × 10 reps" or "3 சுற்றுகள் × 10 முறை" using
-    language-specific labels from translations.
+    language-specific labels from _get_field_labels.
     If values are missing, returns empty string.
     """
     reps = prescribed.get('repetitions')
@@ -8977,7 +8977,7 @@ def _build_dosage_from_prescription(prescribed: dict, labels: dict) -> str:
 
     # Build in the format: "N sets × M reps"
     sets_label = labels.get('sets', 'sets')
-    reps_label = labels.get('reps', 'reps')
+    reps_label = labels.get('repetitions', 'repetitions')  # Use 'repetitions' key
 
     if sets is not None and reps is not None:
         return f"{sets} {sets_label} × {reps} {reps_label}"
