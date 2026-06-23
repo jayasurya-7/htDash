@@ -185,7 +185,7 @@ def _outside_assessment_window(patient, pid, date_str):
     return False
 
 
-_CALL_MODES = ('audio', 'video')
+_CALL_MODES = ('audio', 'video', 'text')
 
 
 def _bad_outcome(no_issue, triggered_items):
@@ -203,10 +203,10 @@ def _bad_outcome(no_issue, triggered_items):
 
 def _bad_call_mode(value):
     """Call-mode gate. Returns (jsonify(error), 400) when value is missing or
-    outside {"audio","video"}, else None. Applied to every call route
+    outside {"audio","video","text"}, else None. Applied to every call route
     (patient_call, followup_call_d07, followup_call_d21)."""
     if value not in _CALL_MODES:
-        return (jsonify({'error': 'Call mode is required and must be "audio" or "video".'}), 400)
+        return (jsonify({'error': 'Call mode is required and must be "audio", "video", or "text".'}), 400)
     return None
 
 
