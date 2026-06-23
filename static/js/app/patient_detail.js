@@ -4861,6 +4861,11 @@ const _ENGINEER_STUBS = new Set([
   'other_device_issue_call', 'other_device_issue_visit', 'device_return',
 ]);
 
+// Stubs that only admin can file. Therapists can see but not open them.
+const _ADMIN_ONLY_STUBS = new Set([
+  'discontinuation',
+]);
+
 function patientEventRow(ev) {
   const sched = ev.scheduled_date;
   const onHold = !!ev.on_hold;
@@ -4932,10 +4937,10 @@ function patientEventRow(ev) {
   const discontinuedBlocks = _patientDiscontinued && !_DISCONTINUED_VISIBLE.has(ev.protocol_event_id);
 
   // Role-based stub gating: therapists cannot file engineer stubs and vice versa;
-  // supervisors cannot file any stub.
+  // supervisors cannot file any stub; only admin can file certain stubs.
   const _priv = (currentUser && currentUser.privilege) || '';
   const roleBlocked = _priv === 'supervisor'
-    || (_priv === 'therapist' && _ENGINEER_STUBS.has(ev.protocol_event_id))
+    || (_priv === 'therapist' && (_ENGINEER_STUBS.has(ev.protocol_event_id) || _ADMIN_ONLY_STUBS.has(ev.protocol_event_id)))
     || (_priv === 'engineer'  && !_ENGINEER_STUBS.has(ev.protocol_event_id));
 
   // Assessment events (A1/A2) clickable only when overdue or in active window (not upcoming).
