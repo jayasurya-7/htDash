@@ -228,6 +228,7 @@ The script shifts the patient's entire timeline by N days (positive or negative)
     }
     ```
     Comparisons run at **datetime precision** (minute). `not_before` resolves to the **latest** of all defined values (strictest floor); `not_after` resolves to the **earliest** (strictest ceiling); references that resolve to None are ignored.
+  - **Per-field date rules** — Some events have multiple date fields with different bounds (e.g., `watch_record` has `sync_datetime` starting from A0 date, `worn_datetime` from activation date). Define per-field rules under `fields: { field_name: { ... } }` in the event rule. Client passes `data-field-name="field_name"` on the input; server and client both resolve field-specific bounds.
   - **DSL tokens** (resolved by both server and client):
     - `"<field>"` — patient field on the patient record (e.g. `enrollDate`, `activationDate`). Empty/missing → ignored.
     - `"<field> + Nd"` / `"<field> - Nd"` — patient field offset by N calendar days.

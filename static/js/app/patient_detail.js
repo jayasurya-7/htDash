@@ -290,9 +290,11 @@ function _ruleForEvent(eventId, group) {
   return spec;
 }
 
-function _resolveDateBounds(eventId, ruleKind = 'completion') {
+function _resolveDateBounds(eventId, ruleKind = 'completion', fieldName = null) {
   // Returns {min: Date|null, max: Date|null} for the given event_id (or the
   // appropriate default rule when no per-event override exists).
+  // If `fieldName` is provided and the event has a fields.<fieldName> rule,
+  // use that per-field rule instead of the event's top-level rule.
   // `ruleKind === 'scheduling'` is used for future-date inputs marked with
   // data-date-rule="scheduling" — falls back to default_scheduling_rule
   // (typically not_before: today) instead of default_completion_rule.
@@ -301,7 +303,16 @@ function _resolveDateBounds(eventId, ruleKind = 'completion') {
   const defaultRule = ruleKind === 'scheduling'
     ? rules.default_scheduling_rule
     : rules.default_completion_rule;
-  const rule = _ruleForEvent(eventId, patient.group) || defaultRule || {};
+  let rule = _ruleForEvent(eventId, patient.group) || defaultRule || {};
+
+  // Check for per-field rule override
+  if (fieldName && eventId) {
+    const baseRule = _ruleForEvent(eventId, patient.group);
+    if (baseRule && baseRule.fields && baseRule.fields[fieldName]) {
+      rule = baseRule.fields[fieldName];
+    }
+  }
+
   const nb = (rule.not_before || []).map(t => _resolveToken(t, patient, _completeEventsCache, 'floor')).filter(Boolean);
   const na = (rule.not_after  || []).map(t => _resolveToken(t, patient, _completeEventsCache, 'ceiling')).filter(Boolean);
   return {
@@ -329,7 +340,8 @@ function _applyDateBounds(modalElOrId, errorId) {
   modalEl.querySelectorAll('input[type="date"], input[type="datetime-local"]').forEach(input => {
     const ruleKind = input.dataset.dateRule === 'scheduling' ? 'scheduling' : 'completion';
     const isDateTime = input.type === 'datetime-local';
-    const { min: minDt, max: maxDt } = _resolveDateBounds(input.dataset.eventId || null, ruleKind);
+    const fieldName = input.dataset.fieldName || null;  // Per-field rule support
+    const { min: minDt, max: maxDt } = _resolveDateBounds(input.dataset.eventId || null, ruleKind, fieldName);
 
     if (!input.min && minDt) input.min = _toInputValue(minDt, isDateTime);
     if (!input.max && maxDt) input.max = _toInputValue(maxDt, isDateTime);

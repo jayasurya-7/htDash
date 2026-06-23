@@ -143,11 +143,15 @@ def _rule_for_event(event_id: Optional[str], group: Optional[str]) -> Optional[d
 def resolve_bounds(patient: dict,
                    event_id: Optional[str] = None,
                    events_data: Optional[dict] = None,
-                   rule_kind: str = 'completion'
+                   rule_kind: str = 'completion',
+                   field_name: Optional[str] = None
                    ) -> Tuple[Optional[datetime], Optional[datetime]]:
     """Return (min_dt, max_dt) for the given event (or the default rule when
     `event_id` is None or has no override). References that resolve to None are
     dropped; bounds reduce to the strictest defined values.
+
+    If `field_name` is provided and the event has a `fields.<field_name>` rule,
+    use that per-field rule instead of the event's top-level rule.
 
     `rule_kind`:
       - `'completion'` (default): falls back to `default_completion_rule` for
@@ -161,6 +165,14 @@ def resolve_bounds(patient: dict,
     group = (patient or {}).get('group')
     default_key = 'default_scheduling_rule' if rule_kind == 'scheduling' else 'default_completion_rule'
     rule = _rule_for_event(event_id, group) or rules.get(default_key) or {}
+
+    # Check for per-field rule override
+    if field_name and event_id:
+        base_rule = _rule_for_event(event_id, group)
+        if base_rule and isinstance(base_rule, dict) and 'fields' in base_rule:
+            field_rule = base_rule['fields'].get(field_name)
+            if field_rule:
+                rule = field_rule
 
     nb_tokens = rule.get('not_before') or []
     na_tokens = rule.get('not_after')  or []

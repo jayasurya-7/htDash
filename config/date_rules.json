@@ -48,7 +48,17 @@
     },
     "watch_record": {
       "not_before": ["a0CompletionDate"],
-      "not_after":  ["today"]
+      "not_after":  ["today"],
+      "fields": {
+        "sync_datetime": {
+          "not_before": ["a0CompletionDate"],
+          "not_after":  ["today"]
+        },
+        "worn_datetime": {
+          "not_before": ["activationDate"],
+          "not_after":  ["today"]
+        }
+      }
     },
     "adverse_event_followup": {
       "not_before": ["event:adverse_event"],
