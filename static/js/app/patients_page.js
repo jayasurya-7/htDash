@@ -211,7 +211,7 @@ function renderCard(p) {
                      class="px-3 py-2 bg-orange-500 hover:bg-orange-600 active:bg-orange-700 text-white text-sm font-medium rounded-xl shadow-md hover:shadow-lg cursor-pointer transition-all duration-200 flex items-center gap-1.5">
                <i class="fas fa-user-slash text-xs"></i>Pre-DC
              </button>
-             <button onclick="showAssignGroupModal('${p.homerID}')"
+             <button onclick="showAssignGroupModal('${p.homerID}', '${p.enrollDate}')"
                      class="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 active:bg-emerald-700 text-white text-sm font-medium rounded-xl shadow-md hover:shadow-lg cursor-pointer transition-all duration-200 flex items-center gap-2">
                <i class="fas fa-tags text-xs"></i>Assign
              </button>
@@ -253,15 +253,23 @@ function renderCard(p) {
 
 let _assignGroupHomerID = null;
 
-function showAssignGroupModal(homerID) {
+function showAssignGroupModal(homerID, enrollDate) {
   _assignGroupHomerID = homerID;
   document.getElementById('assign-group-homer-id').textContent = homerID;
   document.getElementById('assign-group-value').value = '';
   const a0Input = document.getElementById('assign-group-a0-date');
   a0Input.value = '';
-  // Set max to current local datetime (YYYY-MM-DDTHH:MM) to block future selection
+
   const now = new Date();
   const pad = n => String(n).padStart(2, '0');
+
+  // Set min to enrollDate (A0 assessment cannot be before enrollment)
+  if (enrollDate) {
+    const ed = new Date(enrollDate);
+    a0Input.min = `${ed.getFullYear()}-${pad(ed.getMonth()+1)}-${pad(ed.getDate())}T00:00`;
+  }
+
+  // Set max to current local datetime (YYYY-MM-DDTHH:MM) to block future selection
   a0Input.max = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`;
   document.getElementById('assign-group-error').classList.add('hidden');
   ['experimental', 'control'].forEach(g => {
