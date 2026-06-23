@@ -5,7 +5,7 @@ from pathlib import Path
 from datetime import datetime
 import os
 
-from utils.data_access import get_patients_for_user, read_patient_meta, write_patient_meta
+from utils.data_access import get_patients_for_user, read_patient_meta, write_patient_meta, get_hospital_folder
 from config import Config
 
 bp = Blueprint('assessment', __name__, url_prefix='/assessment-api')
@@ -22,8 +22,8 @@ def _is_assessment_therapist():
 
 
 def _get_assessment_pdf_path(folder, homer_id, assess_type):
-    """Full path to assessment PDF file."""
-    return Path(folder) / 'patients' / homer_id / 'assessments' / f'{assess_type}_assessment.pdf'
+    """Full path to assessment PDF file in Assessment Documents folder."""
+    return Path(folder) / 'patients' / homer_id / 'Assessment Documents' / f'{homer_id}_{assess_type.upper()}.pdf'
 
 
 @bp.route('/patients', methods=['GET'])
@@ -67,7 +67,7 @@ def api_upload_assessment_pdf(homer_id, assess_type):
         return jsonify({'error': 'Not authenticated'}), 401
 
     # Read patient to check completion and prior upload
-    folder = Config.get_patient_folder(login_place)
+    folder = get_hospital_folder(login_place)
     patient = read_patient_meta(folder, homer_id)
     if not patient:
         return jsonify({'error': 'Patient not found'}), 404
@@ -105,7 +105,7 @@ def api_upload_assessment_pdf(homer_id, assess_type):
 
     if Config.USE_S3:
         # Upload to S3
-        s3_key = f'{login_place}/patients/{homer_id}/assessments/{assess_type}_assessment.pdf'
+        s3_key = f'{login_place}/patients/{homer_id}/Assessment Documents/{homer_id}_{assess_type.upper()}.pdf'
         try:
             Config.s3_client.put_object(
                 Bucket=Config.S3_BUCKET,
@@ -144,7 +144,7 @@ def api_preview_assessment_pdf(homer_id, assess_type):
     if not login_place:
         return jsonify({'error': 'Not authenticated'}), 401
 
-    folder = Config.get_patient_folder(login_place)
+    folder = get_hospital_folder(login_place)
     pdf_path = _get_assessment_pdf_path(folder, homer_id, assess_type)
 
     if Config.USE_S3:
