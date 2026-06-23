@@ -1059,6 +1059,12 @@ function openDiscontinueModal(ev) {
 }
 
 async function _initiateDiscontinuation() {
+  // Defensive check: only admin can discontinue
+  if (!isAdmin) {
+    alert('Only administrators can discontinue patients.');
+    return;
+  }
+
   const confirmed1 = window.confirm(
     'Discontinuing a patient is a major and irreversible event.\nAre you sure you want to proceed?'
   );
