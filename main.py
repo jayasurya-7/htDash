@@ -67,6 +67,9 @@ def add_header(response):
 def index():
     if not flask_session.get('login_place'):
         return redirect(url_for('login'))
+    privilege = flask_session.get('privilege', '')
+    if privilege == 'assessment_therapist':
+        return redirect(url_for('assessment'))
     return render_template('dashboard.html', active_page='dashboard')
 
 @app.route('/login')
@@ -77,6 +80,9 @@ def login():
 
 @app.route('/dashboard')
 def dashboard():
+    privilege = flask_session.get('privilege', '')
+    if privilege == 'assessment_therapist':
+        return redirect(url_for('assessment'))
     return redirect(url_for('index'))
 
 @app.route('/devices')
