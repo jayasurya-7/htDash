@@ -8,16 +8,17 @@ from routes.dashboard import bp as dashboard_bp
 from routes.user_management import bp as user_management_bp
 from routes.device_data import bp as device_data_bp
 from routes.charts import bp as charts_bp
-from routes.exercises import bp as exercises_bp  
-from routes.adl_exercises import bp as adl_bp  
-from routes.exercise_timing import bp as timing_bp 
-from routes.exit_questionnaire import bp as exit_bp  
+from routes.exercises import bp as exercises_bp
+from routes.adl_exercises import bp as adl_bp
+from routes.exercise_timing import bp as timing_bp
+from routes.exit_questionnaire import bp as exit_bp
 from routes.call_logs import bp as call_logs_bp
 from routes.patient_events import bp as patient_events_bp
 from routes.notes import bp as notes_bp
 from routes.devices import bp as devices_bp
-from routes.sim_cards import bp as sim_cards_bp 
+from routes.sim_cards import bp as sim_cards_bp
 from routes.time_records import bp as time_records_bp
+from routes.assessment import bp as assessment_bp
 
 app = Flask(__name__)
 app.config.from_object(Config)
@@ -31,16 +32,17 @@ app.register_blueprint(dashboard_bp)
 app.register_blueprint(user_management_bp)
 app.register_blueprint(device_data_bp)
 app.register_blueprint(charts_bp)
-app.register_blueprint(exercises_bp) 
-app.register_blueprint(adl_bp, url_prefix='/adl') 
-app.register_blueprint(timing_bp, url_prefix='/timing') 
-app.register_blueprint(exit_bp, url_prefix='/exit') 
+app.register_blueprint(exercises_bp)
+app.register_blueprint(adl_bp, url_prefix='/adl')
+app.register_blueprint(timing_bp, url_prefix='/timing')
+app.register_blueprint(exit_bp, url_prefix='/exit')
 app.register_blueprint(call_logs_bp)
 app.register_blueprint(patient_events_bp, url_prefix='/patient_events')
 app.register_blueprint(notes_bp)
 app.register_blueprint(devices_bp, url_prefix='/devices')
 app.register_blueprint(sim_cards_bp, url_prefix='/sim_cards')
 app.register_blueprint(time_records_bp, url_prefix='/time_records')
+app.register_blueprint(assessment_bp)
 
 import time as _time
 _JS_VERSION = str(int(_time.time()))  # changes on every server restart
@@ -90,14 +92,14 @@ def devices():
 
 @app.route('/assessment')
 def assessment():
-    """Placeholder for the Assessment Therapist section (not yet implemented)."""
+    """Assessment Therapist PDF upload section."""
     from flask import session as flask_session
     if not flask_session.get('login_place'):
         return redirect(url_for('login'))
     privilege = flask_session.get('privilege', '')
     if privilege != 'assessment_therapist':
         return redirect(url_for('index'))
-    return render_template('assessment_placeholder.html')
+    return render_template('assessment.html')
 
 
 if __name__ == '__main__':
