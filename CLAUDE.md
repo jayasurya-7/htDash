@@ -1793,6 +1793,33 @@ filed_at = _now_str()  # Returns timestamp in IST
 - ✅ Consistent timestamp generation across all routes
 - ✅ No ambiguity when timestamps stored and retrieved
 
+### A0 Assessment Date Assignment Validation ✅ (June 23, 2026)
+
+**Feature:** When assigning a patient to experimental/control group, the A0 completion date input now validates against the patient's enrollment date.
+
+**Details:**
+- **Min bound:** `enrollDate` — A0 assessment cannot be dated before enrollment
+- **Max bound:** Today — Cannot select future dates
+- The browser's HTML5 `datetime-local` input enforces these bounds:
+  - Datepicker prevents selecting dates outside the range
+  - Keyboard entry rejects out-of-bounds dates
+
+**User Flow:**
+1. Admin clicks "Assign" on an unassigned patient
+2. Assign Group modal opens
+3. A0 Assessment Date input has min = patient's enrollDate, max = today
+4. Admin selects group and date
+5. Click confirm → patient assigned with A0 date set
+
+**Files Modified:**
+- `static/js/app/patients_page.js` — Updated `showAssignGroupModal()` to accept and apply `enrollDate` parameter; updated button click to pass enrollDate from patient object
+
+**Testing:**
+- ✅ A0 date input has min/max attributes set correctly
+- ✅ Datepicker prevents selecting before enrollDate
+- ✅ Datepicker prevents selecting after today
+- ✅ Keyboard validation matches HTML5 bounds
+
 ---
 
 logconvo-project: htDash
