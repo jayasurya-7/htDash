@@ -139,10 +139,19 @@ def _next_alias(bucket_list: list, role_letter: str) -> str:
 
 @bp.route('/api/patients/<homer_id>/notes', methods=['GET'])
 def api_list_notes(homer_id):
-    """Free notes visible to the caller, newest first. admin → all buckets; else own."""
+    """Free notes visible to the caller, newest first.
+    - Assessment therapist: no access (forbidden)
+    - Admin: sees all notes from all roles
+    - Therapist/Engineer: see all notes from all roles
+    """
     if not flask_session.get('login_place'):
         return jsonify({'error': 'Not authenticated'}), 401
     privilege = flask_session.get('privilege', '')
+
+    # Assessment therapist cannot access notes
+    if privilege == 'assessment_therapist':
+        return jsonify({'error': 'Forbidden'}), 403
+
     if _bucket_for(privilege) is None:
         return jsonify({'error': 'Forbidden'}), 403
 
@@ -152,8 +161,8 @@ def api_list_notes(homer_id):
 
     notes_data = read_patient_notes(folder, homer_id)
     is_admin = privilege == 'admin'
-    notes = ([n for bucket in notes_data.values() for n in bucket] if is_admin
-             else list(notes_data.get(privilege, [])))
+    # All roles (admin, therapist, engineer) see all notes
+    notes = [n for bucket in notes_data.values() for n in bucket]
     notes.sort(key=lambda n: n.get('created_at') or '', reverse=True)
     return jsonify({'notes': notes, 'is_admin': is_admin})
 
@@ -237,10 +246,18 @@ def _next_event_note_alias(events_data: dict, role: str) -> str:
 
 @bp.route('/api/patients/<homer_id>/events/<event_id>/notes', methods=['GET'])
 def api_list_event_notes(homer_id, event_id):
-    """Retrospective notes for one event, role-filtered, newest first."""
+    """Retrospective notes for one event, newest first.
+    - Assessment therapist: no access (forbidden)
+    - All other roles: see all notes from all roles
+    """
     if not flask_session.get('login_place'):
         return jsonify({'error': 'Not authenticated'}), 401
     privilege = flask_session.get('privilege', '')
+
+    # Assessment therapist cannot access notes
+    if privilege == 'assessment_therapist':
+        return jsonify({'error': 'Forbidden'}), 403
+
     if _bucket_for(privilege) is None:
         return jsonify({'error': 'Forbidden'}), 403
 
@@ -255,8 +272,8 @@ def api_list_event_notes(homer_id, event_id):
 
     buckets = entry.get('event_notes') or {}
     is_admin = privilege == 'admin'
-    notes = ([n for b in buckets.values() for n in b] if is_admin
-             else list(buckets.get(privilege, [])))
+    # All roles (admin, therapist, engineer) see all notes
+    notes = [n for b in buckets.values() for n in b]
     notes.sort(key=lambda n: n.get('created_at') or '', reverse=True)
     return jsonify({'notes': notes, 'is_admin': is_admin})
 
