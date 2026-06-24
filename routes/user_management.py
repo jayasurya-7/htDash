@@ -256,7 +256,14 @@ def patient_detail_page(homer_id):
 def api_patient_detail(homer_id):
     if not flask_session.get('login_place'):
         return jsonify({'error': 'Not authenticated'}), 401
-    folder = get_hospital_folder(flask_session['login_place'])
+
+    # Supervisor is global, use find_patient_folder to search all hospitals
+    # Site users use get_hospital_folder for their specific site
+    if flask_session.get('privilege') == 'supervisor':
+        folder = find_patient_folder(flask_session['login_place'], homer_id)
+    else:
+        folder = get_hospital_folder(flask_session['login_place'])
+
     if not folder:
         return jsonify({'error': 'Cannot determine hospital folder'}), 400
     patient = read_patient_meta(folder, homer_id)
