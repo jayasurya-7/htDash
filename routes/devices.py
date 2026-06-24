@@ -43,6 +43,130 @@ def _block_supervisor_writes():
         if flask_session.get('privilege') == 'supervisor':
             return jsonify({'error': 'View-only account — no modifications allowed.'}), 403
 
+def _get_supervisor_device_inventory():
+    """Return read-only device view for all 3 hospitals (supervisor only)."""
+    from utils.data_access import get_patients_for_user
+    result_by_hospital = {}
+
+    for hospital in Config.HOSPITALS:
+        hospital_result = {}
+
+        # Get patients from this hospital
+        patients = get_patients_for_user(hospital)
+        patient_map = {p['homerID']: p for p in patients}
+
+        # Read devices from this hospital (no auto-reset for supervisor read-only view)
+        folder = os.path.join(Config.DATA_ROOT, hospital)
+
+        for dtype in ('pluto', 'mars'):
+            hospital_result[dtype] = []
+            try:
+                inventory = read_device_inventory(folder, dtype)
+                assignments = read_device_assignments(folder, dtype)
+                for d in inventory:
+                    assigned = None
+                    for a in assignments:
+                        if a.get('device_id') == d['id'] and a.get('returned_date') is None:
+                            homer_id = a.get('patient_id') or a.get('homer_id')
+                            p = patient_map.get(homer_id, {})
+                            assigned = {'homerID': homer_id, 'hospitalID': p.get('hospitalID')}
+                            break
+                    hospital_result[dtype].append({
+                        'id': d['id'],
+                        'serial': d.get('serial', ''),
+                        'clinic_only': d.get('clinic_only', False),
+                        'faulty': d.get('faulty', False),
+                        'has_issue': d.get('has_issue', False),
+                        'assigned_to': assigned,
+                    })
+            except Exception:
+                pass
+
+        # AG Watch
+        hospital_result['agwatch'] = []
+        try:
+            inventory = read_device_inventory(folder, 'agwatch')
+            assignments = read_device_assignments(folder, 'agwatch')
+            for d in inventory:
+                assigned = None
+                for a in assignments:
+                    if a.get('device_id') == d['id'] and a.get('returned_date') is None:
+                        homer_id = a.get('patient_id') or a.get('homer_id')
+                        p = patient_map.get(homer_id, {})
+                        assigned = {
+                            'homerID': homer_id,
+                            'hospitalID': p.get('hospitalID'),
+                            'limb': a.get('limb')
+                        }
+                        break
+                hospital_result['agwatch'].append({
+                    'id': d['id'],
+                    'serial': d.get('serial', ''),
+                    'has_issue': d.get('has_issue', False),
+                    'lost': d.get('lost_date') is not None,
+                    'assigned_to': assigned,
+                })
+        except Exception:
+            pass
+
+        # Modems
+        hospital_result['modems'] = []
+        try:
+            inventory = read_device_inventory(folder, 'modems')
+            assignments = read_device_assignments(folder, 'modems')
+            all_sims = read_sims(folder)
+            sim_map = {s['id']: s for s in all_sims}
+            for d in inventory:
+                assigned = None
+                for a in assignments:
+                    if a.get('device_id') == d['id'] and a.get('returned_date') is None:
+                        homer_id = a.get('patient_id') or a.get('homer_id')
+                        p = patient_map.get(homer_id, {})
+                        assigned = {'homerID': homer_id, 'hospitalID': p.get('hospitalID')}
+                        break
+                sim_id = d.get('sim_id')
+                sim_info = None
+                if sim_id and sim_id in sim_map:
+                    s = sim_map[sim_id]
+                    sim_info = {'id': sim_id, 'phoneNumber': s.get('phoneNumber')}
+                hospital_result['modems'].append({
+                    'id': d['id'],
+                    'serial': d.get('serial', ''),
+                    'sim_id': sim_id,
+                    'sim_info': sim_info,
+                    'has_issue': d.get('has_issue', False),
+                    'assigned_to': assigned,
+                })
+        except Exception:
+            pass
+
+        # Laptops
+        hospital_result['laptops'] = []
+        try:
+            inventory = read_device_inventory(folder, 'laptops')
+            assignments = read_device_assignments(folder, 'laptops')
+            for d in inventory:
+                assigned = None
+                for a in assignments:
+                    if a.get('device_id') == d['id'] and a.get('returned_date') is None:
+                        homer_id = a.get('patient_id') or a.get('homer_id')
+                        p = patient_map.get(homer_id, {})
+                        assigned = {'homerID': homer_id, 'hospitalID': p.get('hospitalID')}
+                        break
+                hospital_result['laptops'].append({
+                    'id': d['id'],
+                    'serial': d.get('serial', ''),
+                    'has_issue': d.get('has_issue', False),
+                    'assigned_to': assigned,
+                })
+        except Exception:
+            pass
+
+        result_by_hospital[hospital] = hospital_result
+
+    return jsonify({'by_hospital': result_by_hospital, 'is_supervisor': True})
+
+
 def get_devices_file_path(place=None):
     if not place:
         place = current_session.login_place
@@ -554,9 +678,9 @@ def devices_page():
     if not flask_session.get('login_place'):
         from flask import redirect, url_for
         return redirect(url_for('login'))
-    # Devices page visible only to engineers and admins
-    if flask_session.get('privilege') not in ('admin', 'engineer'):
-        return jsonify({'error': 'Forbidden — device management requires engineer or admin privilege'}), 403
+    # Devices page visible to engineers, admins, and supervisors (read-only for supervisor)
+    if flask_session.get('privilege') not in ('admin', 'engineer', 'supervisor'):
+        return jsonify({'error': 'Forbidden'}), 403
     return render_template('devices.html', active_page='devices')
 
 
@@ -564,13 +688,24 @@ def devices_page():
 
 @bp.route('/api/inventory', methods=['GET'])
 def api_device_inventory():
-    """Return the full device inventory with current assignment info for the user's site."""
+    """Return the full device inventory with current assignment info.
+    - Admin/Engineer: their specific site
+    - Supervisor: all 3 sites (read-only view, no management)
+    """
     if not flask_session.get('login_place'):
         return jsonify({'error': 'Not authenticated'}), 401
-    # Device inventory visible only to engineers and admins
-    if flask_session.get('privilege') not in ('admin', 'engineer'):
-        return jsonify({'error': 'Forbidden — device management requires engineer or admin privilege'}), 403
 
+    privilege = flask_session.get('privilege', '')
+
+    # Device inventory visible to engineers, admins, and supervisors (read-only)
+    if privilege not in ('admin', 'engineer', 'supervisor'):
+        return jsonify({'error': 'Forbidden'}), 403
+
+    # Supervisor gets read-only view of all 3 hospitals
+    if privilege == 'supervisor':
+        return _get_supervisor_device_inventory()
+
+    # Admin/Engineer get management view of their site
     folder = get_hospital_folder(flask_session['login_place'])
     if not folder:
         return jsonify({'error': 'Cannot determine hospital folder'}), 400
@@ -1398,9 +1533,14 @@ def api_device_events():
     """Fetch device events. ?type=<type> for all devices of a type, or add &device_id=<id> for one."""
     if not flask_session.get('login_place'):
         return jsonify({'error': 'Not authenticated'}), 401
-    # Device events visible only to engineers and admins
-    if flask_session.get('privilege') not in ('admin', 'engineer'):
-        return jsonify({'error': 'Forbidden — device management requires engineer or admin privilege'}), 403
+    # Device events visible to engineers, admins, and supervisors (read-only for supervisor)
+    privilege = flask_session.get('privilege', '')
+    if privilege not in ('admin', 'engineer', 'supervisor'):
+        return jsonify({'error': 'Forbidden'}), 403
+
+    # Supervisor cannot filter by specific device (global read-only view)
+    if privilege == 'supervisor':
+        return jsonify({'error': 'Supervisor view not yet implemented for device events'}), 501
 
     folder = get_hospital_folder(flask_session['login_place'])
     if not folder:
