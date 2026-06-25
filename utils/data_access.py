@@ -526,7 +526,7 @@ def mark_device_faulty(hospital_folder: str, device_type: str, device_id: str) -
 
 
 def mark_device_not_faulty(hospital_folder: str, device_type: str, device_id: str) -> None:
-    """Clear faulty flag on a device inventory entry (device declared repaired)."""
+    """Clear faulty/has_issue flags on a device inventory entry (device declared repaired)."""
     folder = _type_folder(device_type)
     if Config.USE_S3:
         key = f"{hospital_folder}/devices/{folder}/inventory.json"
@@ -535,6 +535,7 @@ def mark_device_not_faulty(hospital_folder: str, device_type: str, device_id: st
             for d in data.get('devices', []):
                 if d['id'] == device_id:
                     d.pop('faulty', None)
+                    d.pop('has_issue', None)
                     break
             s3_write_json(key, data)
         except Exception as e:
@@ -547,6 +548,7 @@ def mark_device_not_faulty(hospital_folder: str, device_type: str, device_id: st
         for d in data.get('devices', []):
             if d['id'] == device_id:
                 d.pop('faulty', None)
+                d.pop('has_issue', None)
                 break
         tmp = path.with_suffix('.tmp')
         with open(tmp, 'w', encoding='utf-8') as f:

@@ -4950,9 +4950,16 @@ function patientEventRow(ev) {
   const href      = clickable ? `href="?action=${ev.id}"` : '';
   const extra     = clickable ? 'cursor-pointer hover:shadow-md transition-shadow' : '';
 
-  const roleBlockedLabel = _priv === 'therapist' ? 'Engineer'
-                         : _priv === 'engineer'   ? 'Therapist'
-                         : 'View only';
+  let roleBlockedLabel = '';
+  if (_priv === 'therapist' && _ADMIN_ONLY_STUBS.has(ev.protocol_event_id)) {
+    roleBlockedLabel = 'Admin only';
+  } else if (_priv === 'therapist') {
+    roleBlockedLabel = 'Engineer only';
+  } else if (_priv === 'engineer') {
+    roleBlockedLabel = 'Therapist only';
+  } else if (_priv === 'supervisor') {
+    roleBlockedLabel = 'View only';
+  }
   const rowOpacity = roleBlocked ? 'opacity-60' : '';
   const nameColor  = roleBlocked ? 'text-slate-500' : 'text-slate-800';
 
@@ -4961,7 +4968,7 @@ function patientEventRow(ev) {
     ? `<div class="font-medium ${nameColor} text-sm truncate flex items-center gap-1"><i class="fas fa-lock text-slate-400 text-[10px]"></i>${ev.event_name}</div>`
     : `<div class="font-medium ${nameColor} text-sm truncate">${ev.event_name}</div>`;
   const rightLabel = roleBlocked
-    ? `<span class="text-xs font-medium text-slate-400 bg-slate-100 border border-slate-200 rounded-full px-2 py-0.5 whitespace-nowrap flex-shrink-0">${roleBlockedLabel} only</span>`
+    ? `<span class="text-xs font-medium text-slate-400 bg-slate-100 border border-slate-200 rounded-full px-2 py-0.5 whitespace-nowrap flex-shrink-0">${roleBlockedLabel}</span>`
     : blocked
     ? `<span class="text-xs font-semibold text-amber-600 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5 whitespace-nowrap flex-shrink-0">Needs: ${ev.blocked_by[0]}</span>`
     : onHold

@@ -28,13 +28,32 @@ async function loadDevicesPage() {
   try {
     const r = await fetch('/devices/api/inventory');
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    _inventory = await r.json();
+    const data = await r.json();
+
+    // Handle supervisor multi-hospital view
+    if (data.is_supervisor) {
+      _showSupervisorDeviceView(data.by_hospital);
+      // Clear loading state
+      const loadingEl = document.getElementById('devices-loading');
+      if (loadingEl) loadingEl.classList.add('hidden');
+      return;
+    }
+
+    // Normal admin/engineer single-hospital view
+    _inventory = data;
     _renderAll();
     _checkSimExpiry(_inventory.sims || []);
     _showButtonVisibility();
     _showLoading(false);
   } catch (e) {
-    _showError('Failed to load device data. ' + e.message);
+    const errorEl = document.getElementById('devices-error');
+    const loadingEl = document.getElementById('devices-loading');
+    if (loadingEl) loadingEl.classList.add('hidden');
+    if (errorEl) {
+      errorEl.classList.remove('hidden');
+      const msgEl = document.getElementById('devices-error-msg');
+      if (msgEl) msgEl.textContent = 'Failed to load device data. ' + e.message;
+    }
   }
 }
 
@@ -49,6 +68,146 @@ async function _refreshInventory() {
   } catch (e) {
     showToast('Failed to refresh device data.', 'error');
   }
+}
+
+function _showSupervisorDeviceView(byHospital) {
+  // Display devices grouped by all 3 hospitals for supervisor (read-only, detailed)
+  const container = document.getElementById('devices-content');
+  let html = '<div class="space-y-8 max-h-[calc(100vh-200px)] overflow-y-auto pr-4">';
+
+  for (const [hospital, inventory] of Object.entries(byHospital)) {
+    html += `<div class="border-l-4 border-blue-500 bg-slate-50 p-6 rounded-lg">
+      <h2 class="text-2xl font-bold text-slate-800 mb-6">${hospital.toUpperCase()}</h2>`;
+
+    // Pluto & Mars - detailed table
+    for (const dtype of ['pluto', 'mars']) {
+      const devices = inventory[dtype] || [];
+      if (devices.length === 0) continue;
+      html += `<div class="mb-6">
+        <h3 class="text-lg font-semibold text-slate-700 mb-3">${dtype.toUpperCase()}</h3>
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm border-collapse">
+            <thead>
+              <tr class="bg-slate-200 border border-slate-300">
+                <th class="px-3 py-2 text-left font-semibold">Device ID</th>
+                <th class="px-3 py-2 text-left font-semibold">Serial</th>
+                <th class="px-3 py-2 text-left font-semibold">Status</th>
+                <th class="px-3 py-2 text-left font-semibold">Assigned To</th>
+              </tr>
+            </thead>
+            <tbody>`;
+      for (const d of devices) {
+        const status = [];
+        if (d.faulty) status.push('<span class="text-red-600 font-semibold">Faulty</span>');
+        if (d.clinic_only) status.push('<span class="text-amber-600">Clinic Only</span>');
+        const assigned = d.assigned_to ? d.assigned_to.homerID : '<span class="text-slate-500">Unassigned</span>';
+        html += `<tr class="border border-slate-200 hover:bg-slate-50">
+          <td class="px-3 py-2"><strong>${d.id}</strong></td>
+          <td class="px-3 py-2">${d.serial || '-'}</td>
+          <td class="px-3 py-2">${status.length > 0 ? status.join(', ') : '<span class="text-green-600">OK</span>'}</td>
+          <td class="px-3 py-2">${assigned}</td>
+        </tr>`;
+      }
+      html += '</tbody></table></div></div>';
+    }
+
+    // Agwatch - detailed table
+    const agwatches = inventory.agwatch || [];
+    if (agwatches.length > 0) {
+      html += `<div class="mb-6">
+        <h3 class="text-lg font-semibold text-slate-700 mb-3">AGWATCH</h3>
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm border-collapse">
+            <thead>
+              <tr class="bg-slate-200 border border-slate-300">
+                <th class="px-3 py-2 text-left font-semibold">Device ID</th>
+                <th class="px-3 py-2 text-left font-semibold">Serial</th>
+                <th class="px-3 py-2 text-left font-semibold">Status</th>
+                <th class="px-3 py-2 text-left font-semibold">Assigned To</th>
+              </tr>
+            </thead>
+            <tbody>`;
+      for (const d of agwatches) {
+        const status = [];
+        if (d.lost) status.push('<span class="text-red-600 font-semibold">Lost</span>');
+        if (d.has_issue) status.push('<span class="text-red-600">Issue</span>');
+        const assigned = d.assigned_to ? `${d.assigned_to.homerID} (${d.assigned_to.limb})` : '<span class="text-slate-500">Unassigned</span>';
+        html += `<tr class="border border-slate-200 hover:bg-slate-50">
+          <td class="px-3 py-2"><strong>${d.id}</strong></td>
+          <td class="px-3 py-2">${d.serial || '-'}</td>
+          <td class="px-3 py-2">${status.length > 0 ? status.join(', ') : '<span class="text-green-600">OK</span>'}</td>
+          <td class="px-3 py-2">${assigned}</td>
+        </tr>`;
+      }
+      html += '</tbody></table></div></div>';
+    }
+
+    // Modems - detailed table
+    const modems = inventory.modems || [];
+    if (modems.length > 0) {
+      html += `<div class="mb-6">
+        <h3 class="text-lg font-semibold text-slate-700 mb-3">MODEMS</h3>
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm border-collapse">
+            <thead>
+              <tr class="bg-slate-200 border border-slate-300">
+                <th class="px-3 py-2 text-left font-semibold">Device ID</th>
+                <th class="px-3 py-2 text-left font-semibold">Serial</th>
+                <th class="px-3 py-2 text-left font-semibold">SIM</th>
+                <th class="px-3 py-2 text-left font-semibold">Status</th>
+                <th class="px-3 py-2 text-left font-semibold">Assigned To</th>
+              </tr>
+            </thead>
+            <tbody>`;
+      for (const d of modems) {
+        const status = d.has_issue ? '<span class="text-red-600">Issue</span>' : '<span class="text-green-600">OK</span>';
+        const assigned = d.assigned_to ? d.assigned_to.homerID : '<span class="text-slate-500">Unassigned</span>';
+        const sim = d.sim_info ? `${d.sim_info.phoneNumber || d.sim_id}` : '-';
+        html += `<tr class="border border-slate-200 hover:bg-slate-50">
+          <td class="px-3 py-2"><strong>${d.id}</strong></td>
+          <td class="px-3 py-2">${d.serial || '-'}</td>
+          <td class="px-3 py-2">${sim}</td>
+          <td class="px-3 py-2">${status}</td>
+          <td class="px-3 py-2">${assigned}</td>
+        </tr>`;
+      }
+      html += '</tbody></table></div></div>';
+    }
+
+    // Laptops - detailed table
+    const laptops = inventory.laptops || [];
+    if (laptops.length > 0) {
+      html += `<div class="mb-6">
+        <h3 class="text-lg font-semibold text-slate-700 mb-3">LAPTOPS</h3>
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm border-collapse">
+            <thead>
+              <tr class="bg-slate-200 border border-slate-300">
+                <th class="px-3 py-2 text-left font-semibold">Device ID</th>
+                <th class="px-3 py-2 text-left font-semibold">Serial</th>
+                <th class="px-3 py-2 text-left font-semibold">Status</th>
+                <th class="px-3 py-2 text-left font-semibold">Assigned To</th>
+              </tr>
+            </thead>
+            <tbody>`;
+      for (const d of laptops) {
+        const status = d.has_issue ? '<span class="text-red-600">Issue</span>' : '<span class="text-green-600">OK</span>';
+        const assigned = d.assigned_to ? d.assigned_to.homerID : '<span class="text-slate-500">Unassigned</span>';
+        html += `<tr class="border border-slate-200 hover:bg-slate-50">
+          <td class="px-3 py-2"><strong>${d.id}</strong></td>
+          <td class="px-3 py-2">${d.serial || '-'}</td>
+          <td class="px-3 py-2">${status}</td>
+          <td class="px-3 py-2">${assigned}</td>
+        </tr>`;
+      }
+      html += '</tbody></table></div></div>';
+    }
+
+    html += '</div>';
+  }
+
+  html += '</div>';
+  container.innerHTML = html;
 }
 
 function _showButtonVisibility() {
@@ -400,7 +559,7 @@ function _renderSection(type, devices) {
 
   const active   = devices.filter(d => !d.removal_date);
   const assigned = active.filter(d => d.assigned_to).length;
-  const avail    = active.filter(d => !d.assigned_to && !d.faulty && !d.clinic_only).length;
+  const avail    = active.filter(d => !d.assigned_to && !d.faulty && !d.has_issue && !d.clinic_only).length;
   document.getElementById(`badge-${type}`).textContent =
     `${active.length} total · ${avail} available · ${assigned} assigned`;
 
@@ -679,7 +838,7 @@ function _renderLaptops(devices) {
 
 function _statusBadge(d) {
   if (d.removal_date) return '<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-slate-100 text-slate-400"><i class="fas fa-archive"></i>Retired</span>';
-  if (d.faulty)      return '<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-red-100 text-red-700"><i class="fas fa-exclamation-circle"></i>Issue</span>';
+  if (d.faulty || d.has_issue) return '<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-red-100 text-red-700"><i class="fas fa-exclamation-circle"></i>Issue</span>';
   if (d.clinic_only) return '<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-slate-100 text-slate-500"><i class="fas fa-hospital"></i>Clinic Only</span>';
   if (d.assigned_to) return '<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-700"><i class="fas fa-user-check"></i>Assigned</span>';
   return '<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-700"><i class="fas fa-check-circle"></i>Available</span>';
@@ -1748,8 +1907,10 @@ async function unassignDevice(type, deviceId) {
 // ── UI helpers ────────────────────────────────────────────────
 
 function _showLoading(show) {
-  document.getElementById('devices-loading').classList.toggle('hidden', !show);
-  document.getElementById('devices-error').classList.add('hidden');
+  const loadingEl = document.getElementById('devices-loading');
+  const errorEl = document.getElementById('devices-error');
+  if (loadingEl) loadingEl.classList.toggle('hidden', !show);
+  if (errorEl) errorEl.classList.add('hidden');
   if (show) {
     document.getElementById('devices-tabs-wrapper')?.classList.add('hidden');
     document.getElementById('devices-tab-panes')?.classList.add('hidden');
@@ -1757,9 +1918,12 @@ function _showLoading(show) {
 }
 
 function _showError(msg) {
-  document.getElementById('devices-loading').classList.add('hidden');
-  document.getElementById('devices-error').classList.remove('hidden');
-  document.getElementById('devices-error-msg').textContent = msg;
+  const loadingEl = document.getElementById('devices-loading');
+  const errorEl = document.getElementById('devices-error');
+  const msgEl = document.getElementById('devices-error-msg');
+  if (loadingEl) loadingEl.classList.add('hidden');
+  if (errorEl) errorEl.classList.remove('hidden');
+  if (msgEl) msgEl.textContent = msg;
 }
 
 function _setError(elId, msg) {

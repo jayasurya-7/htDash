@@ -1876,6 +1876,63 @@ filed_at = _now_str()  # Returns timestamp in IST
 - ✅ Log in as therapist + try `GET /assessment-api/patients` → 403
 - ✅ Assessment therapist tries `/patients` → redirected to `/` ✅
 
+### Device Management Fixes & Supervisor Enhancements ✅ (June 24, 2026)
+
+**Features & Fixes:**
+
+1. **Supervisor Multi-Hospital Device View** — Supervisor (LAB-HS-DATA) can now view devices from all 3 hospitals (Manipal, Ranipet, Ludhiana) in read-only mode, organized by hospital and device type with complete inventory details (faulty status, SIM linkage, assignments).
+   - **Files Modified:** `routes/devices.py` (_get_supervisor_device_inventory), `static/js/app/devices.js` (_showSupervisorDeviceView)
+   - **Implementation:** Aggregates read-only device data from all 3 hospitals without auto-reset logic, grouped by hospital. Frontend renders scrollable tables with device ID, serial, status, and assignment info.
+
+2. **Device Inventory Copy Scripts** — Created device structure replication for Ludhiana and Manipal hospitals from Ranipet reference.
+   - **Script:** `scripts/copy_devices_to_hospitals.py` — Idempotent script copies inventory.json, assignments.json, faultReport.json, event files, and logs directories to target hospitals.
+
+3. **Device Status Display Fix** — Fixed status badge display to show "Issue" for devices with `has_issue: true`, not just `faulty: true`.
+   - **Files Modified:** `static/js/app/devices.js` (_statusBadge function, _renderSection available count)
+   - **Fix:** Updated device status check to include both `faulty` and `has_issue` flags. Available device count now excludes devices with issues.
+
+4. **Resolved Issues Still Reappearing Bug** — Fixed critical bug where resolved device issues kept showing as open after every page refresh.
+   - **Root Cause:** `mark_device_not_faulty()` only removed the `faulty` flag, not the `has_issue` flag. Frontend fallback code created synthetic faulty events for any device with `has_issue: true` in inventory.
+   - **Fix:** Updated `mark_device_not_faulty()` to remove BOTH `faulty` and `has_issue` fields.
+   - **Files Modified:** `utils/data_access.py` (mark_device_not_faulty), `data/<site>/devices/*/inventory.json` (cleared has_issue flags)
+
+5. **Therapist Cannot Click Discontinuation Events** — Fixed access control to prevent therapists from opening discontinuation events (admin-only).
+   - **Implementation:** Added `_ADMIN_ONLY_STUBS` set containing 'discontinuation'. Updated dashboard and patient_detail row rendering to check and prevent therapist access.
+   - **Files Modified:** `static/js/app/dashboard.js`, `static/js/app/patient_detail.js`
+   - **Display:** Therapists see discontinuation events as grayed out with "Admin only" label, non-clickable.
+
+6. **Supervisor Device View Scrollable** — Made supervisor device view scrollable with `max-h-[calc(100vh-200px)] overflow-y-auto` to handle large multi-hospital datasets.
+   - **Files Modified:** `static/js/app/devices.js` (_showSupervisorDeviceView)
+
+### Device Assignment Limits ✅ (June 24, 2026)
+
+**Feature:** Enforced device assignment limits per experimental patient: max 1 of each device type (except 2 AG Watches for limbs).
+
+**Rules Enforced:**
+- **Max 1 Pluto** per experimental patient
+- **Max 1 Mars** per experimental patient
+- **Max 1 Laptop** per experimental patient
+- **Max 1 Modem** per experimental patient
+- **Max 1 SIM** per patient (linked to modem)
+- **Max 2 AG Watches** per patient (one per limb: agWatchRightID, agWatchLeftID)
+
+**Implementation:**
+- Added validation in `api_complete_device_install()` to check if patient already has active assignments before allowing new device assignment.
+- Added validation in `api_assign_device()` (modems/laptops manual assignment) to prevent duplicate device types.
+- Error message format: `"Patient HOCMCV003 already has an active Pluto assignment. Return the existing device first."`
+- Watch assignment limits are inherent to the data model (two fields: right/left) so no additional validation needed.
+
+**Files Modified:**
+- `routes/user_management.py` — Added device assignment validation before device setup completion
+- `routes/devices.py` — Added device assignment validation in manual assign endpoint
+
+**Testing Verified:**
+- ✅ Attempting to assign 2 Plutos to same patient returns error
+- ✅ Attempting to assign 2 Modems to same patient returns error
+- ✅ Normal single-device assignments work as expected
+- ✅ Different device types can be assigned to same patient (Pluto + Mars + etc.)
+- ✅ Error messages clear and actionable
+
 ---
 
 logconvo-project: htDash

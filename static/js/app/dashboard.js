@@ -148,9 +148,13 @@
         'robot_issue_call', 'robot_issue_visit', 'resolve_robot_issue_visit',
         'other_device_issue_call', 'other_device_issue_visit', 'device_return',
       ]);
+      const _ADMIN_ONLY_STUBS_DB = new Set([
+        'discontinuation',
+      ]);
       const _priv = (currentUser && currentUser.privilege) || '';
       const roleBlocked = _priv === 'supervisor'
         || (_priv === 'therapist' && _ENGINEER_STUBS_DB.has(ev.protocol_event_id))
+        || (_priv === 'therapist' && _ADMIN_ONLY_STUBS_DB.has(ev.protocol_event_id))
         || (_priv === 'engineer'  && !_ENGINEER_STUBS_DB.has(ev.protocol_event_id));
 
       const nonClickable = roleBlocked || blocked || isUpcoming;
@@ -166,7 +170,8 @@
           <span class="text-slate-400">·</span>
           <span class="font-medium ${nameColor}">${ev.event_name}</span>
         </div>`;
-      const roleBlockedLabel = _priv === 'therapist' ? 'Engineer only'
+      const roleBlockedLabel = _priv === 'therapist' && _ADMIN_ONLY_STUBS_DB.has(ev.protocol_event_id) ? 'Admin only'
+                             : _priv === 'therapist' ? 'Engineer only'
                              : _priv === 'engineer'   ? 'Therapist only'
                              : 'View only';
       const rightLabel = roleBlocked

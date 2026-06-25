@@ -45,18 +45,19 @@ def _block_supervisor_writes():
 
 def _get_supervisor_device_inventory():
     """Return read-only device view for all 3 hospitals (supervisor only)."""
-    from utils.data_access import get_patients_for_user
+    from utils.data_access import get_all_patients
     result_by_hospital = {}
 
     for hospital in Config.HOSPITALS:
         hospital_result = {}
 
-        # Get patients from this hospital
-        patients = get_patients_for_user(hospital)
+        # Get patients from this hospital (hospital is already a folder name like 'manipal')
+        patients = get_all_patients(hospital)
         patient_map = {p['homerID']: p for p in patients}
 
         # Read devices from this hospital (no auto-reset for supervisor read-only view)
-        folder = os.path.join(Config.DATA_ROOT, hospital)
+        # Note: hospital is the folder name (e.g., 'manipal'), not a full path
+        folder = hospital
 
         for dtype in ('pluto', 'mars'):
             hospital_result[dtype] = []
@@ -79,8 +80,9 @@ def _get_supervisor_device_inventory():
                         'has_issue': d.get('has_issue', False),
                         'assigned_to': assigned,
                     })
-            except Exception:
-                pass
+            except Exception as e:
+                import sys
+                print(f"DEBUG error loading {dtype} for {hospital}: {e}", file=sys.stderr)
 
         # AG Watch
         hospital_result['agwatch'] = []
@@ -106,8 +108,9 @@ def _get_supervisor_device_inventory():
                     'lost': d.get('lost_date') is not None,
                     'assigned_to': assigned,
                 })
-        except Exception:
-            pass
+        except Exception as e:
+            import sys
+            print(f"DEBUG error loading agwatch for {hospital}: {e}", file=sys.stderr)
 
         # Modems
         hospital_result['modems'] = []
@@ -137,8 +140,9 @@ def _get_supervisor_device_inventory():
                     'has_issue': d.get('has_issue', False),
                     'assigned_to': assigned,
                 })
-        except Exception:
-            pass
+        except Exception as e:
+            import sys
+            print(f"DEBUG error loading modems for {hospital}: {e}", file=sys.stderr)
 
         # Laptops
         hospital_result['laptops'] = []
@@ -159,11 +163,15 @@ def _get_supervisor_device_inventory():
                     'has_issue': d.get('has_issue', False),
                     'assigned_to': assigned,
                 })
-        except Exception:
-            pass
+        except Exception as e:
+            import sys
+            print(f"DEBUG error loading laptops for {hospital}: {e}", file=sys.stderr)
 
         result_by_hospital[hospital] = hospital_result
 
+    # Debug: log what we're returning
+    import sys
+    print(f"DEBUG supervisor view: {result_by_hospital}", file=sys.stderr)
     return jsonify({'by_hospital': result_by_hospital, 'is_supervisor': True})
 
 
@@ -1445,6 +1453,11 @@ def api_assign_device():
     assignments = read_device_assignments(folder, dtype)
     if any(a.get('device_id') == device_id and a.get('returned_date') is None for a in assignments):
         return jsonify({'error': 'Device is already assigned'}), 409
+
+    # Check if patient already has an active assignment of this device type
+    # (Experimental patients can have max 1 of each: modem, laptop, etc.)
+    if any(a.get('homer_id') == homer_id and a.get('returned_date') is None for a in assignments):
+        return jsonify({'error': f'Patient {homer_id} already has an active {dtype[:-1]} assignment'}), 409
 
     now_str = datetime.now().strftime('%Y-%m-%dT%H:%M')
     new_asgn = {

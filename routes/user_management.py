@@ -1286,6 +1286,15 @@ def api_complete_device_install(homer_id):
         'notes':           notes,
     }
 
+    # Validate that patient doesn't already have active assignments of these types
+    # (Experimental patients can have max 1 of each device type)
+    for device_type, device_id in (('pluto', pluto_id), ('mars', mars_id), ('modems', modem_id), ('laptops', laptop_id)):
+        assignments = read_device_assignments(folder, device_type)
+        existing = any(a.get('homer_id') == homer_id and a.get('returned_date') is None for a in assignments)
+        if existing:
+            dev_name = device_type.rstrip('s').capitalize()  # 'pluto' -> 'Pluto', 'modems' -> 'Modem'
+            return jsonify({'error': f'Patient {homer_id} already has an active {dev_name} assignment. Return the existing device first.'}), 409
+
     events_data['incomplete'] = [e for e in incomplete if e.get('id') != entry['id']]
     events_data.setdefault('complete', []).append(complete_entry)
 
