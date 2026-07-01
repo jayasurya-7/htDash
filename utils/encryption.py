@@ -29,7 +29,12 @@ class EncryptionUtils:
 class CredentialsManager:
     CREDENTIALS_FOLDER = "_dashboard/Credentials"
     LAB_LOCATION = "LAB"
-    
+
+    @staticmethod
+    def _local_path() -> str:
+        """Get local file path for credentials"""
+        return os.path.join(Config.BASE_DIR, "data", "credentials.json")
+
     @staticmethod
     def _get_credentials_key(location: str = None) -> str:
         """Get S3 key for credentials file"""
@@ -99,23 +104,54 @@ class CredentialsManager:
             return False
     
     @staticmethod
+    def load_credentials() -> Optional[dict]:
+        """Load credentials from local file or S3"""
+        if Config.USE_S3:
+            return CredentialsManager.load_credentials_from_s3()
+        else:
+            local_path = CredentialsManager._local_path()
+            if os.path.exists(local_path):
+                try:
+                    with open(local_path, 'r') as f:
+                        return json.load(f)
+                except Exception as e:
+                    print(f"Error loading local credentials: {e}")
+                    return None
+            return None
+
+    @staticmethod
+    def save_credentials(credentials: dict) -> bool:
+        """Save credentials to local file or S3"""
+        if Config.USE_S3:
+            return CredentialsManager.save_credentials_to_s3(credentials)
+        else:
+            local_path = CredentialsManager._local_path()
+            try:
+                os.makedirs(os.path.dirname(local_path), exist_ok=True)
+                with open(local_path, 'w') as f:
+                    json.dump(credentials, f, indent=2)
+                return True
+            except Exception as e:
+                print(f"Error saving local credentials: {e}")
+                return False
+
+    @staticmethod
     def get_or_create_credentials() -> dict:
-        """Get credentials from S3 or create empty structure"""
-        credentials = CredentialsManager.load_credentials_from_s3()
+        """Get credentials from local file or S3, or create empty structure"""
+        credentials = CredentialsManager.load_credentials()
         if credentials is None:
             credentials = {}
         return credentials
     
     @staticmethod
     def initialize_credentials_if_empty() -> bool:
-        """Initialize S3 with LAB admin if empty"""
-        credentials = CredentialsManager.load_credentials_from_s3()
+        """Initialize credentials with LAB admin if empty"""
+        credentials = CredentialsManager.load_credentials()
         if credentials is None or len(credentials) == 0:
             credentials = {
                 "LAB-HS-DATA": {
                     "place": "admin",
                     "privilege": "admin",
-                    "password": "lab@123",
                     "password_hash": EncryptionUtils.hash_password("lab@123"),
                     "created_by": "system",
                     "created_at": datetime.now().isoformat(),
@@ -123,65 +159,63 @@ class CredentialsManager:
                     "password_changed": True
                 }
             }
-            return CredentialsManager.save_credentials_to_s3(credentials)
+            return CredentialsManager.save_credentials(credentials)
         return True
     
     @staticmethod
     def create_user(loginid: str, default_password: str, place: str, privilege: str = "therapist") -> tuple:
         """Create a new user - called by LAB admin"""
         credentials = CredentialsManager.get_or_create_credentials()
-        
+
         if loginid in credentials:
             return False, "User already exists"
-        
+
         hashed = EncryptionUtils.hash_password(default_password)
-        
+
         credentials[loginid] = {
             "place": place,
             "privilege": privilege,
-            "password": default_password,
             "password_hash": hashed,
             "created_by": "LAB-HS-DATA",
             "created_at": datetime.now().isoformat(),
             "first_login": True,
             "password_changed": False
         }
-        
-        success = CredentialsManager.save_credentials_to_s3(credentials)
+
+        success = CredentialsManager.save_credentials(credentials)
         if success:
             return True, f"User {loginid} created successfully"
-        return False, "Failed to save to S3"
+        return False, "Failed to save credentials"
     
     @staticmethod
     def change_password(loginid: str, old_password: str, new_password: str) -> tuple:
         """Change password for a user"""
         credentials = CredentialsManager.get_or_create_credentials()
-        
+
         user_data = credentials.get(loginid)
         if not user_data:
             return False, "User not found"
-        
+
         stored_hash = user_data.get("password_hash")
-        
+
         if stored_hash:
             if not EncryptionUtils.verify_password(old_password, stored_hash):
                 return False, "Current password is incorrect"
         else:
             if user_data.get("password") != old_password:
                 return False, "Current password is incorrect"
-        
+
         new_hash = EncryptionUtils.hash_password(new_password)
-        
-        credentials[loginid]["password"] = new_password
+
         credentials[loginid]["password_hash"] = new_hash
         credentials[loginid]["last_changed"] = datetime.now().isoformat()
         credentials[loginid]["password_changed"] = True
         credentials[loginid]["first_login"] = False
-        
-        success = CredentialsManager.save_credentials_to_s3(credentials)
+
+        success = CredentialsManager.save_credentials(credentials)
         if success:
             return True, "Password changed successfully"
-        return False, "Failed to save to S3"
+        return False, "Failed to save credentials"
     
     @staticmethod
     def get_user(loginid: str) -> Optional[dict]:
@@ -193,41 +227,40 @@ class CredentialsManager:
     def authenticate_user(loginid: str, password: str) -> tuple:
         """Authenticate user - returns (success, message, user_data)"""
         credentials = CredentialsManager.get_or_create_credentials()
-        
+
         user_data = credentials.get(loginid)
-        
+
         if not user_data and loginid in Config.LOGIN_CREDENTIALS:
             config_user = Config.LOGIN_CREDENTIALS[loginid]
             credentials[loginid] = {
                 "place": config_user["place"],
                 "privilege": config_user.get("privilege", "therapist"),
-                "password": config_user["password"],
                 "password_hash": EncryptionUtils.hash_password(config_user["password"]),
                 "created_by": "system",
                 "created_at": datetime.now().isoformat(),
                 "first_login": False,
                 "password_changed": True
             }
-            CredentialsManager.save_credentials_to_s3(credentials)
+            CredentialsManager.save_credentials(credentials)
             user_data = credentials.get(loginid)
-        
+
         if not user_data:
             return False, "User not found", None
-        
+
         stored_hash = user_data.get("password_hash")
         stored_password = user_data.get("password")
-        
+
         password_valid = False
         if stored_hash:
             password_valid = EncryptionUtils.verify_password(password, stored_hash)
         elif stored_password == password:
             password_valid = True
-        
+
         if not password_valid:
             return False, "Invalid credentials", None
-        
+
         needs_password_change = user_data.get("first_login", False)
-        
+
         return True, "Authentication successful", {
             **user_data,
             "needs_password_change": needs_password_change
@@ -237,19 +270,19 @@ class CredentialsManager:
     def delete_user(loginid: str) -> tuple:
         """Delete a user"""
         credentials = CredentialsManager.get_or_create_credentials()
-        
+
         if loginid not in credentials:
             return False, "User not found"
-        
+
         if loginid == "LAB-HS-DATA":
             return False, "Cannot delete main admin"
-        
+
         del credentials[loginid]
-        
-        success = CredentialsManager.save_credentials_to_s3(credentials)
+
+        success = CredentialsManager.save_credentials(credentials)
         if success:
             return True, f"User {loginid} deleted"
-        return False, "Failed to save to S3"
+        return False, "Failed to save credentials"
     
     @staticmethod
     def list_users() -> dict:

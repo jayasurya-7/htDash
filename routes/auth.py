@@ -1,5 +1,6 @@
 from flask import Blueprint, request, jsonify, session as flask_session
 from config import Config
+from utils.encryption import CredentialsManager
 import json
 import os
 import time
@@ -134,8 +135,10 @@ def validate_login():
     if not loginid or not password:
         return jsonify({"status": "error", "message": "Login ID and Password cannot be empty."}), 400
 
-    user_data = Config.LOGIN_CREDENTIALS.get(loginid)
-    if user_data and user_data["password"] == password:
+    # Authenticate using CredentialsManager (bcrypt)
+    success, message, user_data = CredentialsManager.authenticate_user(loginid, password)
+
+    if success and user_data:
         _clear_failures(ip)
         from flask import session as flask_session
         flask_session.clear()
@@ -145,6 +148,7 @@ def validate_login():
         )
         flask_session['loginid']   = loginid
         flask_session['privilege'] = user_data.get('privilege', 'therapist')
+        flask_session['needs_password_change'] = user_data.get('needs_password_change', False)
         session_id = -1
         try:
             from utils.data_access import open_session, get_hospital_folder
@@ -159,7 +163,8 @@ def validate_login():
             "status": "success",
             "loginid": loginid,
             "place": user_data["place"],
-            "privilege": user_data.get("privilege", "therapist")
+            "privilege": user_data.get("privilege", "therapist"),
+            "needs_password_change": user_data.get("needs_password_change", False)
         }), 200
     else:
         _record_failure(ip)
@@ -178,6 +183,44 @@ def me():
         "place": login_place,
         "privilege": flask_session.get('privilege', 'therapist')
     })
+
+
+@bp.route("/api/change-password", methods=["POST"])
+def change_password():
+    """Change password for currently logged-in user"""
+    from flask import session as flask_session
+    loginid = flask_session.get('loginid')
+
+    if not loginid:
+        return jsonify({"status": "error", "message": "Not authenticated"}), 401
+
+    data = request.json or {}
+    old_password = data.get("old_password", "").strip()
+    new_password = data.get("new_password", "").strip()
+    confirm_password = data.get("confirm_password", "").strip()
+
+    # Validation
+    if not old_password or not new_password or not confirm_password:
+        return jsonify({"status": "error", "message": "All fields are required"}), 400
+
+    if new_password != confirm_password:
+        return jsonify({"status": "error", "message": "New passwords do not match"}), 400
+
+    if len(new_password) < 8:
+        return jsonify({"status": "error", "message": "New password must be at least 8 characters"}), 400
+
+    if old_password == new_password:
+        return jsonify({"status": "error", "message": "New password must be different from current password"}), 400
+
+    # Change password via CredentialsManager
+    success, message = CredentialsManager.change_password(loginid, old_password, new_password)
+
+    if success:
+        # Clear the needs_password_change flag
+        flask_session['needs_password_change'] = False
+        return jsonify({"status": "success", "message": "Password changed successfully"}), 200
+    else:
+        return jsonify({"status": "error", "message": message}), 400
 
 
 def _do_close_session(reason: str) -> None:

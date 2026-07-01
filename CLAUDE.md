@@ -119,9 +119,9 @@ The original `main` branch is a single-page app (`dashboard.html`, 39KB). Being 
 | File                            | Purpose                                                                                 |
 | ------------------------------- | --------------------------------------------------------------------------------------- |
 | `main.py`                       | App entry point, blueprint registration                                                 |
-| `config.py`                     | Credentials, hospital map, AWS settings                                                 |
+| `config.py`                     | Hospital map, AWS settings, fallback login credentials (for backward compatibility)     |
 | `models/user.py`                | Session proxy for per-request user context                                              |
-| `routes/auth.py`                | Login, logout, on-login checks                                                          |
+| `routes/auth.py`                | Login, logout, password change, on-login checks; wired to bcrypt credential system      |
 | `routes/dashboard.py`           | Dashboard stats and events API                                                          |
 | `routes/user_management.py`     | Patient CRUD, group assignment, patient events API                                      |
 | `routes/notes.py`               | Patient free-text Notes tab: list / create / attachment download (role-keyed)           |
@@ -129,12 +129,123 @@ The original `main` branch is a single-page app (`dashboard.html`, 39KB). Being 
 | `routes/sim_cards.py`           | Legacy SIM blueprint (not used by the Devices page; SIMs managed via routes/devices.py) |
 | `utils/data_access.py`          | Patient file I/O, hospital folder lookup, session logs                                  |
 | `utils/protocol_events.py`      | Protocol event file creation and date population                                        |
+| `utils/encryption.py`           | Bcrypt hashing + CredentialsManager (read/write credentials from local JSON or S3)      |
 | `config/study_protocol.json`    | Static protocol event definitions                                                       |
 | `templates/base.html`           | Shared layout — sidebar, header, nav                                                    |
+| `templates/login.html`          | Login page with change-password modal (forced on first login)                           |
 | `templates/patient_detail.html` | Patient detail page                                                                     |
 | `static/js/app/`                | Per-page JS modules                                                                     |
 | `scripts/reset_test_patient.py` | Reset all ranipet test patients to enrolled state                                       |
 | `scripts/shift_activation.py`   | Shift a patient's activation date (and all dependent dates) by N days                   |
+| `scripts/init_credentials.py`   | One-time seed script: migrate all 13 users from config.py to bcrypt-hashed JSON        |
+| `scripts/reset_password.py`     | Admin CLI: reset a user's password (generates temp password or accepts new one)         |
+| `data/credentials.json`         | Bcrypt-hashed credentials (gitignored; stored locally in dev, S3 in production)         |
+
+---
+
+## Credential Management ✅ (Implemented June 30, 2026)
+
+All 13 login credentials are now **bcrypt-hashed** and stored securely in `data/credentials.json` (gitignored, never committed).
+
+### **Authentication Flow**
+
+1. User enters login ID + password on `/login`
+2. POST to `/validate_login`
+3. `CredentialsManager.authenticate_user()` verifies via bcrypt
+4. If `first_login: true` → response includes `"needs_password_change": true`
+5. Frontend shows **Change Password Required** modal
+6. User must change password before accessing dashboard
+7. On success → sets `first_login: false`, redirects to dashboard
+
+### **Adding a New User**
+
+1. **Add to `config.py`:**
+   ```python
+   "MP-HS-1004": {
+       "place": "Manipal",
+       "privilege": "therapist",
+       "password": "manipal@123"
+   }
+   ```
+
+2. **Run seed script:**
+   ```bash
+   python scripts/init_credentials.py
+   ```
+   Output: `[OK] Saved 1 new credential to local (data/credentials.json)`
+
+3. **User logs in** with credentials from config.py
+4. **First login**: modal forces password change
+5. **Password is hashed** with bcrypt and stored in credentials.json
+
+### **Password Reset (Forgot Password)**
+
+Admin can reset any user's password via CLI:
+
+```bash
+# Generate random temp password (printed to console)
+python scripts/reset_password.py RP-HS-1002
+
+# Set specific password
+python scripts/reset_password.py RP-HS-1002 NewPassword123
+```
+
+On next login:
+- User enters temp password
+- Modal appears: "Change Password Required"
+- User sets new permanent password
+- Old temp password no longer works
+
+### **Changing Your Own Password**
+
+After login, POST to `/api/change-password`:
+```json
+{
+  "old_password": "currentpass",
+  "new_password": "newpass123",
+  "confirm_password": "newpass123"
+}
+```
+
+**Validation:**
+- Old password must be correct (bcrypt-verified)
+- New password ≥ 8 characters
+- New password ≠ old password
+- Passwords must match
+
+### **File Storage**
+
+**Development (Local):**
+```
+data/credentials.json  ← Bcrypt hashes only
+Config.USE_S3=False
+```
+
+**Production (S3 or Secrets Manager — Future):**
+```
+Config.USE_S3=True  → Reads from s3://bucket/LAB/_dashboard/Credentials/credentials.json
+```
+
+The `CredentialsManager` dispatcher handles both automatically — no code changes needed.
+
+### **Security Notes**
+
+- ✅ All passwords hashed with bcrypt (salted, slow-by-design)
+- ✅ No plaintext passwords in credentials.json or git
+- ✅ `data/` folder in .gitignore
+- ✅ Rate limiting: 10 failed attempts → 10-minute lockout
+- ✅ Session ID logged for audit trail
+- ✅ Password changes require current password verification
+- ✅ First-time users forced to change temp password
+
+### **Known Users (13 Total)**
+
+| Hospital | Therapist | Engineer | Admin | Assessment | Supervisor |
+|----------|---|---|---|---|---|
+| **Manipal** | `MP-HS-1001` | `MP-HS-ENG` | `MP-HS-ADMIN` | `MP-HS-ASSESS` | — |
+| **Ranipet** | `RP-HS-1002` | `RP-HS-ENG` | `RP-HS-ADMIN` | `RP-HS-ASSESS` | — |
+| **Ludhiana** | `LD-HS-1003` | `LD-HS-ENG` | `LD-HS-ADMIN` | `LD-HS-ASSESS` | — |
+| **Global** | — | — | — | — | `LAB-HS-DATA` |
 
 ---
 
