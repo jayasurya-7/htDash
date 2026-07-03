@@ -1650,8 +1650,12 @@ function _timelineExtraFields(ev) {
     } else if (key === 'duration_minutes') {
       display = `${val} min`;
     } else if (key === 'data_file' && ev.id) {
-      // .gt3x watch data → download link (admin/therapist/engineer)
-      display = `<a href="/api/patients/${PATIENT_HOMER_ID}/watch-data/${ev.id}" target="_blank" ` +
+      // Data file download link — assess event type for correct endpoint
+      let endpoint = '/watch-data/';  // default for watch_data_upload
+      if (ev.protocol_event_id && ev.protocol_event_id.endsWith('_pdf_upload')) {
+        endpoint = '/assessment-pdf/';  // for a0/a1/a2_pdf_upload
+      }
+      display = `<a href="/api/patients/${PATIENT_HOMER_ID}${endpoint}${ev.id}" target="_blank" ` +
                 `class="text-blue-600 hover:underline">${ev.original_filename || val.split('/').pop()}</a>`;
     } else if (Array.isArray(val)) {
       display = val.join(', ');

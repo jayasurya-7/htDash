@@ -923,8 +923,9 @@ def api_patient_events(homer_id):
                 except Exception:
                     pass
 
-        # A2 assessment completed (all_completed): no overdue events shown.
-        if is_all_completed:
+        # A2 assessment completed (all_completed): no overdue events shown,
+        # EXCEPT PDF uploads which must still be filed.
+        if is_all_completed and pid not in ('a0_pdf_upload', 'a1_pdf_upload', 'a2_pdf_upload'):
             continue
 
         # After device_return completed or A1 assessment completed: only AE chains and assessments remain visible.
@@ -1066,6 +1067,9 @@ def api_patient_events(homer_id):
         'other_device_issue_call':       'Other Device Issue — Engineer Call',
         'other_device_issue_visit':      'Other Device Issue — Engineer Visit',
         'watch_data_upload':             'AG Watch Data Upload',
+        'a0_pdf_upload':                 'A0 Assessment PDF Upload',
+        'a1_pdf_upload':                 'A1 Assessment PDF Upload',
+        'a2_pdf_upload':                 'A2 Assessment PDF Upload',
     }
     for free_type, free_name in _FREE_EVENT_NAMES.items():
         for entry in events_data.get('free', {}).get(free_type, []):
@@ -2755,6 +2759,31 @@ def api_complete_training_completion(homer_id):
                     break
         except ValueError:
             pass  # ignore malformed date; assessment stub keeps original window
+
+    # Seed watch_data_upload stubs for all active watches when training completes
+    patient = read_patient_meta(folder, homer_id)
+    if patient:
+        active_watches = []
+        if patient.get('agWatchRightID'):
+            active_watches.append({'id': patient['agWatchRightID'], 'limb': 'right'})
+        if patient.get('agWatchLeftID'):
+            active_watches.append({'id': patient['agWatchLeftID'], 'limb': 'left'})
+
+        # Only seed if no watch_data_upload stubs already exist for this patient
+        for watch_info in active_watches:
+            stub_id = str(uuid.uuid4())
+            wdu_stub = {
+                'id': stub_id,
+                'protocol_event_id': 'watch_data_upload',
+                'watch_id': watch_info['id'],
+                'limb': watch_info['limb'],
+                'removed_date': completion_date,
+                'data_start': completion_date,
+                'data_end': completion_date,
+                'scheduled_date': [completion_date, completion_date],
+                'triggered_by': {'type': 'training_completion_d29', 'id': eid},
+            }
+            events_data.setdefault('incomplete', []).append(wdu_stub)
 
     from utils.protocol_events import write_protocol_events
     write_protocol_events(folder, homer_id, events_data)
@@ -5867,8 +5896,8 @@ def api_complete_assessment_pdf_upload(homer_id):
     data = request.json or {}
     event_id = data.get('event_id', '').strip()
     skipped = data.get('skipped', False)
-    notes = data.get('notes', '').strip()
-    original_filename = data.get('original_filename', '').strip()
+    notes = (data.get('notes') or '').strip()
+    original_filename = (data.get('original_filename') or '').strip()
 
     if not event_id:
         return jsonify({'error': 'event_id is required'}), 400
