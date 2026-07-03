@@ -72,11 +72,9 @@
           const badge = document.getElementById('view-only-badge');
           if (badge) badge.classList.remove('hidden');
         }
-        // Hide Devices nav link for therapists and assessment therapists only
+        // Hide Devices nav link for therapists only
         // (engineers, admins, and supervisors can access the Devices page)
-        const hideDevices = currentUser.privilege === 'therapist'
-                         || currentUser.privilege === 'assessment_therapist';
-        if (hideDevices) {
+        if (currentUser.privilege === 'therapist') {
           document.querySelector('a[href="/devices"]')?.classList.add('hidden');
         }
       }

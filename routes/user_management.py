@@ -237,8 +237,6 @@ def _wdu_event_name(entry, fallback='AG Watch Data Upload'):
 def patients_page():
     if not flask_session.get('login_place'):
         return redirect(url_for('login'))
-    if flask_session.get('privilege') == 'assessment_therapist':
-        return redirect(url_for('assessment'))
     return render_template('patients.html', active_page='patients')
 
 
@@ -246,8 +244,6 @@ def patients_page():
 def patient_detail_page(homer_id):
     if not flask_session.get('login_place'):
         return redirect(url_for('login'))
-    if flask_session.get('privilege') == 'assessment_therapist':
-        return redirect(url_for('assessment'))
     return render_template('patient_detail.html', homer_id=homer_id, place=flask_session.get('login_place'),
                            active_page='patients', date_rules=get_date_rules())
 
@@ -592,6 +588,35 @@ def api_patient_events(homer_id):
         if _dirty:
             write_protocol_events(folder, homer_id, events_data)
 
+    # Lazy seeding for assessment PDF upload stubs (one-shot; available after completion date is set).
+    if patient and events_data:
+        _pdf_dirty = False
+        _pdf_now = datetime.now().strftime('%Y-%m-%dT%H:%M')
+        _pdf_filed_at = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
+        for _assess_type in ('a0', 'a1', 'a2'):
+            _completion_field = f'{_assess_type}CompletionDate'
+            _uploaded_field = f'{_assess_type}PdfUploadedAt'
+            _stub_pid = f'{_assess_type}_pdf_upload'
+            _already_done = (
+                patient.get(_uploaded_field) is not None or
+                bool(events_data.get('free', {}).get(_stub_pid))
+            )
+            _stub_exists = any(
+                e.get('protocol_event_id') == _stub_pid
+                for e in events_data.get('incomplete', [])
+            )
+            if patient.get(_completion_field) and not _already_done and not _stub_exists:
+                events_data.setdefault('incomplete', []).append({
+                    'id': str(uuid.uuid4()),
+                    'protocol_event_id': _stub_pid,
+                    'scheduled_date': [_pdf_now, _pdf_now],
+                    'filed_at': _pdf_filed_at,
+                    'filed_by': _filer(),
+                })
+                _pdf_dirty = True
+        if _pdf_dirty:
+            write_protocol_events(folder, homer_id, events_data)
+
     # Lazy seeding for device_return when training ends (any path).
     if patient and events_data:
         _training_ended = bool(
@@ -630,6 +655,9 @@ def api_patient_events(homer_id):
     event_defs['schedule_a2_call']        = {'name': 'Schedule A2 Assessment',   'depends_on': []}
     event_defs['device_return']           = {'name': 'Device Return',            'depends_on': []}
     event_defs['watch_data_upload']       = {'name': 'AG Watch Data Upload',     'depends_on': []}
+    event_defs['a0_pdf_upload']           = {'name': 'A0 Assessment PDF Upload',  'depends_on': []}
+    event_defs['a1_pdf_upload']           = {'name': 'A1 Assessment PDF Upload',  'depends_on': []}
+    event_defs['a2_pdf_upload']           = {'name': 'A2 Assessment PDF Upload',  'depends_on': []}
 
     # Precompute A1/A2 window dates from activationDate for row display
     _assessment_windows = {}
@@ -755,6 +783,7 @@ def api_patient_events(homer_id):
         'training_completion_d29',
         'device_return',
         'watch_data_upload',
+        'a0_pdf_upload', 'a1_pdf_upload', 'a2_pdf_upload',
     })
     # For broken_protocol patients only AE/RI/ODI chains + assessments are interactive.
     _BROKEN_PROTOCOL_INTERACTIVE = frozenset({
@@ -767,6 +796,7 @@ def api_patient_events(homer_id):
         'schedule_a1_call', 'schedule_a2_call',
         'device_return',
         'watch_data_upload',
+        'a0_pdf_upload', 'a1_pdf_upload', 'a2_pdf_upload',
     })
     # For discontinued patients only open AE chains + assessments remain relevant.
     _DISCONTINUED_VISIBLE = frozenset({
@@ -776,6 +806,7 @@ def api_patient_events(homer_id):
         'schedule_a1_call', 'schedule_a2_call',
         'device_return',
         'watch_data_upload',
+        'a0_pdf_upload', 'a1_pdf_upload', 'a2_pdf_upload',
     })
     # For post_training patients (Day 28 passed, D29 not yet filed): only D29,
     # AE chains, assessments, and device_return are shown.
@@ -787,6 +818,7 @@ def api_patient_events(homer_id):
         'schedule_a1_call', 'schedule_a2_call',
         'device_return',
         'watch_data_upload',
+        'a0_pdf_upload', 'a1_pdf_upload', 'a2_pdf_upload',
     })
     # For training_completed patients (D29 filed): only AE chains, assessments,
     # device_return, and watch_data_upload are shown. All training events hidden.
@@ -797,14 +829,17 @@ def api_patient_events(homer_id):
         'schedule_a1_call', 'schedule_a2_call',
         'device_return',
         'watch_data_upload',
+        'a0_pdf_upload', 'a1_pdf_upload', 'a2_pdf_upload',
     })
     # After device_return is completed: only AE chains and assessments remain visible.
     # Training is fully over, only post-training follow-ups shown.
+    # Assessment PDF uploads remain visible since A1/A2 completion often happens around this time.
     _POST_DEVICE_RETURN_VISIBLE = frozenset({
         'adverse_event', 'adverse_event_followup',
         'adverse_event_followup_visit', 'adverse_event_clinical_visit',
         'a1_assessment', 'a2_assessment',
         'schedule_a1_call', 'schedule_a2_call',
+        'a0_pdf_upload', 'a1_pdf_upload', 'a2_pdf_upload',
     })
     is_paused           = bool(patient and patient.get('trainingPausedDate'))
     is_discontinued     = bool(patient and patient.get('discontinuationDate'))
@@ -5763,6 +5798,200 @@ def api_download_watch_data(homer_id, event_id):
     if not path.exists():
         return jsonify({'error': 'Data file not found'}), 404
     return send_file(str(path), mimetype='application/octet-stream',
+                     as_attachment=True, download_name=download_name)
+
+
+# ── Assessment PDF Upload endpoints ────────────────────────────────────────────
+
+@bp.route('/api/patients/<homer_id>/upload-assessment-pdf', methods=['POST'])
+def api_upload_assessment_pdf(homer_id):
+    """Stage a scanned assessment PDF for a0/a1/a2_pdf_upload stub (step 1 of 2)."""
+    if not flask_session.get('login_place'):
+        return jsonify({'error': 'Not authenticated'}), 401
+    if flask_session.get('privilege', '') not in ('admin', 'therapist'):
+        return jsonify({'error': 'Forbidden'}), 403
+
+    event_id = request.form.get('event_id', '').strip()
+    data_file = request.files.get('file')
+
+    if not event_id or not data_file:
+        return jsonify({'error': 'event_id and file are required'}), 400
+
+    # Validate PDF extension
+    filename = data_file.filename or ''
+    if not filename.lower().endswith('.pdf'):
+        return jsonify({'error': 'File must be a PDF (.pdf)'}), 400
+
+    folder = find_patient_folder(flask_session['login_place'], homer_id)
+    if not folder:
+        return jsonify({'error': 'Patient not found'}), 404
+
+    events_data = read_protocol_events(folder, homer_id)
+    if not events_data:
+        return jsonify({'error': 'Protocol events not found'}), 404
+
+    # Guard: event_id must exist as an open stub of type a0/a1/a2_pdf_upload
+    stub_found = False
+    for e in events_data.get('incomplete', []):
+        if e.get('id') == event_id and e.get('protocol_event_id') in ('a0_pdf_upload', 'a1_pdf_upload', 'a2_pdf_upload'):
+            stub_found = True
+            break
+    if not stub_found:
+        return jsonify({'error': 'Stub not found or wrong type'}), 404
+
+    # Save the PDF file to assessment_pdfs/<event_id>.pdf (local or S3)
+    try:
+        rel = f'assessment_pdfs/{event_id}.pdf'
+        if Config.USE_S3:
+            s3_key = f"{folder}/patients/{homer_id}/{rel}"
+            s3_put_bytes(s3_key, data_file.read(), content_type='application/pdf')
+        else:
+            path = get_patients_path(folder) / homer_id / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data_file.read())
+    except Exception as e:
+        print(f'Error saving assessment PDF: {e}')
+        return jsonify({'error': 'Failed to save PDF'}), 500
+
+    return jsonify({'ok': True, 'original_filename': filename})
+
+
+@bp.route('/api/patients/<homer_id>/complete-event/assessment-pdf-upload', methods=['POST'])
+def api_complete_assessment_pdf_upload(homer_id):
+    """Complete an a0/a1/a2_pdf_upload task (step 2 of 2): record metadata or skip."""
+    if not flask_session.get('login_place'):
+        return jsonify({'error': 'Not authenticated'}), 401
+    if flask_session.get('privilege', '') not in ('admin', 'therapist'):
+        return jsonify({'error': 'Forbidden'}), 403
+
+    data = request.json or {}
+    event_id = data.get('event_id', '').strip()
+    skipped = data.get('skipped', False)
+    notes = data.get('notes', '').strip()
+    original_filename = data.get('original_filename', '').strip()
+
+    if not event_id:
+        return jsonify({'error': 'event_id is required'}), 400
+
+    if skipped:
+        if not notes:
+            return jsonify({'error': 'notes are required when skipping'}), 400
+    else:
+        # Verify staged file exists
+        folder = find_patient_folder(flask_session['login_place'], homer_id)
+        if not folder:
+            return jsonify({'error': 'Patient not found'}), 404
+        rel = f'assessment_pdfs/{event_id}.pdf'
+        if Config.USE_S3:
+            if not s3_exists(f"{folder}/patients/{homer_id}/{rel}"):
+                return jsonify({'error': 'Please upload the PDF before saving.'}), 400
+        else:
+            if not (get_patients_path(folder) / homer_id / rel).exists():
+                return jsonify({'error': 'Please upload the PDF before saving.'}), 400
+
+    folder = find_patient_folder(flask_session['login_place'], homer_id)
+    if not folder:
+        return jsonify({'error': 'Patient not found'}), 404
+
+    events_data = read_protocol_events(folder, homer_id)
+    if not events_data:
+        return jsonify({'error': 'Protocol events not found'}), 404
+
+    # Find entry in incomplete list
+    entry = None
+    incomplete = events_data.get('incomplete', [])
+    for e in incomplete:
+        if e.get('id') == event_id and e.get('protocol_event_id') in ('a0_pdf_upload', 'a1_pdf_upload', 'a2_pdf_upload'):
+            entry = e
+            break
+    if not entry:
+        return jsonify({'error': 'Stub not found'}), 404
+
+    # Determine assess type from protocol_event_id
+    stub_pid = entry.get('protocol_event_id')
+    assess_type = stub_pid.split('_')[0]  # e.g. 'a0' from 'a0_pdf_upload'
+
+    # Move entry from incomplete to free bucket
+    filed_at = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
+    completion_date = filed_at[:16]
+    data_file_rel = f'assessment_pdfs/{event_id}.pdf' if not skipped else None
+
+    complete_entry = {
+        **entry,
+        'completion_date': completion_date,
+        'filed_at': filed_at,
+        'filed_by': _filer(),
+        'data_file': data_file_rel,
+        'original_filename': original_filename if not skipped else None,
+        'skipped': bool(skipped),
+        'notes': notes,
+    }
+
+    events_data['incomplete'] = [e for e in incomplete if e.get('id') != event_id]
+    events_data.setdefault('free', {}).setdefault(stub_pid, []).append(complete_entry)
+    write_protocol_events(folder, homer_id, events_data)
+
+    # Stamp the patient's PdfUploadedAt field (only on real upload, not on skip)
+    if not skipped:
+        patient = read_patient_meta(folder, homer_id)
+        if patient:
+            patient[f'{assess_type}PdfUploadedAt'] = filed_at
+            write_patient_meta(folder, homer_id, patient)
+
+    loginid = flask_session.get('loginid', 'unknown')
+    session_id = flask_session.get('session_id', -1)
+    log_msg = f'{assess_type.upper()} assessment PDF upload skipped' if skipped else f'{assess_type.upper()} assessment PDF uploaded'
+    write_patient_log(folder, homer_id, loginid, session_id, log_msg)
+
+    return jsonify({'ok': True})
+
+
+@bp.route('/api/patients/<homer_id>/assessment-pdf/<event_id>', methods=['GET'])
+def api_download_assessment_pdf(homer_id, event_id):
+    """Download the uploaded PDF for an a0/a1/a2_pdf_upload event. Admin + therapist only."""
+    if not flask_session.get('login_place'):
+        return jsonify({'error': 'Not authenticated'}), 401
+    if flask_session.get('privilege', '') not in ('admin', 'therapist'):
+        return jsonify({'error': 'Forbidden'}), 403
+
+    folder = find_patient_folder(flask_session['login_place'], homer_id)
+    if not folder:
+        return jsonify({'error': 'Patient not found'}), 404
+
+    events_data = read_protocol_events(folder, homer_id)
+    if not events_data:
+        return jsonify({'error': 'Protocol events not found'}), 404
+
+    # Search all three free buckets for the event
+    entry = None
+    for stub_type in ('a0_pdf_upload', 'a1_pdf_upload', 'a2_pdf_upload'):
+        for e in events_data.get('free', {}).get(stub_type, []):
+            if e.get('id') == event_id:
+                entry = e
+                break
+        if entry:
+            break
+
+    if not entry or not entry.get('data_file'):
+        return jsonify({'error': 'PDF not found'}), 404
+
+    from flask import send_file
+    import io
+
+    rel = entry.get('data_file')
+    download_name = entry.get('original_filename') or f'{event_id}.pdf'
+
+    if Config.USE_S3:
+        data = s3_get_bytes(f"{folder}/patients/{homer_id}/{rel}")
+        if data is None:
+            return jsonify({'error': 'Data file not found'}), 404
+        return send_file(io.BytesIO(data), mimetype='application/pdf',
+                         as_attachment=True, download_name=download_name)
+
+    path = get_patients_path(folder) / homer_id / rel
+    if not path.exists():
+        return jsonify({'error': 'Data file not found'}), 404
+    return send_file(str(path), mimetype='application/pdf',
                      as_attachment=True, download_name=download_name)
 
 

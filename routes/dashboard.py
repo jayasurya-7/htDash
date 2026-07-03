@@ -127,6 +127,9 @@ def events():
     event_names['schedule_a2_call']        = 'Schedule A2 Assessment'
     event_names['device_return']           = 'Device Return'
     event_names['watch_data_upload']       = 'AG Watch Data Upload'
+    event_names['a0_pdf_upload']           = 'A0 Assessment PDF Upload'
+    event_names['a1_pdf_upload']           = 'A1 Assessment PDF Upload'
+    event_names['a2_pdf_upload']           = 'A2 Assessment PDF Upload'
 
     # Build per-group event_defs so depends_on is looked up against the correct
     # group definition (e.g. activation has different depends_on per group).
@@ -140,6 +143,9 @@ def events():
         defs['training_pause_followup'] = {'name': 'Training Pause Follow-up', 'depends_on': []}
         defs['device_return']           = {'name': 'Device Return',            'depends_on': []}
         defs['watch_data_upload']       = {'name': 'AG Watch Data Upload',     'depends_on': []}
+        defs['a0_pdf_upload']           = {'name': 'A0 Assessment PDF Upload',  'depends_on': []}
+        defs['a1_pdf_upload']           = {'name': 'A1 Assessment PDF Upload',  'depends_on': []}
+        defs['a2_pdf_upload']           = {'name': 'A2 Assessment PDF Upload',  'depends_on': []}
         group_defs[grp] = defs
 
     # Merged defs for topo sort (experimental preferred — stricter depends_on).
@@ -171,6 +177,7 @@ def events():
                 'adverse_event_followup_visit', 'adverse_event_clinical_visit',
                 'device_return',
                 'watch_data_upload',
+                'a0_pdf_upload', 'a1_pdf_upload', 'a2_pdf_upload',
             })
             ae_alias_map_bp = {
                 e['id']: e['alias']
@@ -281,6 +288,7 @@ def events():
             'training_completion_d29',
             'device_return',
             'watch_data_upload',
+            'a0_pdf_upload', 'a1_pdf_upload', 'a2_pdf_upload',
         })
         _DISCONTINUED_VISIBLE = frozenset({
             'adverse_event', 'adverse_event_followup',
@@ -289,6 +297,7 @@ def events():
             'schedule_a1_call', 'schedule_a2_call',
             'device_return',
             'watch_data_upload',
+            'a0_pdf_upload', 'a1_pdf_upload', 'a2_pdf_upload',
         })
         _POST_TRAINING_VISIBLE = frozenset({
             'training_completion_d29',
@@ -298,6 +307,7 @@ def events():
             'schedule_a1_call', 'schedule_a2_call',
             'device_return',
             'watch_data_upload',
+            'a0_pdf_upload', 'a1_pdf_upload', 'a2_pdf_upload',
         })
         _TRAINING_COMPLETED_VISIBLE = frozenset({
             'adverse_event', 'adverse_event_followup',
@@ -306,14 +316,17 @@ def events():
             'schedule_a1_call', 'schedule_a2_call',
             'device_return',
             'watch_data_upload',
+            'a0_pdf_upload', 'a1_pdf_upload', 'a2_pdf_upload',
         })
         # After device_return is completed: only AE chains and assessments remain visible.
         # Training is fully over, only post-training follow-ups shown.
+        # Assessment PDF uploads remain visible since A1/A2 completion often happens around this time.
         _POST_DEVICE_RETURN_VISIBLE = frozenset({
             'adverse_event', 'adverse_event_followup',
             'adverse_event_followup_visit', 'adverse_event_clinical_visit',
             'a1_assessment', 'a2_assessment',
             'schedule_a1_call', 'schedule_a2_call',
+            'a0_pdf_upload', 'a1_pdf_upload', 'a2_pdf_upload',
         })
         is_paused             = bool(patient.get('trainingPausedDate'))
         is_discontinued       = bool(patient.get('discontinuationDate'))

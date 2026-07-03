@@ -148,10 +148,6 @@ def api_list_notes(homer_id):
         return jsonify({'error': 'Not authenticated'}), 401
     privilege = flask_session.get('privilege', '')
 
-    # Assessment therapist cannot access notes
-    if privilege == 'assessment_therapist':
-        return jsonify({'error': 'Forbidden'}), 403
-
     if _bucket_for(privilege) is None:
         return jsonify({'error': 'Forbidden'}), 403
 
@@ -253,10 +249,6 @@ def api_list_event_notes(homer_id, event_id):
     if not flask_session.get('login_place'):
         return jsonify({'error': 'Not authenticated'}), 401
     privilege = flask_session.get('privilege', '')
-
-    # Assessment therapist cannot access notes
-    if privilege == 'assessment_therapist':
-        return jsonify({'error': 'Forbidden'}), 403
 
     if _bucket_for(privilege) is None:
         return jsonify({'error': 'Forbidden'}), 403

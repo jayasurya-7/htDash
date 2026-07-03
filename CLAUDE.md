@@ -28,7 +28,7 @@ HOMER Therapy Dashboard (htDash) is a Flask-based clinical dashboard for managin
 
 ## Role-Based Access Control (RBAC) — Implemented June 2026
 
-**5 Roles** with separate credentials (13 login IDs across 3 hospital sites + global supervisor):
+**4 Roles** with separate credentials (10 login IDs across 3 hospital sites + global supervisor):
 
 | Role | Credentials | Access |
 |------|---|---|
@@ -36,7 +36,6 @@ HOMER Therapy Dashboard (htDash) is a Flask-based clinical dashboard for managin
 | **Site Admin** | `MP/RP/LD-HS-ADMIN` (1 per site) | Full access to all stubs, devices, patient management for their site. |
 | **Therapist** | `MP/RP/LD-HS-1002` (1 per site) | File clinical events (home visits, calls, prescriptions, assessments, AE). Cannot access Devices page. Cannot discontinue normal patients but CAN discontinue broken_protocol patients via synthetic `discontinuation_reminder` event. |
 | **Engineer** | `MP/RP/LD-HS-ENG` (1 per site) | Full device inventory & assignment management, watch records, device issue handling. Cannot file clinical events but sees them greyed (non-clickable). |
-| **Assessment Therapist** | `MP/RP/LD-HS-ASSESS` (1 per site) | Dedicated `/assessment` page. Uploads scanned assessment PDFs (A0, A1, A2) after clinical assessment completion. No access to Dashboard, Patients, or Devices. Cannot see patient group. |
 
 **Stub Visibility Rules:**
 - **Therapist sees engineer stubs greyed** (not clickable): device setup, watch record, device issues, device return, watch data upload
@@ -145,7 +144,7 @@ The original `main` branch is a single-page app (`dashboard.html`, 39KB). Being 
 
 ## Credential Management ✅ (Implemented June 30, 2026)
 
-All 13 login credentials are now **bcrypt-hashed** and stored securely in `data/credentials.json` (gitignored, never committed).
+All 10 login credentials are now **bcrypt-hashed** and stored securely in `data/credentials.json` (gitignored, never committed).
 
 ### **Authentication Flow**
 
@@ -238,14 +237,14 @@ The `CredentialsManager` dispatcher handles both automatically — no code chang
 - ✅ Password changes require current password verification
 - ✅ First-time users forced to change temp password
 
-### **Known Users (13 Total)**
+### **Known Users (10 Total)**
 
-| Hospital | Therapist | Engineer | Admin | Assessment | Supervisor |
-|----------|---|---|---|---|---|
-| **Manipal** | `MP-HS-1001` | `MP-HS-ENG` | `MP-HS-ADMIN` | `MP-HS-ASSESS` | — |
-| **Ranipet** | `RP-HS-1002` | `RP-HS-ENG` | `RP-HS-ADMIN` | `RP-HS-ASSESS` | — |
-| **Ludhiana** | `LD-HS-1003` | `LD-HS-ENG` | `LD-HS-ADMIN` | `LD-HS-ASSESS` | — |
-| **Global** | — | — | — | — | `LAB-HS-DATA` |
+| Hospital | Therapist | Engineer | Admin | Supervisor |
+|----------|---|---|---|---|
+| **Manipal** | `MP-HS-1001` | `MP-HS-ENG` | `MP-HS-ADMIN` | — |
+| **Ranipet** | `RP-HS-1002` | `RP-HS-ENG` | `RP-HS-ADMIN` | — |
+| **Ludhiana** | `LD-HS-1003` | `LD-HS-ENG` | `LD-HS-ADMIN` | — |
+| **Global** | — | — | — | `LAB-HS-DATA` |
 
 ---
 
@@ -1931,61 +1930,51 @@ filed_at = _now_str()  # Returns timestamp in IST
 - ✅ Datepicker prevents selecting after today
 - ✅ Keyboard validation matches HTML5 bounds
 
-### Assessment Therapist PDF Upload Section ✅ (June 23, 2026)
+### Assessment PDF Upload (Therapist) ✅ (July 2, 2026)
 
-**Feature:** Complete implementation of Assessment Therapist role with dedicated `/assessment` page for uploading scanned assessment PDFs (A0, A1, A2). Immutable uploads with browser-based PDF preview.
+**Feature:** Three simple protocol event stubs (`a0_pdf_upload`, `a1_pdf_upload`, `a2_pdf_upload`) allow regular therapists to upload scanned assessment PDFs directly from the patient detail page. Removed separate `assessment_therapist` role.
 
 **Architecture:**
 
-**New blueprint:** `routes/assessment.py` with 3 API endpoints:
-- `GET /assessment-api/patients` — List patients for site, filtered response: only `homerID`, completion dates, and upload timestamps. **No group shown.**
-- `POST /assessment-api/patients/<homer_id>/upload/<assess_type>` — Upload PDF for A0/A1/A2. Guards: clinical assessment must be completed (`a0/a1/a2CompletionDate` set), and PDF cannot be re-uploaded (409 if already done). File saved to `data/<site>/patients/<homer_id>/assessments/<type>_assessment.pdf` or S3. Stamps `a0/a1/a2PdfUploadedAt = _now_str()`.
-- `GET /assessment-api/patients/<homer_id>/preview/<assess_type>` — Serve PDF with `Content-Disposition: inline` for browser built-in viewer (opens in new tab).
+**Synthetic protocol events** — lazily seeded in `api_patient_events` when the corresponding completion date is set:
+- `a0_pdf_upload` — seeded when `a0CompletionDate` is set, no existing stub
+- `a1_pdf_upload` — seeded when `a1CompletionDate` is set, no existing stub
+- `a2_pdf_upload` — seeded when `a2CompletionDate` is set, no existing stub
 
-**Frontend:** `templates/assessment.html` + `static/js/app/assessment.js`
-- Patient cards showing A0, A1, A2 rows
-- Pending: grey "Awaiting clinical assessment"
-- Ready (completed, no PDF): green "Completed [date]" + "Upload PDF" button
-- Uploaded: blue "Uploaded [date] at [time]" + "Preview PDF" button (immutable)
-- No delete/replace buttons ever rendered
-
-**Data model:**
-- Three new patient JSON fields: `a0PdfUploadedAt`, `a1PdfUploadedAt`, `a2PdfUploadedAt` (initially `null`, stamped at upload)
-- Storage: `data/<site>/patients/<homer_id>/assessments/<type>_assessment.pdf`
-- S3 support: mirrored at `<site>/patients/<homer_id>/assessments/<type>_assessment.pdf`
+**Modal and upload:**
+- One generic modal `assessment-pdf-upload-modal` with dynamic title based on event type
+- PDF file input (required, `.pdf` only)
+- Optional notes textarea
+- Upload progress bar with percent and completion feedback
+- Stored at: `Assessment Documents/<homer_id>_<TYPE>.pdf` (reuses existing path convention)
+- Patient fields stamped: `a0/a1/a2PdfUploadedAt`
 
 **Access Control:**
-- `assessment_therapist` privilege only (403 if not)
-- No access to `/patients`, `/devices`, or `/dashboard` (already redirected in `main.py`)
-- Patient group and training side **never shown** in any response or UI
+- Therapist role only (403 if not `therapist` or `admin`)
+- Events visible to therapist/admin in patient detail page
+- Events included in `_DISCONTINUED_VISIBLE` and all pause/broken-protocol visibility sets
 
 **Upload Flow:**
-1. Clinical therapist completes A0/A1/A2 assessment, sets `a0/a1/a2CompletionDate`
-2. Assessment therapist logs in → sees `/assessment` page with patient IDs and assessment status
-3. For each completed-but-not-uploaded assessment, clicks "Upload PDF"
-4. File input → Multipart POST with progress bar
-5. Server validates: completion date set, no prior upload, PDF file type
-6. Saves and stamps timestamp
-7. Card updates to "Uploaded" + "Preview" (no upload button ever appears again)
-8. Attempting to re-upload returns 409
+1. Therapist completes A0/A1/A2 assessment on patient, sets `a0/a1/a2CompletionDate`
+2. Patient detail page automatically seeds `a0/a1/a2_pdf_upload` stub
+3. Therapist clicks stub row → modal opens with dynamic title
+4. Selects PDF file → uploads immediately with progress bar
+5. Optionally adds notes
+6. Clicks Save → event moves from `incomplete` to `free.*`, timestamp stamped
+7. Stub one-shot: never re-appears after completion (immutable)
+
+**Removed:**
+- `assessment_therapist` role and 3 login IDs (MP/RP/LD-HS-ASSESS)
+- `/assessment` route and page
+- `routes/assessment.py`, `templates/assessment.html`, `templates/assessment_placeholder.html`, `static/js/app/assessment.js`, `scripts/add_assessment_pdf_fields.py`
+- Redirects in `main.py`, `routes/user_management.py`, `models/user.py`, `routes/notes.py`, `static/js/app/app.js`, `templates/base.html`
 
 **Files Modified:**
-- `routes/assessment.py` (new)
-- `templates/assessment.html` (new, replaces `assessment_placeholder.html`)
-- `static/js/app/assessment.js` (new)
-- `main.py` — registered assessment blueprint, updated `/assessment` route to render new template
-- `routes/user_management.py` — added 3 fields to `api_create_patient`
-- `scripts/reset_test_patient.py` — added 3 fields to patient meta initialization
-
-**Testing:**
-- ✅ Log in as `RP-HS-ASSESS` → lands on `/assessment` (no group column visible)
-- ✅ Patient with no A0 date → "Pending — awaiting clinical assessment"
-- ✅ Patient with `a0CompletionDate` set but no PDF → "Ready — Upload PDF" button clickable
-- ✅ Upload a PDF → file saved, row updates to "Uploaded [date]" + "Preview PDF", no upload button
-- ✅ Click "Preview PDF" → browser opens PDF in new tab (built-in viewer)
-- ✅ Try uploading again → 409 "Already uploaded — cannot replace"
-- ✅ Log in as therapist + try `GET /assessment-api/patients` → 403
-- ✅ Assessment therapist tries `/patients` → redirected to `/` ✅
+- `routes/user_management.py` — synthetic event defs, lazy-seeding, 3 new complete-event endpoints, visibility frozensets
+- `routes/dashboard.py` — mirror of event defs and frozensets
+- `templates/patient_detail.html` — new modal for assessment PDF upload
+- `static/js/app/patient_detail.js` — modal functions, EVENT_OPENERS entry, upload handlers
+- `config.py` — removed 3 assessment_therapist credentials
 
 ### Device Management Fixes & Supervisor Enhancements ✅ (June 24, 2026)
 

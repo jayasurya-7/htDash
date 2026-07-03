@@ -4838,6 +4838,9 @@ const EVENT_OPENERS = {
   agwatch_timing_d15:        (ev) => openAgwatchTimingModal(ev),
   watch_record:              (ev) => openWatchRecordModal(ev),
   watch_data_upload:         (ev) => openWatchDataUploadModal(ev),
+  a0_pdf_upload:             (ev) => openAssessmentPdfUploadModal(ev),
+  a1_pdf_upload:             (ev) => openAssessmentPdfUploadModal(ev),
+  a2_pdf_upload:             (ev) => openAssessmentPdfUploadModal(ev),
   adverse_event:                (ev) => openAdverseEventModal(ev),
   robot_issue_call:             (ev) => openRobotIssueCallModal(ev),
   robot_issue_visit:            (ev) => openRobotIssueVisitModal(ev),
@@ -4933,6 +4936,7 @@ function patientEventRow(ev) {
     'schedule_a1_call', 'schedule_a2_call',
     'device_return',
     'watch_data_upload',
+    'a0_pdf_upload', 'a1_pdf_upload', 'a2_pdf_upload',
   ]);
   const discontinuedBlocks = _patientDiscontinued && !_DISCONTINUED_VISIBLE.has(ev.protocol_event_id);
 
@@ -8056,6 +8060,13 @@ let _wduUploaded        = false;  // true once the .gt3x has fully uploaded (sta
 let _wduOriginalFilename = null;
 let _wduXhr             = null;   // in-flight upload, so a re-selection can abort it
 
+// ── Assessment PDF Upload state ──────────────────────────────────────────────
+let _apuEventId         = null;
+let _apuEventType       = null;   // 'a0_pdf_upload' | 'a1_pdf_upload' | 'a2_pdf_upload'
+let _apuUploaded        = false;
+let _apuOriginalFilename = null;
+let _apuXhr             = null;
+
 function openWatchDataUploadModal(ev) {
   _wduEventId          = ev.id;
   _wduUploaded         = false;
@@ -8202,6 +8213,136 @@ async function saveWatchDataUpload() {
     return;
   }
   hideModal('watch-data-upload-modal');
+  loadPatientEvents();
+}
+
+// ── Assessment PDF Upload modal ──────────────────────────────────────────────
+function openAssessmentPdfUploadModal(ev) {
+  _apuEventId          = ev.id;
+  _apuEventType        = ev.protocol_event_id;
+  _apuUploaded         = false;
+  _apuOriginalFilename = null;
+  if (_apuXhr) { try { _apuXhr.abort(); } catch {} _apuXhr = null; }
+
+  // Set title based on event type
+  let titleText = 'Assessment PDF Upload';
+  if (_apuEventType === 'a0_pdf_upload') titleText = 'A0 Assessment PDF Upload';
+  else if (_apuEventType === 'a1_pdf_upload') titleText = 'A1 Assessment PDF Upload';
+  else if (_apuEventType === 'a2_pdf_upload') titleText = 'A2 Assessment PDF Upload';
+  document.getElementById('apu-title').textContent = titleText;
+
+  // Reset fields
+  document.getElementById('apu-file').value = '';
+  document.getElementById('apu-notes').value = '';
+  _apuHideProgress();
+  setError('apu-error', '');
+
+  // File-select: validate and upload immediately
+  const fileEl = document.getElementById('apu-file');
+  fileEl.onchange = () => _apuStartUpload(fileEl.files[0] || null);
+
+  _apuUpdateSave();
+  showModal('assessment-pdf-upload-modal');
+}
+
+// Save enables only when the PDF has finished uploading
+function _apuUpdateSave() {
+  document.getElementById('apu-save').disabled = !_apuUploaded;
+}
+
+function _apuShowProgress(pct, done) {
+  const wrap = document.getElementById('apu-progress-wrap');
+  const bar  = document.getElementById('apu-progress-bar');
+  const txt  = document.getElementById('apu-progress-text');
+  wrap.classList.remove('hidden');
+  bar.style.width = `${pct}%`;
+  bar.classList.toggle('bg-green-500', !!done);
+  bar.classList.toggle('bg-blue-500',  !done);
+  txt.textContent = done ? 'Uploaded ✓' : `Uploading… ${pct}%`;
+}
+
+function _apuHideProgress() {
+  const wrap = document.getElementById('apu-progress-wrap');
+  if (wrap) wrap.classList.add('hidden');
+  const bar = document.getElementById('apu-progress-bar');
+  if (bar) bar.style.width = '0%';
+}
+
+function _apuStartUpload(file) {
+  setError('apu-error', '');
+  _apuUploaded = false;
+  _apuOriginalFilename = null;
+  if (_apuXhr) { try { _apuXhr.abort(); } catch {} _apuXhr = null; }
+  _apuUpdateSave();
+
+  if (!file) { _apuHideProgress(); return; }
+  if (!file.name.toLowerCase().endsWith('.pdf')) {
+    setError('apu-error', 'File must be a PDF (.pdf).');
+    document.getElementById('apu-file').value = '';
+    _apuHideProgress();
+    return;
+  }
+
+  _apuShowProgress(0, false);
+
+  const fd = new FormData();
+  fd.append('event_id', _apuEventId);
+  fd.append('file', file);
+
+  const xhr = new XMLHttpRequest();
+  _apuXhr = xhr;
+  xhr.open('POST', `/api/patients/${PATIENT_HOMER_ID}/upload-assessment-pdf`);
+  xhr.upload.onprogress = (e) => {
+    if (e.lengthComputable) _apuShowProgress(Math.round((e.loaded / e.total) * 100), false);
+  };
+  xhr.onload = () => {
+    _apuXhr = null;
+    let data = {};
+    try { data = JSON.parse(xhr.responseText); } catch {}
+    if (xhr.status >= 200 && xhr.status < 300 && data.ok) {
+      _apuUploaded = true;
+      _apuOriginalFilename = data.original_filename || file.name;
+      _apuShowProgress(100, true);
+    } else {
+      setError('apu-error', data.error || 'Upload failed. Please try again.');
+      _apuHideProgress();
+    }
+    _apuUpdateSave();
+  };
+  xhr.onerror = () => {
+    _apuXhr = null;
+    setError('apu-error', 'Network error during upload. Please try again.');
+    _apuHideProgress();
+    _apuUpdateSave();
+  };
+  xhr.onabort = () => { _apuXhr = null; };
+  xhr.send(fd);
+}
+
+async function saveAssessmentPdfUpload() {
+  const notes = document.getElementById('apu-notes').value.trim();
+
+  if (!_apuUploaded) {
+    setError('apu-error', 'Please upload a PDF file first.');
+    return;
+  }
+
+  const saveBtn = document.getElementById('apu-save');
+  saveBtn.disabled = true;
+
+  const body = {
+    event_id: _apuEventId,
+    notes: notes || null,
+    original_filename: _apuOriginalFilename,
+  };
+
+  const { ok, data } = await apiPost(`/api/patients/${PATIENT_HOMER_ID}/complete-event/assessment-pdf-upload`, body);
+  if (!ok) {
+    _apuUpdateSave();
+    setError('apu-error', data.error || 'Failed to save.');
+    return;
+  }
+  hideModal('assessment-pdf-upload-modal');
   loadPatientEvents();
 }
 

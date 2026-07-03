@@ -18,7 +18,6 @@ from routes.notes import bp as notes_bp
 from routes.devices import bp as devices_bp
 from routes.sim_cards import bp as sim_cards_bp
 from routes.time_records import bp as time_records_bp
-from routes.assessment import bp as assessment_bp
 
 app = Flask(__name__)
 app.config.from_object(Config)
@@ -42,7 +41,6 @@ app.register_blueprint(notes_bp)
 app.register_blueprint(devices_bp, url_prefix='/devices')
 app.register_blueprint(sim_cards_bp, url_prefix='/sim_cards')
 app.register_blueprint(time_records_bp, url_prefix='/time_records')
-app.register_blueprint(assessment_bp)
 
 import time as _time
 _JS_VERSION = str(int(_time.time()))  # changes on every server restart
@@ -67,9 +65,6 @@ def add_header(response):
 def index():
     if not flask_session.get('login_place'):
         return redirect(url_for('login'))
-    privilege = flask_session.get('privilege', '')
-    if privilege == 'assessment_therapist':
-        return redirect(url_for('assessment'))
     return render_template('dashboard.html', active_page='dashboard')
 
 @app.route('/login')
@@ -80,9 +75,6 @@ def login():
 
 @app.route('/dashboard')
 def dashboard():
-    privilege = flask_session.get('privilege', '')
-    if privilege == 'assessment_therapist':
-        return redirect(url_for('assessment'))
     return redirect(url_for('index'))
 
 @app.route('/devices')
@@ -91,21 +83,9 @@ def devices():
     if not flask_session.get('login_place'):
         return redirect(url_for('login'))
     privilege = flask_session.get('privilege', '')
-    if privilege in ('therapist', 'assessment_therapist'):
+    if privilege == 'therapist':
         return redirect(url_for('index'))
     return render_template('devices.html', active_page='devices')
-
-
-@app.route('/assessment')
-def assessment():
-    """Assessment Therapist PDF upload section."""
-    from flask import session as flask_session
-    if not flask_session.get('login_place'):
-        return redirect(url_for('login'))
-    privilege = flask_session.get('privilege', '')
-    if privilege != 'assessment_therapist':
-        return redirect(url_for('index'))
-    return render_template('assessment.html')
 
 
 if __name__ == '__main__':
