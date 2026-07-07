@@ -79,6 +79,20 @@ function switchTab(tab) {
   if (tab === 'device-issues') renderDeviceIssuesTab();
   if (tab === 'timeline')      renderTimelineTab();
   if (tab === 'notes')         renderNotesTab();
+  if (tab === 'expenses')      renderExpensesTab();
+}
+
+// ── Utility helpers ──────────────────────────────────────────────────────────
+
+function escapeHtml(text) {
+  const map = {
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#039;',
+  };
+  return String(text).replace(/[&<>"']/g, m => map[m]);
 }
 
 // ── Modal helpers ─────────────────────────────────────────────────────────────
@@ -9513,3 +9527,488 @@ function _noteCardHtml(note, isAdmin, attachUrl) {
 
 // Event-note loading/rendering for the Timeline detail panel lives with the
 // Timeline (master–detail) code above: _loadTimelineDetailNotes().
+
+// ── Expense Tracker Tab ──────────────────────────────────────────────────────────
+
+let _expensesCache = [];
+let _expensesUsedStatic = [];
+let _expensesIsEditable = false;
+let _expensesPatientGroup = 'control';
+
+const _EXPENSE_CATEGORIES = {
+  static: [
+    { id: 'demo_installation', label: 'Demo + Installation' },
+    { id: 'a0_assessment', label: 'A0 Assessment Cost' },
+    { id: 'day1', label: 'Day 1' },
+    { id: 'day2', label: 'Day 2' },
+    { id: 'day3', label: 'Day 3' },
+    { id: 'day15', label: 'Day 15' },
+    { id: 'day29', label: 'Day 29' },
+    { id: 'a1_assessment', label: 'A1 Assessment Cost' },
+    { id: 'a2_assessment', label: 'A2 Assessment Cost' },
+  ],
+  dynamic: [
+    { id: 'adverse_event_visit', label: 'Adverse Event Visit' },
+    { id: 'clinical_visit', label: 'Clinical Visit' },
+    { id: 'robot_issue_visit', label: 'Robot Issue Visit' },
+  ],
+};
+
+function renderExpensesTab() {
+  fetch(`/api/patients/${PATIENT_HOMER_ID}/expenses`, { credentials: 'include' })
+    .then(r => {
+      if (!r.ok) {
+        throw new Error(`HTTP ${r.status}: ${r.statusText}`);
+      }
+      return r.json();
+    })
+    .then(data => {
+      if (data.error) {
+        console.error('Expense API error:', data.error);
+        document.getElementById('expenses-content').innerHTML = `<div class="text-red-500 text-sm"><strong>Error:</strong> ${escapeHtml(data.error)}</div>`;
+        return;
+      }
+      _expensesCache = data.expenses || [];
+      _expensesUsedStatic = (data.used_static_categories && Array.isArray(data.used_static_categories)) ? data.used_static_categories : [];
+      _expensesIsEditable = data.is_editable || false;
+      _expensesPatientGroup = data.patient_group || 'control';
+
+      // DEBUG: Log API response
+      console.log('[DEBUG] renderExpensesTab API response:', {
+        expensesCount: _expensesCache.length,
+        usedStaticCategories: _expensesUsedStatic,
+        usedStaticType: typeof _expensesUsedStatic,
+        patientGroup: _expensesPatientGroup,
+        expenses: _expensesCache.map(e => ({ id: e.id, category: e.category, category_type: e.category_type })),
+        debugInfo: data.__debug__ || 'none'
+      });
+      if (data.__debug__) {
+        console.log('[DEBUG] Backend debug info:', data.__debug__);
+      }
+
+      // Calculate total amount
+      const totalAmount = _expensesCache.reduce((sum, e) => sum + (e.amount || 0), 0);
+      const LIMIT = 6000;
+      const percentage = Math.min((totalAmount / LIMIT) * 100, 100);
+      const isOverBudget = totalAmount > LIMIT;
+
+      // Update progress bar
+      const progressBar = document.getElementById('expense-progress-bar');
+      const totalAmountEl = document.getElementById('expense-total-amount');
+      const progressPercent = document.getElementById('expense-progress-percent');
+      const warningEl = document.getElementById('expense-warning');
+
+      if (progressBar) {
+        progressBar.style.width = percentage + '%';
+        progressBar.className = isOverBudget
+          ? 'bg-red-500 h-3 rounded-full transition-all duration-300'
+          : 'bg-blue-500 h-3 rounded-full transition-all duration-300';
+      }
+      if (totalAmountEl) {
+        totalAmountEl.textContent = '₹' + totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      }
+      if (progressPercent) {
+        progressPercent.textContent = Math.round(percentage) + '%';
+      }
+      if (warningEl) {
+        warningEl.classList.toggle('hidden', !isOverBudget);
+      }
+
+      // Hide Add button if not editable
+      const addBtn = document.getElementById('add-expense-btn');
+      if (addBtn) addBtn.classList.toggle('hidden', !_expensesIsEditable);
+
+      const content = document.getElementById('expenses-content');
+      if (_expensesCache.length === 0) {
+        content.innerHTML = `<div class="text-center py-8 text-slate-500 text-sm">No expenses logged yet.</div>`;
+      } else {
+        _expensesCache.sort((a, b) => (b.filed_at || '').localeCompare(a.filed_at || ''));
+        content.innerHTML = _expensesCache.map(e => _expenseCard(e)).join('');
+      }
+    })
+    .catch(err => {
+      console.error('Expense tab error:', err);
+      document.getElementById('expenses-content').innerHTML = `<div class="text-red-500 text-sm"><strong>Error:</strong> ${escapeHtml(err.message || 'Failed to load expenses.')}</div>`;
+    });
+}
+
+function _getCategoryLabel(category) {
+  for (const cat of _EXPENSE_CATEGORIES.static) {
+    if (cat.id === category) return cat.label;
+  }
+  for (const cat of _EXPENSE_CATEGORIES.dynamic) {
+    if (cat.id === category) return cat.label;
+  }
+  // Custom category - return as-is with title case
+  return category.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+}
+
+function _expenseCard(expense) {
+  const label = _getCategoryLabel(expense.category);
+  const date = expense.date ? new Date(expense.date).toLocaleDateString() : 'N/A';
+  const filed = expense.filed_at ? new Date(expense.filed_at).toLocaleString() : 'Unknown';
+  const editHistoryCount = (expense.edit_history || []).length;
+  const hasHistory = editHistoryCount > 0;
+
+  let editBtn = '';
+  if (_expensesIsEditable) {
+    editBtn = `<button onclick="openEditExpenseModal('${expense.id}')" class="inline-flex items-center gap-1 px-2.5 py-1 bg-blue-50 text-blue-600 rounded text-xs font-medium hover:bg-blue-100 border border-blue-200">
+      <i class="fas fa-pencil text-[10px]"></i> Edit
+    </button>`;
+  }
+
+  let historySection = '';
+  if (hasHistory) {
+    const historyHtml = expense.edit_history.map((h, i) => {
+      const editedAt = new Date(h.edited_at).toLocaleString();
+      const prevFields = Object.entries(h.previous || {})
+        .map(([k, v]) => {
+          if (k === 'amount') return `${k}: <strong>₹${v}</strong>`;
+          return `${k}: <strong>${escapeHtml(String(v))}</strong>`;
+        })
+        .join(', ') || '(no changes recorded)';
+      return `<div class="bg-slate-50 p-2 rounded border border-slate-100">
+        <div class="flex items-start justify-between mb-1">
+          <div class="text-xs font-medium text-slate-700">Edit ${i + 1}</div>
+          <div class="text-xs text-slate-500">${editedAt}</div>
+        </div>
+        <div class="text-xs text-slate-600 mb-1"><strong>By:</strong> ${escapeHtml(h.edited_by)}</div>
+        <div class="text-xs text-slate-600 mb-1"><strong>Reason:</strong> ${escapeHtml(h.reason)}</div>
+        <div class="text-xs text-slate-600"><strong>Previous:</strong> ${prevFields}</div>
+      </div>`;
+    }).join('');
+    historySection = `<details class="mt-3"><summary class="cursor-pointer text-xs font-medium text-blue-600 hover:text-blue-700 flex items-center gap-1">
+      <i class="fas fa-history text-[10px]"></i> Edit History (${editHistoryCount})
+    </summary>
+      <div class="mt-2 space-y-2">${historyHtml}</div></details>`;
+  }
+
+  return `<div class="bg-white border border-slate-200 rounded-lg p-4 mb-3 hover:shadow-sm transition-shadow">
+    <div class="flex items-start justify-between mb-3">
+      <div class="flex items-center gap-2 flex-1">
+        <span class="inline-block px-2.5 py-1 bg-blue-100 text-blue-700 rounded text-xs font-semibold">${escapeHtml(label)}</span>
+      </div>
+      ${editBtn}
+    </div>
+    <div class="space-y-2">
+      <div class="flex items-baseline justify-between">
+        <span class="text-slate-600 text-sm">Amount:</span>
+        <span class="text-lg font-bold text-slate-900">₹${expense.amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+      </div>
+      <div class="grid grid-cols-2 gap-3 text-sm">
+        <div>
+          <span class="text-slate-600">Date:</span>
+          <div class="font-medium text-slate-700">${date}</div>
+        </div>
+        <div>
+          <span class="text-slate-600">Filed:</span>
+          <div class="font-medium text-slate-700">${filed}</div>
+        </div>
+      </div>
+      <div>
+        <span class="text-slate-600 text-sm">Notes:</span>
+        <div class="text-sm text-slate-700 mt-1 p-2 bg-slate-50 rounded border border-slate-100">${escapeHtml(expense.notes)}</div>
+      </div>
+      <div class="text-xs text-slate-500 pt-1">Filed by: <strong>${escapeHtml(expense.filed_by)}</strong></div>
+    </div>
+
+    ${expense.bill_attachment ? `
+    <div class="mt-3 pt-3 border-t border-slate-100">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <i class="fas fa-file-pdf text-red-500"></i>
+          <div class="text-sm">
+            <div class="font-medium text-slate-700">Bill/Receipt</div>
+            <div class="text-xs text-slate-600">${escapeHtml(expense.bill_notes)}</div>
+          </div>
+        </div>
+        <a href="/api/patients/${PATIENT_HOMER_ID}/download-expense-bill/${expense.id}" class="text-xs text-blue-600 hover:underline font-medium" download>Download</a>
+      </div>
+    </div>
+    ` : ''}
+
+    ${historySection}
+  </div>`;
+}
+
+function updateExpenseCategoryInput() {
+  const select = document.getElementById('expense-category');
+  const customInput = document.getElementById('expense-category-custom');
+  if (select.value === '__custom__') {
+    customInput.classList.remove('hidden');
+    customInput.focus();
+  } else {
+    customInput.classList.add('hidden');
+    customInput.value = '';
+  }
+}
+
+function updateBillSection() {
+  const hasBill = document.getElementById('expense-has-bill').checked;
+  const billSection = document.getElementById('expense-bill-section');
+  if (hasBill) {
+    billSection.classList.remove('hidden');
+    document.getElementById('expense-bill-file').focus();
+  } else {
+    billSection.classList.add('hidden');
+    document.getElementById('expense-bill-file').value = '';
+    document.getElementById('expense-bill-filename').textContent = 'No file selected';
+    document.getElementById('expense-bill-notes').value = '';
+  }
+}
+
+function updateBillFilename() {
+  const fileInput = document.getElementById('expense-bill-file');
+  const filenameSpan = document.getElementById('expense-bill-filename');
+  if (fileInput.files && fileInput.files[0]) {
+    const file = fileInput.files[0];
+    if (!file.name.toLowerCase().endsWith('.pdf')) {
+      setError('add-expense-error', 'Only PDF files are allowed.');
+      fileInput.value = '';
+      filenameSpan.textContent = 'No file selected';
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setError('add-expense-error', 'File size must be less than 5MB.');
+      fileInput.value = '';
+      filenameSpan.textContent = 'No file selected';
+      return;
+    }
+    filenameSpan.textContent = file.name;
+  } else {
+    filenameSpan.textContent = 'No file selected';
+  }
+}
+
+function removeEditBill() {
+  if (confirm('Remove the attached bill? This cannot be undone.')) {
+    document.getElementById('edit-bill-section-wrapper').classList.add('hidden');
+    document.getElementById('edit-expense-modal').dataset.removeBill = 'true';
+  }
+}
+
+// Attach file change listener
+document.addEventListener('DOMContentLoaded', function() {
+  const fileInput = document.getElementById('expense-bill-file');
+  if (fileInput) {
+    fileInput.addEventListener('change', updateBillFilename);
+  }
+});
+
+function openAddExpenseModal() {
+  setError('add-expense-error', '');
+  document.getElementById('expense-category').value = '';
+  document.getElementById('expense-category-custom').value = '';
+  document.getElementById('expense-category-custom').classList.add('hidden');
+  document.getElementById('expense-date').value = '';
+  document.getElementById('expense-amount').value = '';
+  document.getElementById('expense-notes').value = '';
+
+  // Populate category options and disable already-used static ones
+  const select = document.getElementById('expense-category');
+
+  // Get ALL option elements (including inside optgroups)
+  const allOptions = select.querySelectorAll('option');
+
+  // DEBUG: Log current state
+  console.log('[DEBUG] openAddExpenseModal START');
+  console.log('[DEBUG] _expensesUsedStatic:', _expensesUsedStatic, '(type: ' + typeof _expensesUsedStatic + ')');
+  console.log('[DEBUG] _expensesCache:', _expensesCache);
+  console.log('[DEBUG] patient group:', _expensesPatientGroup);
+  console.log('[DEBUG] found', allOptions.length, 'total options in select');
+
+  allOptions.forEach(opt => {
+    const optValue = opt.value;
+
+    // Skip empty value option
+    if (!optValue || optValue === '__custom__') {
+      console.log(`[DEBUG] skipping special option: value="${optValue}"`);
+      return;
+    }
+
+    const isUsed = Array.isArray(_expensesUsedStatic) && _expensesUsedStatic.includes(optValue);
+    const isDemoControl = optValue === 'demo_installation' && _expensesPatientGroup !== 'experimental';
+    const shouldDisable = isUsed || isDemoControl;
+
+    console.log(`[DEBUG] opt value="${optValue}", isUsed=${isUsed}, isDemoControl=${isDemoControl}, shouldDisable=${shouldDisable}, disabled_before=${opt.disabled}`);
+
+    // Always explicitly set the disabled state
+    opt.disabled = shouldDisable;
+
+    // Update label
+    const originalText = opt.textContent.replace(' (already logged)', '').trim();
+    if (isUsed) {
+      opt.textContent = originalText + ' (already logged)';
+    } else {
+      opt.textContent = originalText;
+    }
+    console.log(`[DEBUG] after update: disabled=${opt.disabled}, text="${opt.textContent}"`);
+  });
+
+  console.log('[DEBUG] openAddExpenseModal END - total options processed:', allOptions.length);
+
+  showModal('add-expense-modal');
+  setTimeout(() => document.getElementById('expense-category')?.focus(), 50);
+}
+
+async function saveExpense() {
+  let category = document.getElementById('expense-category').value.trim();
+  const customCategory = document.getElementById('expense-category-custom').value.trim();
+  const date = document.getElementById('expense-date').value.trim();
+  const amount = document.getElementById('expense-amount').value.trim();
+  const notes = document.getElementById('expense-notes').value.trim();
+  const hasBill = document.getElementById('expense-has-bill').checked;
+  const billFile = document.getElementById('expense-bill-file').files[0];
+  const billNotes = document.getElementById('expense-bill-notes').value.trim();
+
+  // Handle custom category
+  if (category === '__custom__') {
+    if (!customCategory) {
+      setError('add-expense-error', 'Please enter a custom category name.');
+      return;
+    }
+    category = customCategory;
+  }
+
+  if (!category) {
+    setError('add-expense-error', 'Please select a category.');
+    return;
+  }
+  if (!date) {
+    setError('add-expense-error', 'Please select a date.');
+    return;
+  }
+  if (!amount) {
+    setError('add-expense-error', 'Please enter an amount.');
+    return;
+  }
+  if (!notes) {
+    setError('add-expense-error', 'Please enter notes.');
+    return;
+  }
+
+  // Bill validation
+  if (hasBill) {
+    if (!billFile) {
+      setError('add-expense-error', 'Please select a bill PDF.');
+      return;
+    }
+    if (!billNotes) {
+      setError('add-expense-error', 'Please enter a description for the bill.');
+      return;
+    }
+  }
+
+  // DEBUG: Determine category type
+  console.log('[DEBUG saveExpense] category:', category);
+  console.log('[DEBUG] _EXPENSE_CATEGORIES.static:', _EXPENSE_CATEGORIES.static.map(c => c.id));
+  const isStatic = _EXPENSE_CATEGORIES.static.some(c => c.id === category);
+  console.log('[DEBUG] isStatic:', isStatic);
+  const categoryType = isStatic ? 'static' : 'dynamic';
+  console.log('[DEBUG] categoryType determined as:', categoryType);
+
+  setLoading('add-expense-save', true);
+
+  const formData = new FormData();
+  formData.append('category_type', categoryType);
+  formData.append('category', category);
+  formData.append('date', date);
+  formData.append('amount', parseFloat(amount));
+  formData.append('notes', notes);
+  if (hasBill && billFile) {
+    formData.append('bill_file', billFile);
+    formData.append('bill_notes', billNotes);
+  }
+
+  const res = await fetch(`/api/patients/${PATIENT_HOMER_ID}/expenses`, {
+    method: 'POST',
+    credentials: 'include',
+    body: formData,
+  });
+  let data;
+  try { data = await res.json(); } catch { data = { error: `Server error (${res.status})` }; }
+  setLoading('add-expense-save', false);
+
+  if (!res.ok) {
+    setError('add-expense-error', data.error || 'Failed to save expense.');
+    return;
+  }
+
+  hideModal('add-expense-modal');
+  setTimeout(() => renderExpensesTab(), 300);
+}
+
+function openEditExpenseModal(expenseId) {
+  const expense = _expensesCache.find(e => e.id === expenseId);
+  if (!expense) return;
+
+  const label = _getCategoryLabel(expense.category);
+  document.getElementById('edit-expense-category-label').textContent = label;
+  document.getElementById('edit-expense-date').value = expense.date || '';
+  document.getElementById('edit-expense-amount').value = expense.amount || '';
+  document.getElementById('edit-expense-notes').value = expense.notes || '';
+  document.getElementById('edit-expense-reason').value = '';
+  setError('edit-expense-error', '');
+
+  // Render edit history
+  const historyDiv = document.getElementById('edit-expense-history');
+  if ((expense.edit_history || []).length === 0) {
+    historyDiv.innerHTML = '<p class="text-slate-500">No edits yet.</p>';
+  } else {
+    historyDiv.innerHTML = expense.edit_history.map((h, i) => {
+      const editedAt = new Date(h.edited_at).toLocaleString();
+      const prevStr = Object.entries(h.previous || {})
+        .map(([k, v]) => {
+          if (k === 'amount') return `${k}: ₹${v}`;
+          return `${k}: ${v}`;
+        })
+        .join(', ') || '(no changes)';
+      return `<div class="border-b border-slate-100 pb-2 last:border-b-0">
+        <div class="font-medium">Edit ${i + 1} — ${h.edited_by} at ${editedAt}</div>
+        <div class="text-slate-600">Reason: ${escapeHtml(h.reason)}</div>
+        <div class="text-slate-600">Changed: ${prevStr}</div>
+      </div>`;
+    }).join('');
+  }
+
+  // Store the expense ID for save
+  document.getElementById('edit-expense-modal').dataset.expenseId = expenseId;
+  showModal('edit-expense-modal');
+}
+
+async function saveExpenseEdit() {
+  const expenseId = document.getElementById('edit-expense-modal').dataset.expenseId;
+  const date = document.getElementById('edit-expense-date').value.trim();
+  const amount = document.getElementById('edit-expense-amount').value.trim();
+  const notes = document.getElementById('edit-expense-notes').value.trim();
+  const reason = document.getElementById('edit-expense-reason').value.trim();
+
+  if (!reason) {
+    setError('edit-expense-error', 'Please provide a reason for the edit.');
+    return;
+  }
+
+  setLoading('edit-expense-save', true);
+  const res = await fetch(`/api/patients/${PATIENT_HOMER_ID}/expenses/${expenseId}`, {
+    method: 'PUT',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      date: date || undefined,
+      amount: amount ? parseFloat(amount) : undefined,
+      notes: notes || undefined,
+      reason,
+    }),
+  });
+  let data;
+  try { data = await res.json(); } catch { data = { error: `Server error (${res.status})` }; }
+  setLoading('edit-expense-save', false);
+
+  if (!res.ok) {
+    setError('edit-expense-error', data.error || 'Failed to save changes.');
+    return;
+  }
+
+  hideModal('edit-expense-modal');
+  setTimeout(() => renderExpensesTab(), 300);
+}

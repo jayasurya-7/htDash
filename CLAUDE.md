@@ -454,8 +454,9 @@ Tabs appear left-to-right in this order. Visibility is per group.
 | Device Issues  | ✅           | ⬜ hidden |
 | Timeline       | ✅           | ✅        |
 | Notes          | ✅           | ✅        |
+| Expenses       | ✅           | ✅        |
 
-Notes is the last tab. It is visible to all three roles (admin, therapist, engineer) — unlike Adverse Events / Device Issues which are role-restricted — but each role sees only its own notes bucket (admin sees all). See the Notes feature spec below.
+**Expenses** is the last tab, visible to admin/therapist/supervisor (engineers cannot add/edit, only view if they somehow access). See the Expense Tracker feature spec below.
 
 ### Device Issues tab
 
@@ -2032,6 +2033,55 @@ filed_at = _now_str()  # Returns timestamp in IST
 - ✅ Normal single-device assignments work as expected
 - ✅ Different device types can be assigned to same patient (Pluto + Mars + etc.)
 - ✅ Error messages clear and actionable
+
+### Expense Tracker ✅ (July 2026)
+
+**Feature:** Per-patient expense ledger with editable entries and mandatory audit trail. Tracks costs for standard protocol-day visits (Demo + Installation, Days 1/2/3/15/29) and ad-hoc visit types (Adverse Event Visit, Clinical Visit, Robot Issue Visit).
+
+**Architecture:**
+
+- **New tab on Patient Detail page** (not a separate URL) — follows the same one-URL/JS-tab-switch convention as ADL, Adverse Events, and Notes.
+- **Data storage:** `expense_tracker.json` per patient (role-independent, unlike notes).
+- **Category model:**
+  - **Static** (one entry allowed per patient): `demo_installation` (experimental only), `day1`, `day2`, `day3`, `day15`, `day29`.
+  - **Dynamic** (unlimited): `adverse_event_visit`, `clinical_visit`, `robot_issue_visit`, or user-typed custom names.
+- **Entry fields:** `amount` (positive number), `date` (YYYY-MM-DD, not future), `notes` (required on create), `filed_by`, `filed_at`.
+- **Edit-with-audit-trail:** Editing requires a mandatory `reason`. Previous values stored in `edit_history` array (mirrors `appointment_reschedules`/`appointment_cancellations` pattern in `api_reschedule_assessment_appointment`).
+
+**Access Control:**
+
+| Role | Tab visible | Add/Edit | View |
+|---|---|---|---|
+| Admin | ✅ | ✅ | ✅ |
+| Therapist | ✅ | ✅ | ✅ |
+| Supervisor | ✅ | ⬜ (view-only) | ✅ |
+| Engineer | ⬜ hidden | — | — |
+
+**Files Added:**
+- `routes/expense_tracker.py` — Blueprint with three endpoints: `GET /api/patients/<id>/expenses`, `POST /api/patients/<id>/expenses`, `PUT /api/patients/<id>/expenses/<id>`.
+- `utils/data_access.py` — `read_patient_expenses()`, `write_patient_expenses()` (mirrors notes pattern).
+
+**Files Modified:**
+- `main.py` — Import and register blueprint (no URL prefix, like notes).
+- `templates/patient_detail.html` — Expense Tracker tab button, pane, Add Expense modal, Edit Expense modal.
+- `static/js/app/patient_detail.js` — Tab render function, modal openers/savers, category filtering, edit history display.
+- `CLAUDE.md` — Added tab to Patient Detail Tab Order table, this Enhancements section.
+
+**Validation:**
+
+- Client-side: date picker bounds, required fields (category, date, amount, notes on create; reason on edit), amount must be positive.
+- Server-side: same bounds + 400 for invalid category, 400 for demo_installation on control patients, 400 for empty notes/reason, 409 for duplicate static category.
+
+**Testing Verified:**
+- ✅ Expense Tracker tab appears after Notes tab.
+- ✅ Category picker shows 6 static + 3 dynamic options; `demo_installation` disabled for control patients and already-used static categories.
+- ✅ Add entry: amount, date, notes required; saved with `filed_by`/`filed_at` server-stamped.
+- ✅ Duplicate static category returns 409 error.
+- ✅ Edit entry: reason required; previous values appended to `edit_history`; live fields updated.
+- ✅ Multiple dynamic entries allowed (adverse_event_visit added twice succeeds).
+- ✅ Supervisor sees tab but Add/Edit buttons hidden and greyed.
+- ✅ Engineer doesn't see Expense Tracker tab at all.
+- ✅ `expense_tracker.json` created per patient with correct schema.
 
 ---
 

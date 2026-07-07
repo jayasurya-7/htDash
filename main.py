@@ -18,6 +18,7 @@ from routes.notes import bp as notes_bp
 from routes.devices import bp as devices_bp
 from routes.sim_cards import bp as sim_cards_bp
 from routes.time_records import bp as time_records_bp
+from routes.expense_tracker import bp as expense_tracker_bp
 
 app = Flask(__name__)
 app.config.from_object(Config)
@@ -38,6 +39,7 @@ app.register_blueprint(exit_bp, url_prefix='/exit')
 app.register_blueprint(call_logs_bp)
 app.register_blueprint(patient_events_bp, url_prefix='/patient_events')
 app.register_blueprint(notes_bp)
+app.register_blueprint(expense_tracker_bp)
 app.register_blueprint(devices_bp, url_prefix='/devices')
 app.register_blueprint(sim_cards_bp, url_prefix='/sim_cards')
 app.register_blueprint(time_records_bp, url_prefix='/time_records')

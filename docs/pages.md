@@ -1492,3 +1492,105 @@ Implemented via `_shift_future_incomplete_events(events_data, pause_days)` in `r
 - Applied server-side at the moment `trainingPausedDate` is cleared (same write as `cumulativePauseDays` update).
 - Free events (null `scheduled_date`) and already-completed events are not touched.
 - If broken protocol was set (Rule 1), the shift still runs — the shifted dates don't matter for a broken-protocol patient, but it keeps the data consistent.
+
+---
+
+## Expense Tracker Tab
+
+Per-patient expense ledger tracking costs for standard protocol-day visits (Demo + Installation, Days 1/2/3/15/29) and ad-hoc visit types (Adverse Event Visit, Clinical Visit, Robot Issue Visit).
+
+### Access Control
+
+| Role | Visibility | Add/Edit | View |
+|---|---|---|---|
+| Admin | ✅ | ✅ | ✅ |
+| Therapist | ✅ | ✅ | ✅ |
+| Supervisor | ✅ | ⬜ (view-only) | ✅ |
+| Engineer | ⬜ hidden | — | — |
+
+Supervisor sees the tab with all expense cards displayed, but the "Add Expense" button is hidden and Edit buttons are disabled/greyed.
+
+### Category Model
+
+**Static categories** (one entry per patient, per category):
+- `demo_installation` — Demo + Installation (experimental only)
+- `day1`, `day2`, `day3`, `day15`, `day29` — Protocol day expenses
+
+**Dynamic categories** (unlimited entries per patient, per category):
+- `adverse_event_visit` — Adverse Event Visit
+- `clinical_visit` — Clinical Visit
+- `robot_issue_visit` — Robot Issue Visit
+- **Custom** — User-typed category name for any other visit/expense type not in the predefined list
+
+Static category picker disables/greys options already logged. `demo_installation` is hidden entirely for control-group patients. Dynamic categories include a "Custom…" option that opens a text input for user-typed category names.
+
+### Create Expense (`openAddExpenseModal()`)
+
+**Modal fields:**
+- **Category** — Required `<select>` with two `<optgroup>`s: "Standard (by Day)" and "Visit-Based". Validation: known category id required; `demo_installation` only for experimental patients (400 if violated); duplicate static categories blocked (409 if already logged).
+- **Date** — Required date input (YYYY-MM-DD). Validation: not in the future (400 if violated).
+- **Amount** — Required number input (positive). Validation: > 0 (400 if violated).
+- **Notes** — Required textarea. Validation: non-empty (400 if empty).
+
+**Client-side validation:** Blocks save if any required field is empty or invalid; displays error messages.
+
+**Server-side validation:** Same bounds + 400 for unknown category, 400 for `demo_installation` on control patients, 400 for empty notes, 409 for duplicate static category.
+
+**On save:** Entry created with server-stamped `filed_by` (session loginid) and `filed_at` (ISO 8601 seconds). List re-renders showing newest-first.
+
+### Edit Expense (`openEditExpenseModal(id)`)
+
+**Modal fields:**
+- **Category** — Read-only display (not editable).
+- **Date** — Optional date input. Validation: not in the future (same as create). Omit from request if unchanged.
+- **Amount** — Optional number input. Validation: > 0. Omit if unchanged.
+- **Notes** — Optional textarea. Omit if unchanged.
+- **Reason for Edit** — Required textarea. Validation: non-empty (400 if empty).
+- **Edit History** — Collapsible read-only section showing past edits (timestamp, editor, reason, previous values).
+
+**Client-side validation:** Blocks save if `Reason for Edit` is empty; displays error.
+
+**Server-side validation:** Requires non-empty reason (400 if empty). Any provided field is validated (date not future, amount > 0) and updated live. Previous values appended to `edit_history` alongside reason + timestamp before fields are overwritten.
+
+**On save:** List re-renders showing the updated entry with `edit_history` section expanded if edits exist.
+
+### Display
+
+Expenses displayed as cards (newest-first by `filed_at`), grouped by `category_type`:
+
+**Card header:** 
+- Category badge (color-coded by type: blue for standard, green for visit-based)
+- Edit button (hidden if not editable)
+
+**Card body:**
+- Amount (₹ formatted with locale thousands separators)
+- Date (localized format)
+- Notes (full text, escaped)
+- Filed meta: "Filed by `<loginid>` at `<timestamp>`"
+- Edit history (collapsible details with per-edit: timestamp, editor, reason, changed fields + previous values)
+
+**Empty state:** "No expenses logged yet." message if list is empty.
+
+### Endpoints
+
+- **GET** `/api/patients/<homer_id>/expenses` — Role-gated to admin, therapist, supervisor. Returns: list of all expenses + set of used static categories + `is_editable` flag + `patient_group` (for filtering `demo_installation`).
+- **POST** `/api/patients/<homer_id>/expenses` — Role-gated to admin, therapist. Creates entry. Payload: `{ category_type, category, date, amount, notes }`. Returns: created expense or error.
+- **PUT** `/api/patients/<homer_id>/expenses/<expense_id>` — Role-gated to admin, therapist. Updates entry. Payload: `{ date?, amount?, notes?, reason }` (reason required, at least one field required). Returns: updated expense with edit_history appended or error.
+
+### Error Responses
+
+| Status | Condition | Message |
+|--------|-----------|---------|
+| 401 | Not authenticated | `Not authenticated` |
+| 403 | Role not admin/therapist/supervisor | `Forbidden` |
+| 404 | Patient not found | `Patient not found` |
+| 404 | Expense not found (edit) | `Expense not found` |
+| 400 | Empty notes (create) | `Notes are required.` |
+| 400 | Empty reason (edit) | `Reason is required to edit an expense.` |
+| 400 | Future date | `Date cannot be in the future.` |
+| 400 | Invalid date format | `Date must be YYYY-MM-DD.` |
+| 400 | Amount ≤ 0 | `Amount must be positive.` |
+| 400 | Invalid amount | `Amount must be a positive number.` |
+| 400 | Unknown category | `Unknown category.` |
+| 400 | `demo_installation` on control patient | `Demo + Installation is only for experimental patients.` |
+| 409 | Duplicate static category | `<category> already logged — edit the existing entry instead.` |

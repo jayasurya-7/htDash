@@ -1561,3 +1561,114 @@ Each event's group, type, window, clinical purpose, dependencies, and date sourc
 | `patient_call` | Patient Call | anytime | — | — | — | — | `user` | Document any unscheduled contact with the patient or carer. May spawn `adverse_event`, `robot_issue_call` (exp only), and/or `watch_record` entries. |
 | `pre_discontinuation` | Pre-Discontinuation | anytime | — | — | — | — | `user` | Document withdrawal from the study before group assignment. |
 | `discontinuation` | Discontinuation | anytime | — | — | — | — | `user` | Document withdrawal from the study after group assignment. |
+
+---
+
+## expense_tracker.json
+
+Per-patient expense ledger storing costs for standard protocol-day visits and ad-hoc visit types. Entries are editable with mandatory reason; previous values stored in an audit trail.
+
+**Storage:** `data/<hospital>/patients/<homer_id>/expense_tracker.json`
+
+**Access:** Admin and Therapist can create and edit (edit requires reason). Supervisor can view. Engineer has no access.
+
+**Root structure:**
+```json
+{
+  "expenses": [
+    {
+      "id": "uuid4-string",
+      "category_type": "static | dynamic",
+      "category": "day2 | adverse_event_visit | ...",
+      "date": "YYYY-MM-DD",
+      "amount": 1500.50,
+      "notes": "string",
+      "filed_by": "loginid",
+      "filed_at": "ISO 8601 seconds (YYYY-MM-DDTHH:MM:SS)",
+      "edit_history": [
+        {
+          "edited_at": "ISO 8601 seconds",
+          "edited_by": "loginid",
+          "reason": "string (required)",
+          "previous": { "date": "...", "amount": ..., "notes": "..." }
+        }
+      ]
+    }
+  ]
+}
+```
+
+**Fields:**
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `id` | UUID | Assigned server-side on create. |
+| `category_type` | `static` \| `dynamic` | `static` = protocol-day categories (one per patient); `dynamic` = ad-hoc visit types (unlimited). |
+| `category` | string | **Static:** one of `demo_installation`, `day1`, `day2`, `day3`, `day15`, `day29`. **Dynamic:** one of the predefined `adverse_event_visit`, `clinical_visit`, `robot_issue_visit`, OR any user-typed custom name (free text). `demo_installation` only for experimental-group patients; server returns 400 if attempted for control patients. |
+| `date` | `YYYY-MM-DD` | Date the expense was incurred. Server validates not in the future (400 if violated). |
+| `amount` | number | Positive decimal. Server validates > 0 (400 otherwise). |
+| `notes` | string | Required on create (400 if empty). May be empty when editing via `notes: undefined` in the PUT request. |
+| `filed_by` | string | Loginid of the user who created the entry. Server-stamped. |
+| `filed_at` | ISO 8601 seconds | When the entry was created. Server-stamped using `Config.TIMEZONE` (IST). |
+| `edit_history` | array | Append-only. Each edit appends `{ edited_at, edited_by, reason, previous }` before live fields are updated. `reason` is required; empty reason returns 400. `previous` is a dict of fields that changed (omitted fields unchanged). |
+
+**Examples:**
+
+Create a Day 2 expense:
+```json
+{
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "category_type": "static",
+  "category": "day2",
+  "date": "2026-06-03",
+  "amount": 2000.00,
+  "notes": "Travel + therapist salary for Day 2 home visit",
+  "filed_by": "RP-HS-1002",
+  "filed_at": "2026-06-25T15:45:30",
+  "edit_history": []
+}
+```
+
+Edit the amount with a reason:
+```json
+{
+  "...": "...",
+  "amount": 2500.00,
+  "edit_history": [
+    {
+      "edited_at": "2026-06-26T10:30:15",
+      "edited_by": "RP-HS-1002",
+      "reason": "Corrected mileage calculation",
+      "previous": { "amount": 2000.00 }
+    }
+  ]
+}
+```
+
+Add a second Adverse Event Visit expense:
+```json
+{
+  "id": "660e8400-e29b-41d4-a716-446655440001",
+  "category_type": "dynamic",
+  "category": "adverse_event_visit",
+  "date": "2026-06-10",
+  "amount": 1500.00,
+  "notes": "Unscheduled visit to address patient's pain",
+  "filed_by": "RP-HS-1002",
+  "filed_at": "2026-06-25T16:00:00",
+  "edit_history": []
+}
+```
+
+**Validation:**
+
+| Scenario | Status | Message |
+|----------|--------|---------|
+| Create with empty notes | 400 | `Notes are required.` |
+| Create with future date | 400 | `Date cannot be in the future.` |
+| Create with amount ≤ 0 | 400 | `Amount must be positive.` |
+| Create duplicate static category | 409 | `day2 already logged — edit the existing entry instead.` |
+| Create `demo_installation` for control patient | 400 | `Demo + Installation is only for experimental patients.` |
+| Edit without reason | 400 | `Reason is required to edit an expense.` |
+| Edit with future date | 400 | `Date cannot be in the future.` |
+| Edit with amount ≤ 0 | 400 | `Amount must be positive.` |

@@ -729,3 +729,38 @@ def write_patient_notes(hospital_folder: str, patient_id: str, data: dict) -> No
     with open(tmp, 'w', encoding='utf-8') as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
     os.replace(tmp, path)
+
+
+# ── Expense Tracker (per-patient expense log) ─────────────────────────────────────
+
+
+def read_patient_expenses(hospital_folder: str, patient_id: str) -> dict:
+    """Read expense_tracker.json for a patient. Returns empty structure if absent."""
+    if Config.USE_S3:
+        data = s3_read_json(f"{hospital_folder}/patients/{patient_id}/expense_tracker.json")
+    else:
+        path = get_patients_path(hospital_folder) / patient_id / 'expense_tracker.json'
+        if not path.exists():
+            return {"expenses": []}
+        try:
+            with open(path, encoding='utf-8') as f:
+                data = json.load(f)
+        except Exception:
+            return {"expenses": []}
+    if not isinstance(data, dict) or "expenses" not in data:
+        return {"expenses": []}
+    return data if isinstance(data.get("expenses"), list) else {"expenses": []}
+
+
+def write_patient_expenses(hospital_folder: str, patient_id: str, data: dict) -> None:
+    """Write (create or update) expense_tracker.json for a patient atomically."""
+    if Config.USE_S3:
+        s3_write_json(f"{hospital_folder}/patients/{patient_id}/expense_tracker.json", data)
+        return
+    patient_dir = get_patients_path(hospital_folder) / patient_id
+    patient_dir.mkdir(parents=True, exist_ok=True)
+    path = patient_dir / 'expense_tracker.json'
+    tmp = path.with_suffix('.tmp')
+    with open(tmp, 'w', encoding='utf-8') as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+    os.replace(tmp, path)
