@@ -100,6 +100,8 @@ function escapeHtml(text) {
 function showModal(id) {
   const m = document.getElementById(id);
   if (!m) return;
+  // Hide PDF preview panel (if any) when opening a new modal
+  if (window._hidePdfPreview) window._hidePdfPreview();
   m.style.display = 'flex';
   // Date Rule Framework: apply universal completion-date bounds to every date
   // input in the modal that hasn't been constrained by the opener. The modal
@@ -9754,6 +9756,8 @@ function updateBillSection() {
     document.getElementById('expense-bill-file').value = '';
     document.getElementById('expense-bill-filename').textContent = 'No file selected';
     document.getElementById('expense-bill-notes').value = '';
+    // Hide PDF preview panel when unchecking "Attach Bill"
+    if (window._hidePdfPreview) window._hidePdfPreview();
   }
 }
 
@@ -9784,6 +9788,8 @@ function removeEditBill() {
   if (confirm('Remove the attached bill? This cannot be undone.')) {
     document.getElementById('edit-bill-section-wrapper').classList.add('hidden');
     document.getElementById('edit-expense-modal').dataset.removeBill = 'true';
+    // Hide PDF preview panel when removing attached bill
+    if (window._hidePdfPreview) window._hidePdfPreview();
   }
 }
 
