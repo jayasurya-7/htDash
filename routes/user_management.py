@@ -1172,7 +1172,7 @@ def api_available_devices(homer_id):
 
 @bp.route('/api/patients/<homer_id>/available-agwatches', methods=['GET'])
 def api_available_agwatches(homer_id):
-    """Return available AG watches plus the patient's currently-assigned watches."""
+    """Return available AG watches plus the patient's currently-assigned watch for affected side."""
     if not flask_session.get('login_place'):
         return jsonify({'error': 'Not authenticated'}), 401
     folder = find_patient_folder(flask_session['login_place'], homer_id)
@@ -1181,10 +1181,10 @@ def api_available_agwatches(homer_id):
 
     available = get_available_devices(folder, 'agwatch')
 
-    # Also return the currently-assigned watches so the modal can offer
-    # "keep same watch" (new_id = old_id) when no swap is needed.
+    # Return the currently-assigned watch for the affected side only
     patient = read_patient_meta(folder, homer_id)
     inventory = {d['id']: d for d in read_device_inventory(folder, 'agwatch')}
+    affected_side = patient.get('trainingSide', 'Right')
 
     def current_watch(watch_id):
         if not watch_id:
@@ -1192,10 +1192,15 @@ def api_available_agwatches(homer_id):
         d = inventory.get(watch_id)
         return {'id': d['id'], 'serial': d.get('serial', '')} if d else None
 
+    if affected_side == 'Right':
+        current = current_watch(patient.get('agWatchRightID'))
+    else:
+        current = current_watch(patient.get('agWatchLeftID'))
+
     return jsonify({
         'agwatch':       available,
-        'current_right': current_watch(patient.get('agWatchRightID')),
-        'current_left':  current_watch(patient.get('agWatchLeftID')),
+        'current_right': current,
+        'current_left':  current,
     })
 
 
@@ -1430,6 +1435,7 @@ def api_create_patient():
         'agWatchRightID':             None,
         'agWatchLeftID':              None,
     }
+    # Keep both fields for backward compatibility, but only one will be populated based on trainingSide
     write_patient_meta(folder, homer_id, patient_data)
     create_patient_folders(folder, homer_id, 'unassigned')
     create_patient_log(folder, homer_id)
@@ -3057,6 +3063,7 @@ def api_complete_adverse_event(homer_id):
     training_blocked          = bool(body.get('training_blocked', False))
     scheduled_followup_visit  = (body.get('scheduled_followup_visit') or '').strip() or None
     scheduled_clinical_visit  = (body.get('scheduled_clinical_visit') or '').strip() or None
+    severity_level            = (body.get('severity_level') or '').strip()
 
     if not event_id:
         return jsonify({'error': 'event_id is required.'}), 400
@@ -3072,6 +3079,10 @@ def api_complete_adverse_event(homer_id):
         return jsonify({'error': 'Description is required.'}), 400
     if not action_taken:
         return jsonify({'error': 'Action taken is required.'}), 400
+    if not severity_level:
+        return jsonify({'error': 'Severity level is required.'}), 400
+    if severity_level not in ('Investigator', 'Consultant', 'IRB'):
+        return jsonify({'error': 'Invalid severity level.'}), 400
     if scheduled_followup_visit:
         try:
             datetime.strptime(scheduled_followup_visit, '%Y-%m-%dT%H:%M')
@@ -3113,6 +3124,7 @@ def api_complete_adverse_event(homer_id):
         'description':              description,
         'action_taken':             action_taken,
         'training_blocked':         training_blocked,
+        'severity_level':           severity_level,
         'scheduled_followup_visit': followup_visit_stub_id,
         'scheduled_clinical_visit': clinical_visit_stub_id,
     }
@@ -3284,7 +3296,7 @@ def api_complete_adverse_event_followup(homer_id):
     stub_ae_ids = entry.get('adverse_event_ids', [])
     resolved_ids = {r['adverse_event_id'] for r in ae_discussions if r.get('resolved')}
 
-    # Look up each AE to check training_blocked
+    # Look up each AE to check training_blocked and SAE status
     training_ended = bool(patient and (
         patient.get('trainingCompletionDate') or
         patient.get('brokenProtocolDate') or
@@ -3301,15 +3313,29 @@ def api_complete_adverse_event_followup(homer_id):
         ae_id = r.get('adverse_event_id')
         if ae_id not in stub_ae_ids:
             return jsonify({'error': f'Unknown adverse_event_id: {ae_id}'}), 400
+        ae = free_aes.get(ae_id, {})
         if r.get('resolved'):
-            ae = free_aes.get(ae_id, {})
             if ae.get('training_blocked') and not training_ended and not (r.get('can_resume_from') or '').strip():
                 return jsonify({'error': 'can_resume_from is required for resolved training-blocked events.'}), 400
+        # Validate severity level is required for all AEs
+        severity = r.get('severity_level', '').strip()
+        if not severity:
+            ae_alias = ae.get('alias', 'Adverse Event')
+            return jsonify({'error': f'Severity level is required for {ae_alias}.'}), 400
+        if severity not in ('Investigator', 'Consultant', 'IRB'):
+            return jsonify({'error': f'Invalid severity level: {severity}'}), 400
 
     filed_at = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
     today    = date.today()
     tomorrow = (today + timedelta(days=1)).strftime('%Y-%m-%dT%H:%M')
     today_str = today.strftime('%Y-%m-%dT%H:%M')
+
+    # Update severity level on AE entries if they were recorded in follow-up
+    for r in ae_discussions:
+        ae_id = r.get('adverse_event_id')
+        new_severity = r.get('severity_level')
+        if new_severity and ae_id in free_aes:
+            free_aes[ae_id]['severity_level'] = new_severity
 
     complete_entry = {
         **entry,
@@ -3699,6 +3725,13 @@ def api_complete_ae_followup_visit(homer_id):
             if ae.get('training_blocked') and not training_ended and not (r.get('can_resume_from') or '').strip():
                 return jsonify({'error': 'can_resume_from is required for resolved training-blocked events.'}), 400
 
+    # Update severity level on AE entries if they were recorded in follow-up
+    for r in ae_discussions:
+        ae_id = r.get('adverse_event_id')
+        new_severity = r.get('severity_level')
+        if new_severity and ae_id in free_aes:
+            free_aes[ae_id]['severity_level'] = new_severity
+
     filed_at = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
 
     complete_entry = {
@@ -3826,6 +3859,13 @@ def api_complete_ae_clinical_visit(homer_id):
             ae = free_aes.get(ae_id, {})
             if ae.get('training_blocked') and not training_ended and not (r.get('can_resume_from') or '').strip():
                 return jsonify({'error': 'can_resume_from is required for resolved training-blocked events.'}), 400
+
+    # Update severity level on AE entries if they were recorded in follow-up
+    for r in ae_discussions:
+        ae_id = r.get('adverse_event_id')
+        new_severity = r.get('severity_level')
+        if new_severity and ae_id in free_aes:
+            free_aes[ae_id]['severity_level'] = new_severity
 
     filed_at = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
 
@@ -5433,7 +5473,7 @@ def api_complete_followup_call(homer_id):
 
 @bp.route('/api/patients/<homer_id>/complete-event/watch-record', methods=['POST'])
 def api_complete_watch_record(homer_id):
-    """Complete a watch_record event: assign watches, seed next chain entry."""
+    """Complete a watch_record event: assign watch to affected side, seed next chain entry."""
     if not flask_session.get('login_place'):
         return jsonify({'error': 'Not authenticated'}), 401
     if flask_session.get('privilege') not in ('admin', 'engineer'):
@@ -5442,17 +5482,18 @@ def api_complete_watch_record(homer_id):
     if not folder:
         return jsonify({'error': 'Patient not found'}), 404
 
-    # Check if patient is discontinued
     patient = read_patient_meta(folder, homer_id)
-    if patient and patient.get('discontinuationDate'):
+    if not patient:
+        return jsonify({'error': 'Patient not found'}), 404
+
+    if patient.get('discontinuationDate'):
         return jsonify({'error': 'Patient is discontinued. No further changes are allowed.'}), 403
 
     data               = request.get_json() or {}
     event_id           = data.get('event_id')
-    ag_right_new       = data.get('ag_watch_right_new')   # str or None
-    ag_left_new        = data.get('ag_watch_left_new')    # str or None
-    right_old_lost     = bool(data.get('ag_watch_right_old_lost', False))
-    left_old_lost      = bool(data.get('ag_watch_left_old_lost', False))
+    ag_watch_new       = data.get('ag_watch_new')  # str or None
+    old_lost           = bool(data.get('ag_watch_old_lost', False))
+    affected_side      = data.get('affected_side', 'Right')  # 'Right' or 'Left'
     sync_datetime      = (data.get('sync_datetime') or '').strip()
     worn_datetime      = (data.get('worn_datetime') or '').strip()
     next_followup_days = data.get('next_followup_days')
@@ -5460,30 +5501,29 @@ def api_complete_watch_record(homer_id):
 
     if not event_id:
         return jsonify({'error': 'event_id is required'}), 400
-
-    patient = read_patient_meta(folder, homer_id)
-    if not patient:
-        return jsonify({'error': 'Patient not found'}), 404
-
-    old_right    = patient.get('agWatchRightID')
-    old_left     = patient.get('agWatchLeftID')
-    two_watches  = bool(old_right and old_left)
-    both_current = two_watches and ag_right_new == old_right and ag_left_new == old_left
-    sync_required = two_watches and not both_current
-    worn_required = not both_current
-
-    if ag_right_new and ag_left_new and ag_right_new == ag_left_new:
-        return jsonify({'error': 'Right and left watches must be different'}), 400
-    if sync_required and not sync_datetime:
-        return jsonify({'error': 'Sync date & time is required when watches are changed'}), 400
-    if worn_required and not worn_datetime:
-        return jsonify({'error': 'Worn date & time is required'}), 400
-    right_no_watch = old_right is not None and ag_right_new is None
-    left_no_watch  = old_left  is not None and ag_left_new  is None
-    if (right_no_watch or left_no_watch) and not notes:
-        return jsonify({'error': 'Notes are required when a watch is not assigned'}), 400
     if not isinstance(next_followup_days, int) or next_followup_days < 1:
         return jsonify({'error': 'next_followup_days must be a positive integer'}), 400
+
+    # Determine which patient field to update based on affected side
+    if affected_side == 'Right':
+        old_watch_id = patient.get('agWatchRightID')
+        watch_field = 'agWatchRightID'
+        limb = 'right'
+    else:  # Left
+        old_watch_id = patient.get('agWatchLeftID')
+        watch_field = 'agWatchLeftID'
+        limb = 'left'
+
+    # Validation
+    is_current = not old_lost and ag_watch_new == old_watch_id
+    if not is_current and not sync_datetime:
+        return jsonify({'error': 'Sync date & time is required when watch is changed'}), 400
+    if not is_current and not worn_datetime:
+        return jsonify({'error': 'Worn date & time is required when watch is changed'}), 400
+
+    if old_watch_id and ag_watch_new is None and not notes:
+        return jsonify({'error': 'Notes are required when a watch is not assigned'}), 400
+
     for dt_val, label in ((sync_datetime, 'Sync'), (worn_datetime, 'Worn')):
         if not dt_val:
             continue
@@ -5492,6 +5532,7 @@ def api_complete_watch_record(homer_id):
                 return jsonify({'error': f'{label} date cannot be in the future'}), 400
         except ValueError:
             return jsonify({'error': f'{label} date format must be YYYY-MM-DDTHH:MM'}), 400
+
     if r := _bad_date(patient, sync_datetime): return r
     if r := _bad_date(patient, worn_datetime): return r
 
@@ -5507,6 +5548,7 @@ def api_complete_watch_record(homer_id):
     )
     if not entry:
         return jsonify({'error': 'Watch record not found in incomplete'}), 404
+
     filed_at        = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
     completion_date = worn_datetime or sync_datetime or filed_at[:16]
 
@@ -5515,9 +5557,8 @@ def api_complete_watch_record(homer_id):
         'alias':              _next_wr_alias(events_data),
         'completion_date':    completion_date,
         'filed_at':           filed_at,
-        'filed_by':   _filer(),
-        'ag_watch_right':     {'old_id': old_right, 'old_lost': right_old_lost, 'new_id': ag_right_new},
-        'ag_watch_left':      {'old_id': old_left,  'old_lost': left_old_lost,  'new_id': ag_left_new},
+        'filed_by':           _filer(),
+        'ag_watch':           {'old_id': old_watch_id, 'old_lost': old_lost, 'new_id': ag_watch_new, 'limb': limb},
         'sync_datetime':      sync_datetime,
         'worn_datetime':      worn_datetime,
         'next_followup_days': next_followup_days,
@@ -5527,41 +5568,33 @@ def api_complete_watch_record(homer_id):
     events_data['incomplete'] = [e for e in incomplete if e.get('id') != event_id]
     events_data.setdefault('complete', []).append(complete_entry)
 
-    # Read agwatch assignments once — used both to seed data-upload tasks (for the
-    # removed watch's assignment window) and for the assignment mutation loop below.
+    # Read agwatch assignments for data-upload seeding and assignment mutations
     assignments = read_device_assignments(folder, 'agwatch')
 
-    # Seed a watch_data_upload task for each removed, recoverable (non-lost) watch.
-    # A watch is "removed" when it had an old id that differs from the new id (a swap,
-    # or a removal to a gap with new_id null). Lost watches are skipped — there is no
-    # physical device to pull data from. The engineer uploads the raw .gt3x later.
+    # Seed watch_data_upload task if watch was removed and not lost
     wdu_refs = []
-    for old_id, old_lost, new_id, limb in (
-        (old_right, right_old_lost, ag_right_new, 'right'),
-        (old_left,  left_old_lost,  ag_left_new,  'left'),
-    ):
-        if old_id and old_id != new_id and not old_lost:
-            assigned_date = next(
-                (a.get('assigned_date') for a in assignments
-                 if a.get('device_id') == old_id and a.get('homer_id') == homer_id
-                 and a.get('returned_date') is None),
-                None
-            )
-            wdu_id = str(uuid.uuid4())
-            events_data.setdefault('incomplete', []).append({
-                'id':                wdu_id,
-                'protocol_event_id': 'watch_data_upload',
-                'triggered_by':      {'type': 'watch_record', 'id': event_id},
-                'watch_id':          old_id,
-                'limb':              limb,
-                'removed_date':      completion_date,
-                'data_start':        assigned_date,
-                'data_end':          completion_date,
-                'scheduled_date':    [completion_date, completion_date],
-                'filed_at':          filed_at,
-                'filed_by':          _filer(),
-            })
-            wdu_refs.append({'type': 'watch_data_upload', 'id': wdu_id})
+    if old_watch_id and old_watch_id != ag_watch_new and not old_lost:
+        assigned_date = next(
+            (a.get('assigned_date') for a in assignments
+             if a.get('device_id') == old_watch_id and a.get('homer_id') == homer_id
+             and a.get('returned_date') is None),
+            None
+        )
+        wdu_id = str(uuid.uuid4())
+        events_data.setdefault('incomplete', []).append({
+            'id':                wdu_id,
+            'protocol_event_id': 'watch_data_upload',
+            'triggered_by':      {'type': 'watch_record', 'id': event_id},
+            'watch_id':          old_watch_id,
+            'limb':              limb,
+            'removed_date':      completion_date,
+            'data_start':        assigned_date,
+            'data_end':          completion_date,
+            'scheduled_date':    [completion_date, completion_date],
+            'filed_at':          filed_at,
+            'filed_by':          _filer(),
+        })
+        wdu_refs.append({'type': 'watch_data_upload', 'id': wdu_id})
     if wdu_refs:
         complete_entry['triggered'] = wdu_refs
 
@@ -5588,49 +5621,45 @@ def api_complete_watch_record(homer_id):
         })
     write_protocol_events(folder, homer_id, events_data)
 
-    # Update patient meta
-    patient['agWatchRightID'] = ag_right_new
-    patient['agWatchLeftID']  = ag_left_new
+    # Update patient meta - only update affected side watch field
+    patient[watch_field] = ag_watch_new
     write_patient_meta(folder, homer_id, patient)
 
     # Update device assignments: close old open assignment, open new
-    # (assignments already read above for data-upload seeding)
     loginid    = flask_session.get('loginid', 'unknown')
     session_id = flask_session.get('session_id', -1)
     lost_date_str = completion_date[:10]
-    for old_id, old_lost, new_id, limb in (
-        (old_right, right_old_lost, ag_right_new, 'right'),
-        (old_left,  left_old_lost,  ag_left_new,  'left'),
-    ):
-        if old_id and old_id != new_id:
-            for a in assignments:
-                if a.get('device_id') == old_id and a.get('homer_id') == homer_id and a.get('returned_date') is None:
-                    a['returned_date'] = completion_date
-                    if old_lost:
-                        a['lost'] = True
-            if old_lost:
-                mark_device_lost(folder, 'agwatch', old_id, lost_date_str)
-                write_device_log(folder, old_id, loginid, session_id, f'Lost — reported by {homer_id}')
-                append_device_event(folder, 'agwatch', old_id, 'lost', loginid,
-                                    homer_id=homer_id, notes=f'Lost — reported by {homer_id}')
-            else:
-                append_device_event(folder, 'agwatch', old_id, 'available', loginid,
-                                    homer_id=homer_id, notes=f'Returned by {homer_id}')
-        if new_id and new_id != old_id:
-            assignments.append({
-                'id':            str(uuid.uuid4()),
-                'device_id':     new_id,
-                'homer_id':      homer_id,
-                'limb':          limb,
-                'assigned_date': completion_date,
-                'returned_date': None,
-                'lost':          False,
-                'assigned_by':   loginid,
-                'notes':         notes,
-            })
-            write_device_log(folder, new_id, loginid, session_id, f'Assigned to {homer_id} ({limb})')
-            append_device_event(folder, 'agwatch', new_id, 'assign', loginid,
-                                homer_id=homer_id, notes=f'Assigned ({limb})')
+
+    if old_watch_id and old_watch_id != ag_watch_new:
+        for a in assignments:
+            if a.get('device_id') == old_watch_id and a.get('homer_id') == homer_id and a.get('returned_date') is None:
+                a['returned_date'] = completion_date
+                if old_lost:
+                    a['lost'] = True
+        if old_lost:
+            mark_device_lost(folder, 'agwatch', old_watch_id, lost_date_str)
+            write_device_log(folder, old_watch_id, loginid, session_id, f'Lost — reported by {homer_id}')
+            append_device_event(folder, 'agwatch', old_watch_id, 'lost', loginid,
+                                homer_id=homer_id, notes=f'Lost — reported by {homer_id}')
+        else:
+            append_device_event(folder, 'agwatch', old_watch_id, 'available', loginid,
+                                homer_id=homer_id, notes=f'Returned by {homer_id}')
+
+    if ag_watch_new and ag_watch_new != old_watch_id:
+        assignments.append({
+            'id':            str(uuid.uuid4()),
+            'device_id':     ag_watch_new,
+            'homer_id':      homer_id,
+            'limb':          limb,
+            'assigned_date': completion_date,
+            'returned_date': None,
+            'lost':          False,
+            'assigned_by':   loginid,
+            'notes':         notes,
+        })
+        write_device_log(folder, ag_watch_new, loginid, session_id, f'Assigned to {homer_id} ({limb})')
+        append_device_event(folder, 'agwatch', ag_watch_new, 'assign', loginid,
+                            homer_id=homer_id, notes=f'Assigned ({limb})')
     write_device_assignments(folder, 'agwatch', assignments)
 
     write_patient_log(folder, homer_id, loginid, session_id, 'Watch record filed')

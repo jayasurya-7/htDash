@@ -2479,6 +2479,12 @@ function _adverseEventCard(ev, followupEvents) {
 
   const cardId = ev.id.replace(/-/g, '');
 
+  // Severity level badge - always shown
+  const severityBadge = ev.severity_level
+    ? `<span class="inline-flex items-center gap-1 text-xs font-medium bg-red-100 text-red-800 border border-red-300 rounded-full px-2 py-0.5" title="Severity Level">
+         <i class="fas fa-exclamation text-[10px]"></i>${ev.severity_level}</span>`
+    : '';
+
   // Note-count badge in the header (server-stamped, role-filtered count from
   // api_patient_events). Hidden when zero so the header stays uncluttered.
   const noteCount = ev.event_notes_count || 0;
@@ -2513,6 +2519,7 @@ function _adverseEventCard(ev, followupEvents) {
         <div class="flex items-center gap-2.5 flex-wrap">
           <span class="text-sm font-bold ${headerText}">${ev.alias || ''}</span>
           ${statusBadge}
+          ${severityBadge}
           ${noteCountBadge}
         </div>
         <i class="fas fa-chevron-down text-xs ${headerText}" id="ae-chevron-${cardId}"
@@ -3104,6 +3111,9 @@ function openAdverseEventModal(ev) {
   document.getElementById('ae-clinical-date-wrap').classList.add('hidden');
   document.getElementById('ae-clinical-date').value        = '';
 
+  // Severity level initialization
+  document.querySelectorAll('input[name="ae-severity"]').forEach(r => r.checked = false);
+
   document.getElementById('ae-schedule-visit').onchange = () => {
     const on = document.getElementById('ae-schedule-visit').checked;
     document.getElementById('ae-visit-date-wrap').classList.toggle('hidden', !on);
@@ -3133,9 +3143,12 @@ async function saveAdverseEvent() {
   const scheduleClinical = document.getElementById('ae-schedule-clinical').checked;
   const clinicalDate     = document.getElementById('ae-clinical-date').value;
 
+  const severityLevel = document.querySelector('input[name="ae-severity"]:checked')?.value || null;
+
   if (!date)        { setError('ae-error', 'Event date is required.'); return; }
   if (!description) { setError('ae-error', 'Description is required.'); return; }
   if (!actionTaken) { setError('ae-error', 'Action taken is required.'); return; }
+  if (!severityLevel) { setError('ae-error', 'Severity level is required.'); return; }
   if (scheduleVisit && !visitDate)    { setError('ae-error', 'Follow-up visit date is required.'); return; }
   if (scheduleClinical && !clinicalDate) { setError('ae-error', 'Clinical visit date is required.'); return; }
   if (!_validateAttachment('ae', 'ae-error')) return;
@@ -3146,6 +3159,7 @@ async function saveAdverseEvent() {
     action_taken: actionTaken, training_blocked,
     scheduled_followup_visit:  scheduleVisit    ? visitDate    : null,
     scheduled_clinical_visit:  scheduleClinical ? clinicalDate : null,
+    severity_level: severityLevel,
   };
   const { ok, data } = await apiPost(
     `/api/patients/${PATIENT_HOMER_ID}/complete-event/adverse-event`, payload
@@ -3747,6 +3761,7 @@ function openAdverseEventFollowupModal(ev, lockedFrom = null) {
       alias:            ae?.alias || '',
       date:             ae?.completion_date || '',
       training_blocked: ae?.training_blocked || false,
+      severity_level:   ae?.severity_level || '',
     };
   });
 
@@ -3773,17 +3788,44 @@ function openAdverseEventFollowupModal(ev, lockedFrom = null) {
   const rowsEl = document.getElementById('aef-ae-rows');
   rowsEl.innerHTML = _aefAeDetails.map((ae, i) => {
     const dateStr = ae.date ? _fmtDateTime(ae.date) : 'Unknown date';
+    const currentLevelBadge = ae.severity_level
+      ? `<div class="text-xs font-medium inline-flex items-center gap-1 text-red-700 bg-red-50 px-2 py-1 rounded-full"><i class="fas fa-exclamation"></i>${ae.severity_level}</div>`
+      : '';
+
+    // Severity level recording (required for all AEs)
+    const severityLevelField = `<div class="mt-2 space-y-2">
+           <p class="text-xs font-medium text-slate-600">Severity Level <span class="text-red-400">*</span></p>
+           <div class="flex flex-col gap-1.5">
+             <label class="flex items-center gap-2 cursor-pointer select-none">
+               <input type="radio" id="aef-severity-investigator-${i}" name="aef-severity-${i}" value="Investigator" class="w-3.5 h-3.5 rounded border-slate-300">
+               <span class="text-xs text-slate-700">Investigator Level</span>
+             </label>
+             <label class="flex items-center gap-2 cursor-pointer select-none">
+               <input type="radio" id="aef-severity-consultant-${i}" name="aef-severity-${i}" value="Consultant" class="w-3.5 h-3.5 rounded border-slate-300">
+               <span class="text-xs text-slate-700">Consultant Level</span>
+             </label>
+             <label class="flex items-center gap-2 cursor-pointer select-none">
+               <input type="radio" id="aef-severity-irb-${i}" name="aef-severity-${i}" value="IRB" class="w-3.5 h-3.5 rounded border-slate-300">
+               <span class="text-xs text-slate-700">IRB Level</span>
+             </label>
+           </div>
+         </div>`;
+
     const resumeField = (ae.training_blocked && !_trainingPermanentlyEnded())
       ? `<div id="aef-resume-wrap-${i}" class="hidden mt-2">
            <label class="block text-xs font-medium text-slate-600 mb-1">Can resume from <span class="text-red-400">*</span></label>
            <input type="date" id="aef-resume-${i}" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-300">
          </div>` : '';
     return `<div class="p-3 rounded-xl border border-slate-200 bg-slate-50 space-y-2">
-      <div class="text-sm font-medium text-slate-700">${ae.alias || 'Adverse Event'} — ${dateStr}</div>
+      <div class="flex items-center justify-between">
+        <div class="text-sm font-medium text-slate-700">${ae.alias || 'Adverse Event'} — ${dateStr}</div>
+        ${currentLevelBadge}
+      </div>
       <div>
         <label class="block text-xs font-medium text-slate-600 mb-1">Discussion notes</label>
         <textarea id="aef-disc-${i}" rows="2" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-blue-300 resize-none" placeholder="What was discussed for this AE…"></textarea>
       </div>
+      ${severityLevelField}
       <label class="flex items-center gap-2 cursor-pointer select-none">
         <input type="checkbox" id="aef-resolved-${i}" onchange="_aefToggleResume(${i})" class="w-4 h-4 rounded border-slate-300">
         <span class="text-sm text-slate-700">Resolved</span>
@@ -3888,7 +3930,21 @@ async function saveAdverseEventFollowup() {
       }
     }
     const notes = document.getElementById(`aef-disc-${i}`)?.value.trim() || null;
-    ae_discussions.push({ adverse_event_id: ae.id, notes, resolved, can_resume_from });
+
+    // Severity level recording (required for all AEs)
+    const severity_level = document.querySelector(`input[name="aef-severity-${i}"]:checked`)?.value || null;
+    if (!severity_level) {
+      setError('aef-error', `Severity level is required for ${ae.alias || 'Adverse Event'}.`);
+      return;
+    }
+
+    ae_discussions.push({
+      adverse_event_id: ae.id,
+      notes,
+      resolved,
+      can_resume_from,
+      severity_level: severity_level
+    });
   }
 
   const { scheduledFollowupVisit, scheduledClinicalVisit, error: schedError } = _collectAeScheduling('aef');
@@ -3925,17 +3981,43 @@ function _buildAeVisitRows(prefix, aeDetails) {
     const dateStr = ae.date ? _fmtDateTime(ae.date) : 'Unknown date';
     const pauseTag = ae.training_blocked
       ? ' <span class="text-xs text-red-600 font-medium">(training blocked)</span>' : '';
+    const currentLevelBadge = ae.severity_level
+      ? `<div class="text-xs font-medium inline-flex items-center gap-1 text-red-700 bg-red-50 px-2 py-1 rounded-full">${ae.severity_level}</div>`
+      : '';
+
+    const severityLevelField = `<div class="mt-2 space-y-2">
+           <p class="text-xs font-medium text-slate-600">Severity Level <span class="text-red-400">*</span></p>
+           <div class="flex flex-col gap-1.5">
+             <label class="flex items-center gap-2 cursor-pointer select-none">
+               <input type="radio" id="${prefix}-severity-investigator-${i}" name="${prefix}-severity-${i}" value="Investigator" class="w-3.5 h-3.5 rounded border-slate-300">
+               <span class="text-xs text-slate-700">Investigator Level</span>
+             </label>
+             <label class="flex items-center gap-2 cursor-pointer select-none">
+               <input type="radio" id="${prefix}-severity-consultant-${i}" name="${prefix}-severity-${i}" value="Consultant" class="w-3.5 h-3.5 rounded border-slate-300">
+               <span class="text-xs text-slate-700">Consultant Level</span>
+             </label>
+             <label class="flex items-center gap-2 cursor-pointer select-none">
+               <input type="radio" id="${prefix}-severity-irb-${i}" name="${prefix}-severity-${i}" value="IRB" class="w-3.5 h-3.5 rounded border-slate-300">
+               <span class="text-xs text-slate-700">IRB Level</span>
+             </label>
+           </div>
+         </div>`;
+
     const resumeField = (ae.training_blocked && !_trainingPermanentlyEnded())
       ? `<div id="${prefix}-resume-wrap-${i}" class="hidden mt-2">
            <label class="block text-xs font-medium text-slate-600 mb-1">Can resume from <span class="text-red-400">*</span></label>
            <input type="date" id="${prefix}-resume-${i}" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-300">
          </div>` : '';
     return `<div class="p-3 rounded-xl border border-slate-200 bg-slate-50 space-y-2">
-      <div class="text-sm font-medium text-slate-700">${ae.alias || 'Adverse Event'} — ${dateStr}${pauseTag}</div>
+      <div class="flex items-center justify-between">
+        <div class="text-sm font-medium text-slate-700">${ae.alias || 'Adverse Event'} — ${dateStr}${pauseTag}</div>
+        ${currentLevelBadge}
+      </div>
       <div>
         <label class="block text-xs font-medium text-slate-600 mb-1">Discussion notes</label>
         <textarea id="${prefix}-disc-${i}" rows="2" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-blue-300 resize-none" placeholder="What was discussed for this AE…"></textarea>
       </div>
+      ${severityLevelField}
       <label class="flex items-center gap-2 cursor-pointer select-none">
         <input type="checkbox" id="${prefix}-resolved-${i}" onchange="_aeVisitToggleResume('${prefix}', ${i})" class="w-4 h-4 rounded border-slate-300">
         <span class="text-sm text-slate-700">Resolved</span>
@@ -3963,13 +4045,19 @@ function _collectAeDiscussions(prefix, aeDetails) {
     const ae       = aeDetails[i];
     const notes    = document.getElementById(`${prefix}-disc-${i}`)?.value.trim() || null;
     const resolved = document.getElementById(`${prefix}-resolved-${i}`).checked;
+    const severity_level = document.querySelector(`input[name="${prefix}-severity-${i}"]:checked`)?.value || null;
+
+    if (!severity_level) {
+      return { discussions: null, error: `Severity level is required for ${ae.alias || 'Adverse Event'}.` };
+    }
+
     let can_resume_from = null;
     if (resolved && ae.training_blocked && !_trainingPermanentlyEnded()) {
       can_resume_from = document.getElementById(`${prefix}-resume-${i}`)?.value || '';
       if (!can_resume_from)
         return { discussions: null, error: 'Can resume from date is required for resolved training-blocked events.' };
     }
-    discussions.push({ adverse_event_id: ae.id, notes, resolved, can_resume_from: can_resume_from || null });
+    discussions.push({ adverse_event_id: ae.id, notes, resolved, can_resume_from: can_resume_from || null, severity_level });
   }
   return { discussions, error: null };
 }
@@ -3977,7 +4065,13 @@ function _collectAeDiscussions(prefix, aeDetails) {
 function _loadAeDetails(aeIds) {
   return aeIds.map(id => {
     const ae = (_completeEventsCache || []).find(e => e.id === id);
-    return { id, alias: ae?.alias || '', date: ae?.completion_date || '', training_blocked: ae?.training_blocked || false };
+    return {
+      id,
+      alias: ae?.alias || '',
+      date: ae?.completion_date || '',
+      training_blocked: ae?.training_blocked || false,
+      severity_level: ae?.severity_level || ''
+    };
   });
 }
 
@@ -7841,11 +7935,15 @@ const _WR_TRIGGER_NAMES = {
 };
 
 let _wrEventId  = null;
-let _wrOldRight = null;
-let _wrOldLeft  = null;
+let _wrOldWatch = null;
 
 async function openWatchRecordModal(ev) {
   _wrEventId = ev.id;
+
+  // Determine affected side from patient training side
+  const affectedSide = patientData?.trainingSide || 'Right';
+  const isRightAffected = affectedSide === 'Right';
+  const limbLabel = isRightAffected ? 'Right' : 'Left';
 
   // Context banner
   const banner = document.getElementById('wr-context-banner');
@@ -7858,37 +7956,25 @@ async function openWatchRecordModal(ev) {
     banner.className = 'px-4 py-2 rounded-xl text-sm font-medium bg-slate-50 text-slate-600 border border-slate-200';
   }
 
-  // Current watches + Lost checkboxes
-  _wrOldRight = patientData?.agWatchRightID || null;
-  _wrOldLeft  = patientData?.agWatchLeftID  || null;
-  // Initial assignment (activation): neither watch exists yet — treat as two-watch.
-  const bothNull   = !_wrOldRight && !_wrOldLeft;
-  const twoWatches = !!(_wrOldRight && _wrOldLeft) || bothNull;
-  const showRight  = !!_wrOldRight || bothNull;
-  const showLeft   = !!_wrOldLeft  || bothNull;
+  // Current watch (affected side only)
+  _wrOldWatch = (isRightAffected ? patientData?.agWatchRightID : patientData?.agWatchLeftID) || null;
+  const noWatch = !_wrOldWatch;
 
-  document.getElementById('wr-old-right').textContent = _wrOldRight || '';
-  document.getElementById('wr-old-left').textContent  = _wrOldLeft  || '';
-  document.getElementById('wr-right-lost-wrap').classList.toggle('hidden', !_wrOldRight);
-  document.getElementById('wr-left-lost-wrap').classList.toggle('hidden',  !_wrOldLeft);
-  document.getElementById('wr-no-watches-msg').classList.toggle('hidden',  !bothNull);
-  document.getElementById('wr-right-lost').checked = false;
-  document.getElementById('wr-left-lost').checked  = false;
+  document.getElementById('wr-limb-label').textContent = limbLabel;
+  document.getElementById('wr-old-watch').textContent = _wrOldWatch || '';
+  document.getElementById('wr-lost-wrap').classList.toggle('hidden', !_wrOldWatch);
+  document.getElementById('wr-no-watches-msg').classList.toggle('hidden', !noWatch);
+  document.getElementById('wr-lost').checked = false;
 
-  // Show/hide selectors and sync based on watch count
-  document.getElementById('wr-right-current-row').classList.toggle('hidden', !_wrOldRight);
-  document.getElementById('wr-left-current-row').classList.toggle('hidden',  !_wrOldLeft);
-  document.getElementById('wr-right-wrap').classList.toggle('hidden', !showRight);
-  document.getElementById('wr-left-wrap').classList.toggle('hidden',  !showLeft);
-  document.getElementById('wr-sync-wrap').classList.toggle('hidden',  !twoWatches);
+  // Update label for new watch
+  document.getElementById('wr-label').textContent = `New Watch — ${limbLabel} *`;
 
   // Reset fields
-  document.getElementById('wr-new-right').innerHTML  = '<option value="">Loading…</option>';
-  document.getElementById('wr-new-left').innerHTML   = '<option value="">Loading…</option>';
-  document.getElementById('wr-sync-datetime').value  = '';
-  document.getElementById('wr-worn-datetime').value  = '';
-  document.getElementById('wr-next-days').value      = '';
-  document.getElementById('wr-notes').value          = '';
+  document.getElementById('wr-new-watch').innerHTML = '<option value="">Loading…</option>';
+  document.getElementById('wr-sync-datetime').value = '';
+  document.getElementById('wr-worn-datetime').value = '';
+  document.getElementById('wr-next-days').value = '';
+  document.getElementById('wr-notes').value = '';
   _resetAttachment('wr');
   setError('wr-error', '');
 
@@ -7903,37 +7989,17 @@ async function openWatchRecordModal(ev) {
     const NO_WATCH_VAL = '__none__';
     const NO_WATCH_OPT = `<option value="${NO_WATCH_VAL}">No Watch Available</option>`;
 
-    const rightSel    = document.getElementById('wr-new-right');
-    const leftSel     = document.getElementById('wr-new-left');
-    const syncInput   = document.getElementById('wr-sync-datetime');
-    const wornInput   = document.getElementById('wr-worn-datetime');
-    const rightLostCb = document.getElementById('wr-right-lost');
-    const leftLostCb  = document.getElementById('wr-left-lost');
+    const watchSel = document.getElementById('wr-new-watch');
+    const syncInput = document.getElementById('wr-sync-datetime');
+    const wornInput = document.getElementById('wr-worn-datetime');
+    const lostCb = document.getElementById('wr-lost');
+    const current = isRightAffected ? current_right : current_left;
 
-    // True if any watch is being marked lost — overrides the right-as-reference lock.
-    function anyLost() {
-      return (rightLostCb.checked && !!_wrOldRight) ||
-             (leftLostCb.checked  && !!_wrOldLeft);
-    }
-
-    // Sync/worn disabled only when both watches are kept as current (and none lost).
-    function updateDatetimeFields() {
-      const bothCurrent = !anyLost() && twoWatches &&
-        current_right && rightSel.value === current_right.id &&
-        current_left  && leftSel.value  === current_left.id;
-      const syncRequired = twoWatches && !bothCurrent;
-      const wornRequired = !bothCurrent;
-      syncInput.disabled = !syncRequired;
-      wornInput.disabled = !wornRequired;
-      if (!syncRequired) syncInput.value = '';
-      if (!wornRequired) wornInput.value = '';
-    }
-
-    // Right options: current option excluded if right is lost (can't keep a lost watch).
-    function buildRightOpts() {
-      const rightLost  = rightLostCb.checked && !!current_right;
-      const currentOpt = (current_right && !rightLost)
-        ? `<option value="${current_right.id}">${current_right.id} (${current_right.serial}) — current</option>`
+    // Rebuild options based on lost state
+    function buildWatchOpts() {
+      const isLost = lostCb.checked && !!_wrOldWatch;
+      const currentOpt = (current && !isLost)
+        ? `<option value="${current.id}">${current.id} (${current.serial}) — current</option>`
         : '';
       return '<option value="">Select watch…</option>' +
         currentOpt +
@@ -7941,96 +8007,68 @@ async function openWatchRecordModal(ev) {
         NO_WATCH_OPT;
     }
 
-    // Left options:
-    //   anyLost OR right ≠ current → new mode (pool + NO_WATCH, no current option, left unlocked)
-    //   right = current AND no lost → left auto-locks to current (disabled)
-    function updateLeftOpts() {
-      const rightIsCurrent = !anyLost() && current_right && rightSel.value === current_right.id;
-      if (rightIsCurrent) {
-        leftSel.innerHTML = current_left
-          ? `<option value="${current_left.id}">${current_left.id} (${current_left.serial}) — current</option>`
-          : '<option value="">No current watch</option>';
-        if (current_left) leftSel.value = current_left.id;
-        leftSel.disabled = true;
-      } else {
-        leftSel.disabled = false;
-        const excludeId = (rightSel.value && rightSel.value !== NO_WATCH_VAL) ? rightSel.value : null;
-        const pool = agwatch.filter(d => d.id !== excludeId);
-        leftSel.innerHTML = '<option value="">Select watch…</option>' +
-          pool.map(d => `<option value="${d.id}">${d.id} (${d.serial})</option>`).join('') +
-          NO_WATCH_OPT;
-      }
+    // Update sync/worn datetime disabled state
+    function updateDatetimeFields() {
+      const isCurrent = !lostCb.checked && current && watchSel.value === current.id;
+      const syncRequired = !isCurrent;
+      const wornRequired = !isCurrent;
+      syncInput.disabled = !syncRequired;
+      wornInput.disabled = !wornRequired;
+      if (!syncRequired) syncInput.value = '';
+      if (!wornRequired) wornInput.value = '';
+    }
+
+    watchSel.innerHTML = buildWatchOpts();
+    updateDatetimeFields();
+
+    watchSel.onchange = () => updateDatetimeFields();
+    lostCb.onchange = () => {
+      const prev = watchSel.value;
+      watchSel.innerHTML = buildWatchOpts();
+      if (prev && [...watchSel.options].some(o => o.value === prev)) watchSel.value = prev;
       updateDatetimeFields();
-    }
-
-    // Rebuild right options (lost state may add/remove the current option) then update left.
-    function updateAll() {
-      const prev = rightSel.value;
-      rightSel.innerHTML = buildRightOpts();
-      if (prev && [...rightSel.options].some(o => o.value === prev)) rightSel.value = prev;
-      updateLeftOpts();
-    }
-
-    rightSel.innerHTML = buildRightOpts();
-    updateLeftOpts();   // initialise left based on right's default (empty → new mode)
-
-    rightSel.onchange    = () => updateLeftOpts();
-    rightLostCb.onchange = () => updateAll();
-    leftLostCb.onchange  = () => updateAll();
+    };
   } catch (e) {
     setError('wr-error', 'Failed to load available watches.');
   }
 }
 
 async function saveWatchRecord() {
-  const newRight = document.getElementById('wr-new-right').value;
-  const newLeft  = document.getElementById('wr-new-left').value;
+  const affectedSide = patientData?.trainingSide || 'Right';
+  const isRightAffected = affectedSide === 'Right';
+
+  const newWatch = document.getElementById('wr-new-watch').value;
   const syncDt   = document.getElementById('wr-sync-datetime').value;
   const wornDt   = document.getElementById('wr-worn-datetime').value;
   const nextDays = document.getElementById('wr-next-days').value;
   const notes    = document.getElementById('wr-notes').value.trim();
-  const NO_WATCH   = '__none__';
-  const bothNull   = !_wrOldRight && !_wrOldLeft;
-  const twoWatches = !!(_wrOldRight && _wrOldLeft) || bothNull;
-  const showRight  = !!_wrOldRight || bothNull;
-  const showLeft   = !!_wrOldLeft  || bothNull;
+  const NO_WATCH = '__none__';
+  const watchIsLost = (document.getElementById('wr-lost')?.checked && !!_wrOldWatch) || false;
 
-  if (showRight && !newRight) { setError('wr-error', 'Please select a right watch or "No Watch Available".'); return; }
-  if (showLeft  && !newLeft)  { setError('wr-error', 'Please select a left watch or "No Watch Available".'); return; }
-  if (twoWatches && newRight !== NO_WATCH && newRight === newLeft) {
-    setError('wr-error', 'Right and left watches must be different.'); return;
-  }
+  if (!newWatch) { setError('wr-error', 'Please select a watch or "No Watch Available".'); return; }
 
-  const rightLost = (document.getElementById('wr-right-lost')?.checked && !!_wrOldRight) || false;
-  const leftLost  = (document.getElementById('wr-left-lost')?.checked  && !!_wrOldLeft)  || false;
-  const anyLost   = rightLost || leftLost;
+  // Sync and worn datetime required unless keeping current watch
+  const isCurrent = !watchIsLost && newWatch === _wrOldWatch;
+  if (!isCurrent && !syncDt) { setError('wr-error', 'Sync date & time is required when watch is changed.'); return; }
+  if (!isCurrent && !wornDt) { setError('wr-error', 'Worn date & time is required when watch is changed.'); return; }
 
-  // Determine whether either watch is changing vs being kept as-is
-  const bothCurrent = !bothNull && twoWatches && !anyLost && newRight === _wrOldRight && newLeft === _wrOldLeft;
-  const syncRequired = twoWatches && !bothCurrent;
-  const wornRequired = !bothCurrent;
-
-  if (syncRequired && !syncDt) { setError('wr-error', 'Sync date & time is required when watches are changed.'); return; }
-  if (wornRequired && !wornDt) { setError('wr-error', 'Worn date & time is required.'); return; }
   if (!nextDays || parseInt(nextDays) < 1) { setError('wr-error', 'Next follow-up days must be at least 1.'); return; }
-  const rightNoWatch = showRight && newRight === NO_WATCH;
-  const leftNoWatch  = showLeft  && newLeft  === NO_WATCH;
-  if ((rightNoWatch || leftNoWatch) && !notes) {
+
+  if (newWatch === NO_WATCH && !notes) {
     setError('wr-error', 'Notes are required when a watch is not assigned — explain why.'); return;
   }
+
   if (!_validateAttachment('wr', 'wr-error')) return;
 
-  // Resolve final watch IDs (null for unshown limbs or "No Watch Available")
-  const finalRight = showRight ? (newRight === NO_WATCH ? null : newRight) : null;
-  const finalLeft  = showLeft  ? (newLeft  === NO_WATCH ? null : newLeft)  : null;
+  // Resolve final watch ID (null for "No Watch Available")
+  const finalWatch = newWatch === NO_WATCH ? null : newWatch;
 
   const saveBtn = document.getElementById('wr-save');
   const body = {
     event_id:                 _wrEventId,
-    ag_watch_right_new:       finalRight,
-    ag_watch_left_new:        finalLeft,
-    ag_watch_right_old_lost:  rightLost,
-    ag_watch_left_old_lost:   leftLost,
+    ag_watch_new:             finalWatch,
+    ag_watch_old_lost:        watchIsLost,
+    affected_side:            affectedSide,
     sync_datetime:            syncDt,
     worn_datetime:            wornDt,
     next_followup_days:       parseInt(nextDays),
