@@ -1602,7 +1602,7 @@ def api_create_discontinuation_stub(homer_id):
     events_data.setdefault('incomplete', []).append(stub)
     write_protocol_events(folder, homer_id, events_data)
 
-    return jsonify({'ok': True})
+    return jsonify({'ok': True, 'event_id': stub['id']})
 
 
 @bp.route('/api/patients/<homer_id>/discontinue', methods=['POST'])

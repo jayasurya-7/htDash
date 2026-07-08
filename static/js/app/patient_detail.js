@@ -1109,6 +1109,8 @@ async function _initiateDiscontinuation() {
     alert(data.error || 'Failed to create discontinuation stub.');
     return;
   }
+  // Capture the event_id for use in saveDiscontinuation()
+  _discEventId = data.event_id;
   await loadPatientEvents();  // sets _hasDiscontinuationStub = true
   loadPatient();              // re-evaluates button visibility using updated flag
 }
