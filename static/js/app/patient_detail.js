@@ -1451,6 +1451,7 @@ async function loadPatientEvents() {
     _checkD0203AtRisk(patientData);
     _checkTrainingPeriodExpired(patientData);
     renderPauseHistoryTable(patientData);
+    updateLossOfBlindingUI();  // Update Loss of Blinding button and badge
     renderTimelineTab();
     renderAdverseEventsTab();
     renderWatchRecordsTab();
@@ -4911,16 +4912,19 @@ function completedTimeline(events) {
     const filedStr = _showFiledLine(ev) ? _fmtDateTime(ev.filed_at) : '';
     const isLast  = i === events.length - 1;
     const isDisc  = ev.protocol_event_id === 'discontinuation';
+    const isLob   = ev.protocol_event_id === 'loss-of-blinding';
     const isAssEv = _ASSESS_PIDS_CT.has(ev.protocol_event_id);
     const isMissedCT  = isAssEv && !!ev.missed;
     const isDelayedCT = isAssEv && !isMissedCT && !!ev.completion_date && Array.isArray(ev.scheduled_date)
                         && ev.completion_date.slice(0, 10) > ev.scheduled_date[1].slice(0, 10);
-    const circleCls = isDisc     ? 'bg-red-500 ring-red-300'
-                    : isMissedCT ? 'bg-slate-400 ring-slate-300'
-                    :               'bg-green-500 ring-green-300';
-    const nameCls   = isDisc ? 'text-sm font-bold text-red-700 leading-tight' : 'text-sm font-medium text-slate-800 leading-tight';
+    const circleCls = isDisc || isLob ? 'bg-red-500 ring-red-300'
+                    : isMissedCT     ? 'bg-slate-400 ring-slate-300'
+                    :                  'bg-green-500 ring-green-300';
+    const nameCls   = (isDisc || isLob) ? 'text-sm font-bold text-red-700 leading-tight' : 'text-sm font-medium text-slate-800 leading-tight';
     const badge     = isDisc
       ? `<span class="inline-flex items-center gap-1 text-xs font-semibold bg-red-100 text-red-700 border border-red-200 rounded-full px-2 py-0.5 mt-1"><i class="fas fa-ban text-[10px]"></i>Discontinued</span>`
+      : isLob
+      ? `<span class="inline-flex items-center gap-1 text-xs font-semibold bg-red-100 text-red-700 border border-red-200 rounded-full px-2 py-0.5 mt-1"><i class="fas fa-eye-slash text-[10px]"></i>Blinding Lost</span>`
       : isMissedCT
       ? `<span class="inline-flex items-center gap-1 text-xs font-semibold bg-slate-100 text-slate-600 border border-slate-300 rounded-full px-2 py-0.5 mt-1"><i class="fas fa-times-circle text-[10px]"></i>Missed</span>`
       : isDelayedCT
@@ -4933,6 +4937,7 @@ function completedTimeline(events) {
         <p class="${nameCls}">${ev.event_name}</p>
         <p class="text-xs text-slate-400 mt-0.5">${dateStr}</p>
         ${filedStr ? `<p class="text-xs text-slate-400 leading-tight">Filed: ${filedStr}</p>` : ''}
+        ${isLob && ev.reason ? `<p class="text-xs text-red-600 mt-1 italic">Reason: ${ev.reason}</p>` : ''}
         ${badge}
       </div>`;
   }).join('');
@@ -10095,19 +10100,6 @@ function confirmLossOfBlinding() {
   });
 }
 
-// Show/hide Loss of Blinding button based on whether blinding has been lost
-function updateLossOfBlindingButtonVisibility() {
-  const btn = document.getElementById('loss-of-blinding-btn');
-  if (!btn || !patientData) return;
-  
-  const blindingLost = !!patientData.blindingLostDate;
-  const isTherapistOrAdmin = [userRole].some(r => ['therapist', 'admin'].includes(r));
-  
-  btn.classList.toggle('flex', !blindingLost && isTherapistOrAdmin);
-  btn.classList.toggle('hidden', blindingLost || !isTherapistOrAdmin);
-}
-
-// Display Loss of Blinding badge in overview
 // ── Loss of Blinding ───────────────────────────────────────────────────────
 
 function openLossOfBlindingModal() {
@@ -10187,7 +10179,7 @@ function updateLossOfBlindingButtonVisibility() {
   if (!btn || !patientData) return;
 
   const blindingLost = !!patientData.blindingLostDate;
-  const isTherapistOrAdmin = ['therapist', 'admin'].includes(userRole);
+  const isTherapistOrAdmin = ['therapist', 'admin'].includes(userPrivilege);
 
   const shouldShow = !blindingLost && isTherapistOrAdmin;
   btn.classList.toggle('hidden', !shouldShow);
@@ -10218,18 +10210,3 @@ function displayLossOfBlindingBadge() {
   }
 }
 
-// Attach to patient data load event
-const _origRenderOverviewTab = window.renderOverviewTab;
-window.renderOverviewTab = function() {
-  if (_origRenderOverviewTab) {
-    const result = _origRenderOverviewTab.apply(this, arguments);
-  }
-  // Update Loss of Blinding UI after overview renders
-  updateLossOfBlindingUI();
-  return result;
-};
-
-// Call on initial page load
-if (typeof patientData !== 'undefined') {
-  updateLossOfBlindingUI();
-}

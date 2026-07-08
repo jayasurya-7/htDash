@@ -9656,6 +9656,35 @@ def api_record_loss_of_blinding(homer_id):
 
     write_patient_meta(folder, homer_id, patient)
 
+    # Create a free event for the timeline
+    from utils.protocol_events import read_protocol_events, write_protocol_events
+    import uuid
+    events_data = read_protocol_events(folder, homer_id)
+    if events_data:
+        # Create new free event entry
+        now_str = _now_str()
+        lob_event = {
+            'id': str(uuid.uuid4()),
+            'type': 'loss-of-blinding',
+            'protocol_event_id': 'loss-of-blinding',
+            'event_name': 'Loss of Blinding',
+            'completion_date': loss_date_str[:16],  # YYYY-MM-DDTHH:MM
+            'filed_at': now_str,
+            'filed_by': flask_session.get('loginid', 'unknown'),
+            'reason': loss_reason
+        }
+        # Add to free events
+        if 'free' not in events_data:
+            events_data['free'] = {}
+        if 'loss_of_blinding' not in events_data['free']:
+            events_data['free']['loss_of_blinding'] = []
+        events_data['free']['loss_of_blinding'].append(lob_event)
+        # Also add to complete list for timeline display
+        if 'complete' not in events_data:
+            events_data['complete'] = []
+        events_data['complete'].append(lob_event)
+        write_protocol_events(folder, homer_id, events_data)
+
     # Log the action
     write_patient_log(
         folder, homer_id,
