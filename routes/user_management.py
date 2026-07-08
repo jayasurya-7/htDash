@@ -9647,9 +9647,8 @@ def api_record_loss_of_blinding(homer_id):
         return jsonify({'error': 'Date and reason are required'}), 400
 
     # Validate date format and bounds
-    error = _bad_date(patient, loss_date_str, event_id='loss-of-blinding', events_data=None)
-    if error:
-        return jsonify({'error': error}), 400
+    if r := _bad_date(patient, loss_date_str, event_id='loss-of-blinding', events_data=None):
+        return r
 
     # Record loss of blinding (one-time, irreversible)
     patient['blindingLostDate'] = loss_date_str

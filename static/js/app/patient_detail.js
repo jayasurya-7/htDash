@@ -10108,30 +10108,6 @@ function updateLossOfBlindingButtonVisibility() {
 }
 
 // Display Loss of Blinding badge in overview
-function displayLossOfBlindingBadge() {
-  const badgeContainer = document.getElementById('overview-badges') || document.querySelector('[id*="status"]');
-  if (!patientData?.blindingLostDate || !badgeContainer) return;
-  
-  const badge = document.createElement('span');
-  badge.className = 'inline-flex items-center gap-1 px-2.5 py-1 bg-red-100 text-red-700 border border-red-300 rounded-full text-xs font-semibold';
-  badge.innerHTML = '<i class="fas fa-eye-slash text-[10px]"></i>Blinding Lost';
-  badge.title = `Lost on ${_fmtDateTime(patientData.blindingLostDate)}. Reason: ${patientData.blindingLostReason}`;
-  
-  // Append to overview status area (implementation depends on your overview structure)
-  // This is a placeholder — adjust selector based on actual HTML
-  const statusArea = document.querySelector('[id*="overview"] [id*="status"]') || badgeContainer;
-  if (statusArea) {
-    statusArea.appendChild(badge);
-  }
-}
-
-// Call on page load to set button visibility and badge display
-if (typeof patientData !== 'undefined') {
-  updateLossOfBlindingButtonVisibility();
-  displayLossOfBlindingBadge();
-}
-
-
 // ── Loss of Blinding ───────────────────────────────────────────────────────
 
 function openLossOfBlindingModal() {
@@ -10220,32 +10196,26 @@ function updateLossOfBlindingButtonVisibility() {
 
 // Display Loss of Blinding badge in overview
 function displayLossOfBlindingBadge() {
-  if (!patientData?.blindingLostDate) return;
+  const badgeArea = document.getElementById('lob-badge-area');
+  if (!badgeArea) return;
 
-  // Find or create badge area
-  let badgeArea = document.getElementById('lob-badge-area');
-  if (!badgeArea) {
-    // Create badge area after key dates section
-    const keyDatesCard = document.querySelector('[id*="overview"] .flex-\[2\]:nth-child(3)') || 
-                         document.querySelector('[id*="overview"] .bg-white:nth-child(3)');
-    if (keyDatesCard && keyDatesCard.parentElement) {
-      badgeArea = document.createElement('div');
-      badgeArea.id = 'lob-badge-area';
-      badgeArea.className = 'flex-1 bg-red-50 rounded-2xl p-5 shadow-sm border border-red-200';
-      keyDatesCard.parentElement.appendChild(badgeArea);
-    } else {
-      return; // Bail if we can't find insertion point
-    }
+  if (!patientData?.blindingLostDate) {
+    // Hide badge if no loss of blinding
+    badgeArea.classList.add('hidden');
+    return;
   }
 
-  badgeArea.innerHTML = `
-    <h3 class="text-xs font-semibold text-red-600 uppercase tracking-wider mb-3">🔓 Blinding Lost</h3>
-    <div class="space-y-2">
-      <p class="text-sm font-semibold text-red-700">Date: ${_fmtDate(patientData.blindingLostDate.substring(0, 10))}</p>
-      <p class="text-xs text-red-600"><strong>Reason:</strong></p>
-      <p class="text-xs text-red-600 italic">${patientData.blindingLostReason}</p>
-    </div>
-  `;
+  // Show badge with data
+  badgeArea.classList.remove('hidden');
+  const dateDisplay = document.getElementById('lob-date-display');
+  const reasonDisplay = document.getElementById('lob-reason-display');
+
+  if (dateDisplay) {
+    dateDisplay.textContent = _fmtDate(patientData.blindingLostDate.substring(0, 10));
+  }
+  if (reasonDisplay) {
+    reasonDisplay.textContent = patientData.blindingLostReason || '—';
+  }
 }
 
 // Attach to patient data load event
