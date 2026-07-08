@@ -4997,7 +4997,7 @@ const _ENGINEER_STUBS = new Set([
 
 // Stubs that only admin can file. Therapists can see but not open them.
 const _ADMIN_ONLY_STUBS = new Set([
-  'discontinuation',
+  // 'discontinuation' removed — therapists can now record discontinuation when stub exists
 ]);
 
 function patientEventRow(ev) {

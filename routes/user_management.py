@@ -1628,12 +1628,12 @@ def api_discontinue_patient(homer_id):
     stub_id         = data.get('event_id')
 
     # Admin can always discontinue
-    # Therapist can discontinue broken_protocol patients via the discontinuation_reminder event (stub_id provided)
+    # Therapist can discontinue when stub_id provided (either created by admin or synthetic broken_protocol event)
     privilege = flask_session.get('privilege')
     if privilege == 'admin':
         pass  # Admin allowed
-    elif privilege == 'therapist' and patient.get('brokenProtocolDate') and stub_id:
-        pass  # Therapist allowed for broken_protocol via synthetic event
+    elif privilege == 'therapist' and stub_id:
+        pass  # Therapist allowed to record discontinuation when stub exists
     else:
         return jsonify({'error': 'Forbidden — insufficient privilege'}), 403
 
