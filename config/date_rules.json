@@ -75,6 +75,10 @@
     "schedule_a2_call": {
       "not_before": ["activationDate + 172d"],
       "not_after":  ["today"]
+    },
+    "loss-of-blinding": {
+      "not_before": ["enrollDate"],
+      "not_after":  ["today"]
     }
   }
 }

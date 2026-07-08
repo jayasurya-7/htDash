@@ -10030,3 +10030,236 @@ async function saveExpenseEdit() {
   hideModal('edit-expense-modal');
   setTimeout(() => renderExpensesTab(), 300);
 }
+
+
+// ── Loss of Blinding ───────────────────────────────────────────────────────
+
+function openLossOfBlindingModal() {
+  const modal = document.getElementById('loss-of-blinding-modal');
+  if (!modal) return;
+  
+  // Clear previous input
+  document.getElementById('lob-date').value = '';
+  document.getElementById('lob-reason').value = '';
+  document.getElementById('lob-error').classList.add('hidden');
+  
+  // Apply date bounds
+  _applyDateBounds(modal, 'lob-error');
+  
+  modal.style.display = 'flex';
+}
+
+function confirmLossOfBlinding() {
+  const lossDate = document.getElementById('lob-date').value;
+  const lossReason = document.getElementById('lob-reason').value;
+  const errorEl = document.getElementById('lob-error');
+  
+  // Validate
+  if (!lossDate || !lossReason) {
+    errorEl.textContent = 'Both date and reason are required';
+    errorEl.classList.remove('hidden');
+    return;
+  }
+  
+  // Double confirmation
+  if (!confirm('Loss of blinding is permanent and cannot be undone. Are you sure?')) {
+    return;
+  }
+  if (!confirm('This is your last confirmation. Once recorded, blinding cannot be recovered. Continue?')) {
+    return;
+  }
+  
+  // Submit to API
+  fetch(`/api/patients/${PATIENT_HOMER_ID}/complete-event/loss-of-blinding`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      blindingLostDate: lossDate,
+      blindingLostReason: lossReason
+    })
+  })
+  .then(r => r.json())
+  .then(data => {
+    if (data.error) {
+      errorEl.textContent = data.error;
+      errorEl.classList.remove('hidden');
+      return;
+    }
+    // Success — reload page to show badge
+    hideModal('loss-of-blinding-modal');
+    loadPatientEvents();
+  })
+  .catch(e => {
+    errorEl.textContent = 'Failed to record loss of blinding';
+    errorEl.classList.remove('hidden');
+  });
+}
+
+// Show/hide Loss of Blinding button based on whether blinding has been lost
+function updateLossOfBlindingButtonVisibility() {
+  const btn = document.getElementById('loss-of-blinding-btn');
+  if (!btn || !patientData) return;
+  
+  const blindingLost = !!patientData.blindingLostDate;
+  const isTherapistOrAdmin = [userRole].some(r => ['therapist', 'admin'].includes(r));
+  
+  btn.classList.toggle('flex', !blindingLost && isTherapistOrAdmin);
+  btn.classList.toggle('hidden', blindingLost || !isTherapistOrAdmin);
+}
+
+// Display Loss of Blinding badge in overview
+function displayLossOfBlindingBadge() {
+  const badgeContainer = document.getElementById('overview-badges') || document.querySelector('[id*="status"]');
+  if (!patientData?.blindingLostDate || !badgeContainer) return;
+  
+  const badge = document.createElement('span');
+  badge.className = 'inline-flex items-center gap-1 px-2.5 py-1 bg-red-100 text-red-700 border border-red-300 rounded-full text-xs font-semibold';
+  badge.innerHTML = '<i class="fas fa-eye-slash text-[10px]"></i>Blinding Lost';
+  badge.title = `Lost on ${_fmtDateTime(patientData.blindingLostDate)}. Reason: ${patientData.blindingLostReason}`;
+  
+  // Append to overview status area (implementation depends on your overview structure)
+  // This is a placeholder — adjust selector based on actual HTML
+  const statusArea = document.querySelector('[id*="overview"] [id*="status"]') || badgeContainer;
+  if (statusArea) {
+    statusArea.appendChild(badge);
+  }
+}
+
+// Call on page load to set button visibility and badge display
+if (typeof patientData !== 'undefined') {
+  updateLossOfBlindingButtonVisibility();
+  displayLossOfBlindingBadge();
+}
+
+
+// ── Loss of Blinding ───────────────────────────────────────────────────────
+
+function openLossOfBlindingModal() {
+  const modal = document.getElementById('loss-of-blinding-modal');
+  if (!modal) return;
+
+  // Clear previous input
+  document.getElementById('lob-date').value = '';
+  document.getElementById('lob-reason').value = '';
+  document.getElementById('lob-error').classList.add('hidden');
+
+  // Apply date bounds
+  _applyDateBounds(modal, 'lob-error');
+
+  modal.style.display = 'flex';
+}
+
+function confirmLossOfBlinding() {
+  const lossDate = document.getElementById('lob-date').value;
+  const lossReason = document.getElementById('lob-reason').value;
+  const errorEl = document.getElementById('lob-error');
+
+  // Validate
+  if (!lossDate || !lossReason) {
+    errorEl.textContent = 'Both date and reason are required';
+    errorEl.classList.remove('hidden');
+    return;
+  }
+
+  // Double confirmation
+  if (!confirm('Loss of blinding is permanent and cannot be undone. Are you sure?')) {
+    return;
+  }
+  if (!confirm('This is your last confirmation. Once recorded, blinding cannot be recovered. Continue?')) {
+    return;
+  }
+
+  // Submit to API
+  fetch(`/api/patients/${PATIENT_HOMER_ID}/complete-event/loss-of-blinding`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      blindingLostDate: lossDate,
+      blindingLostReason: lossReason
+    })
+  })
+  .then(r => r.json())
+  .then(data => {
+    if (data.error) {
+      errorEl.textContent = data.error;
+      errorEl.classList.remove('hidden');
+      return;
+    }
+    // Success — update patient data and reload
+    hideModal('loss-of-blinding-modal');
+    patientData.blindingLostDate = data.blindingLostDate;
+    patientData.blindingLostReason = data.blindingLostReason;
+    updateLossOfBlindingUI();
+    loadPatientEvents();
+  })
+  .catch(e => {
+    console.error('Loss of blinding error:', e);
+    errorEl.textContent = 'Failed to record loss of blinding';
+    errorEl.classList.remove('hidden');
+  });
+}
+
+// Update Loss of Blinding UI (button visibility and badge display)
+function updateLossOfBlindingUI() {
+  updateLossOfBlindingButtonVisibility();
+  displayLossOfBlindingBadge();
+}
+
+// Show/hide Loss of Blinding button based on whether blinding has been lost
+function updateLossOfBlindingButtonVisibility() {
+  const btn = document.getElementById('loss-of-blinding-btn');
+  if (!btn || !patientData) return;
+
+  const blindingLost = !!patientData.blindingLostDate;
+  const isTherapistOrAdmin = ['therapist', 'admin'].includes(userRole);
+
+  const shouldShow = !blindingLost && isTherapistOrAdmin;
+  btn.classList.toggle('hidden', !shouldShow);
+  btn.classList.toggle('flex', shouldShow);
+}
+
+// Display Loss of Blinding badge in overview
+function displayLossOfBlindingBadge() {
+  if (!patientData?.blindingLostDate) return;
+
+  // Find or create badge area
+  let badgeArea = document.getElementById('lob-badge-area');
+  if (!badgeArea) {
+    // Create badge area after key dates section
+    const keyDatesCard = document.querySelector('[id*="overview"] .flex-\[2\]:nth-child(3)') || 
+                         document.querySelector('[id*="overview"] .bg-white:nth-child(3)');
+    if (keyDatesCard && keyDatesCard.parentElement) {
+      badgeArea = document.createElement('div');
+      badgeArea.id = 'lob-badge-area';
+      badgeArea.className = 'flex-1 bg-red-50 rounded-2xl p-5 shadow-sm border border-red-200';
+      keyDatesCard.parentElement.appendChild(badgeArea);
+    } else {
+      return; // Bail if we can't find insertion point
+    }
+  }
+
+  badgeArea.innerHTML = `
+    <h3 class="text-xs font-semibold text-red-600 uppercase tracking-wider mb-3">🔓 Blinding Lost</h3>
+    <div class="space-y-2">
+      <p class="text-sm font-semibold text-red-700">Date: ${_fmtDate(patientData.blindingLostDate.substring(0, 10))}</p>
+      <p class="text-xs text-red-600"><strong>Reason:</strong></p>
+      <p class="text-xs text-red-600 italic">${patientData.blindingLostReason}</p>
+    </div>
+  `;
+}
+
+// Attach to patient data load event
+const _origRenderOverviewTab = window.renderOverviewTab;
+window.renderOverviewTab = function() {
+  if (_origRenderOverviewTab) {
+    const result = _origRenderOverviewTab.apply(this, arguments);
+  }
+  // Update Loss of Blinding UI after overview renders
+  updateLossOfBlindingUI();
+  return result;
+};
+
+// Call on initial page load
+if (typeof patientData !== 'undefined') {
+  updateLossOfBlindingUI();
+}

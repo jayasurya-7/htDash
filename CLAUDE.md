@@ -2039,6 +2039,72 @@ filed_at = _now_str()  # Returns timestamp in IST
 - `templates/base.html` — sidebar link control
 - `models/user.py` — `is_assessment_therapist()` method (already existed)
 
+### Loss of Blinding ✅ (July 8, 2026)
+
+**Feature:** Therapist and admin can record when a patient's study blinding is lost (unblinded/revealed treatment assignment). One-time, irreversible action with date and reason.
+
+**Data Storage:**
+- Patient fields: `blindingLostDate` (ISO datetime), `blindingLostReason` (text)
+- Timeline entry: Free event stored in `protocol_events.json` free bucket
+
+**UI Implementation:**
+
+**Button Location:**
+- Patient detail page, near "Patient Call" button (visible only for therapist/admin)
+- Button appears only if `blindingLostDate` not set
+- Button disappears permanently after used (one-time action)
+
+**Modal:**
+- Title: "Record Loss of Blinding"
+- Fields:
+  1. Date of loss (required, datetime-local input with date bounds)
+  2. Reason (required, textarea)
+- Confirmation: "This action cannot be undone. Continue?" (double confirmation required)
+- On save: stores data + creates timeline entry + button disappears
+
+**Overview Tab Display:**
+- Red badge "🔓 Blinding Lost" appears prominently when `blindingLostDate` is set
+- Shows date: "Lost on DD Mon YYYY at HH:MM"
+- Sub-text with reason if hovered/expanded
+
+**Timeline Tab:**
+- Event: "Loss of Blinding"
+- Shows: loss date, reason, filed by, filed at timestamps
+- Red styling (like discontinued patients)
+- Irreversible (no undo or edit option)
+
+**Access Control:**
+- Therapist: Can access (click button, file event)
+- Admin: Can access (click button, file event)
+- Engineer: No access (button hidden)
+- Supervisor: Read-only (sees badge + timeline, no button)
+- Assessment Therapist: No access (not applicable to dashboard role)
+
+**API Endpoints:**
+- `POST /api/patients/<homer_id>/complete-event/loss-of-blinding` — record loss of blinding
+- Returns: `{ok: true, blinding_lost_date: "...", blinding_lost_reason: "..."}`
+
+**Date Validation:**
+- Min: `enrollDate` (patient cannot lose blinding before enrollment)
+- Max: today (cannot backdate or future-date)
+- Applied via `config/date_rules.json` (new entry for `loss_of_blinding`)
+
+**Files to Modify:**
+- `routes/user_management.py` — new endpoint, API handler
+- `templates/patient_detail.html` — button + modal
+- `static/js/app/patient_detail.js` — button visibility, modal logic, save handler
+- `static/js/app/app.js` — potential nav adjustments
+- `config/date_rules.json` — date validation rules (new event)
+- `config.py` (or `config/study_protocol.json`) — event definition (if using protocol schema)
+- `CLAUDE.md` — this documentation
+
+**Implementation Notes:**
+- One-time action: No undo or revocation mechanism
+- Irreversible: Once set, `blindingLostDate` cannot be cleared
+- Timeline entry created as free event (not part of `protocol_events` scheduled stubs)
+- Badge styling: Red background, white text, warning icon
+- Confirmation: Double-confirm modal to prevent accidental clicks
+
 ### Device Management Fixes & Supervisor Enhancements ✅ (June 24, 2026)
 
 **Features & Fixes:**

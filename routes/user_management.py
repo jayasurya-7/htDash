@@ -1456,6 +1456,8 @@ def api_create_patient():
         'vcgGroup':                   None,
         'agWatchRightID':             None,
         'agWatchLeftID':              None,
+        'blindingLostDate':           None,
+        'blindingLostReason':         None,
     }
     # Keep both fields for backward compatibility, but only one will be populated based on trainingSide
     write_patient_meta(folder, homer_id, patient_data)
@@ -9614,3 +9616,57 @@ def api_vcg_prescription(homer_id):
         return jsonify({'error': err}), 404
 
     return jsonify({'ok': True})
+
+
+@bp.route('/api/patients/<homer_id>/complete-event/loss-of-blinding', methods=['POST'])
+def api_record_loss_of_blinding(homer_id):
+    """Record loss of blinding (unblinding) for a patient. One-time, irreversible action."""
+    if not flask_session.get('login_place'):
+        return jsonify({'error': 'Not authenticated'}), 401
+    privilege = flask_session.get('privilege', '')
+    if privilege not in ('therapist', 'admin'):
+        return jsonify({'error': 'Only therapists and admins can record loss of blinding'}), 403
+
+    folder = find_patient_folder(flask_session['login_place'], homer_id)
+    if not folder:
+        return jsonify({'error': 'Patient not found'}), 404
+
+    patient = read_patient_meta(folder, homer_id)
+    if not patient:
+        return jsonify({'error': 'Patient not found'}), 404
+
+    # Check if blinding already lost (one-time action)
+    if patient.get('blindingLostDate'):
+        return jsonify({'error': 'Blinding already recorded as lost. Cannot be undone.'}), 400
+
+    data = request.get_json() or {}
+    loss_date_str = (data.get('blindingLostDate') or '').strip()
+    loss_reason = (data.get('blindingLostReason') or '').strip()
+
+    if not loss_date_str or not loss_reason:
+        return jsonify({'error': 'Date and reason are required'}), 400
+
+    # Validate date format and bounds
+    error = _bad_date(patient, loss_date_str, event_id='loss-of-blinding', events_data=None)
+    if error:
+        return jsonify({'error': error}), 400
+
+    # Record loss of blinding (one-time, irreversible)
+    patient['blindingLostDate'] = loss_date_str
+    patient['blindingLostReason'] = loss_reason
+
+    write_patient_meta(folder, homer_id, patient)
+
+    # Log the action
+    write_patient_log(
+        folder, homer_id,
+        flask_session.get('loginid', 'unknown'),
+        flask_session.get('session_id', 0),
+        f'Loss of blinding recorded: {loss_reason}'
+    )
+
+    return jsonify({
+        'ok': True,
+        'blindingLostDate': loss_date_str,
+        'blindingLostReason': loss_reason
+    })
