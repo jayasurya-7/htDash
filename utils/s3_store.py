@@ -163,3 +163,11 @@ def s3_upload_bytes(key: str, data: bytes, content_type: str = 'application/octe
         Body=data,
         ContentType=content_type,
     )
+
+
+def s3_delete_object(key: str) -> None:
+    """Delete an object from S3. No-op if it doesn't exist."""
+    try:
+        _client().delete_object(Bucket=Config.BUCKET_NAME, Key=key)
+    except ClientError:
+        pass

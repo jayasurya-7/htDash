@@ -764,3 +764,43 @@ def write_patient_expenses(hospital_folder: str, patient_id: str, data: dict) ->
     with open(tmp, 'w', encoding='utf-8') as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
     os.replace(tmp, path)
+
+
+# ── Documents (global document library) ─────────────────────────────────────────
+
+
+def get_documents_path() -> Path:
+    """Return the global documents directory path (not hospital-scoped)."""
+    return Path(Config.DATA_ROOT) / 'documents'
+
+
+def read_documents_index() -> dict:
+    """Read documents_index.json (global, not hospital-scoped). Returns empty structure if absent."""
+    if Config.USE_S3:
+        data = s3_read_json('documents/documents_index.json')
+    else:
+        path = get_documents_path() / 'documents_index.json'
+        if not path.exists():
+            return {'documents': []}
+        try:
+            with open(path, encoding='utf-8') as f:
+                data = json.load(f)
+        except Exception:
+            return {'documents': []}
+    if not isinstance(data, dict) or not isinstance(data.get('documents'), list):
+        return {'documents': []}
+    return data
+
+
+def write_documents_index(data: dict) -> None:
+    """Write documents_index.json atomically (global, not hospital-scoped)."""
+    if Config.USE_S3:
+        s3_write_json('documents/documents_index.json', data)
+        return
+    docs_dir = get_documents_path()
+    docs_dir.mkdir(parents=True, exist_ok=True)
+    path = docs_dir / 'documents_index.json'
+    tmp = path.with_suffix('.tmp')
+    with open(tmp, 'w', encoding='utf-8') as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+    os.replace(tmp, path)

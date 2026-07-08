@@ -2213,4 +2213,137 @@ filed_at = _now_str()  # Returns timestamp in IST
 
 ---
 
+## Discontinuation PDF Upload Fix ✅ (July 8, 2026)
+
+**Status:** ✅ Complete
+
+**Issue:** Discontinuation PDF attachments returned 404 errors when uploading, preventing therapists from attaching documents to discontinuation events.
+
+**Root Causes:** Three interconnected bugs prevented proper upload/download:
+
+### Bug #1: Missing `protocol_event_id` in discontinuation record
+- When saving the discontinuation entry, the `protocol_event_id` field was missing
+- This field is required by the upload-attachment endpoint to determine the correct filename
+- **Fixed** at line 1685: Added `'protocol_event_id': 'discontinuation'` to the record dict
+
+### Bug #2: Discontinuation stored as dict, but search code only iterated lists
+- Discontinuation is stored as a singleton dict: `free['discontinuation']` (not a list like other free events)
+- The upload/download endpoints iterated through `free` dict values with `if isinstance(val, list)`, skipping dicts
+- This caused the discontinuation entry to never be found, returning 404 from both endpoints
+- **Fixed** at 3 locations:
+  - **Upload endpoint** (line 6370): Added `elif isinstance(val, dict) and val.get('id') == event_id:` check
+  - **Download endpoint** (line 6454): Added same dict handling check
+  - **Friendly name lookup** (line 6508): Added same dict handling check for Content-Disposition header
+
+### Bug #3: Missing discontinuation in PDF filename mapping
+- The `_PRINTOUT_PDF_FILES` dictionary didn't include a mapping for `'discontinuation'`
+- When uploading, the endpoint fell back to a generic `'prescription_attachment.pdf'` (which doesn't exist)
+- This caused the 404 when trying to download the "missing" attachment
+- **Fixed** at line 2274: Added `'discontinuation': 'attachments/discontinuation.pdf'` to the mapping
+
+### Additional Improvements:
+
+**Improved fallback for unknown event types** (line 6384):
+- Changed default fallback from generic `'prescription_attachment.pdf'` to dynamic `f'attachments/{event_id}.pdf'`
+- Prevents filename collisions when multiple event types have attachments
+
+**Improved friendly name derivation** (line 6475-6513):
+- Now tries to use stored attachment path filename first, then protocol_event_id, then event_id
+- More robust when dealing with various event types
+
+**Files Modified:**
+
+- `routes/user_management.py`:
+  - Line 1685: Added `protocol_event_id` field to discontinuation record
+  - Line 2274: Added `'discontinuation'` entry to `_PRINTOUT_PDF_FILES` mapping
+  - Line 2437: Improved fallback for PDF generation to use event_id
+  - Line 6370: Added dict entry handling in upload-attachment endpoint
+  - Line 6384: Improved fallback to use event_id instead of generic filename
+  - Line 6454: Added dict entry handling in download-attachment endpoint
+  - Line 6508: Added dict entry handling in friendly name lookup
+
+**Testing Verified:**
+
+- ✅ Discontinuation record now includes `protocol_event_id: 'discontinuation'`
+- ✅ Upload-attachment endpoint finds discontinuation entries (no longer 404)
+- ✅ PDF saved to correct path: `attachments/discontinuation.pdf`
+- ✅ Download-attachment endpoint retrieves file successfully (no longer 404)
+- ✅ Friendly filename displays correctly in Content-Disposition header
+- ✅ Works for all three hospitals (Manipal, Ranipet, Ludhiana)
+- ✅ Works with both local storage and S3 storage
+- ✅ Other event type attachments unaffected
+
+---
+
+## Documents Library ✅ (July 8, 2026)
+
+**Status:** ✅ Complete
+
+**Feature:** Study-wide shared document library for general resources (protocols, consent templates, SOPs, training materials) — not tied to any single patient. Standalone page `/documents`, global across all 3 hospital sites, with admin-only upload and category management.
+
+**Architecture:**
+
+- **Scope:** Global — storage at `data/documents/documents_index.json` and files at `data/documents/files/<id>.pdf`, sibling to hospital folders under `Config.DATA_ROOT`, matching the existing `credentials.json` precedent (not hospital-nested).
+- **Upload/Add:** Admin only. **View/Download:** Any authenticated role (admin, therapist, engineer, supervisor, assessment_therapist).
+- **Categorization:** Admin picks from existing categories or types new one inline during upload (no separate category-management screen). Categories derived from documents on read (no separate array).
+- **File type:** PDF only.
+
+**Data model — `data/documents/documents_index.json`:**
+
+```json
+{
+  "documents": [
+    {
+      "id": "uuid4",
+      "title": "Study Protocol v3",
+      "category": "Protocols",
+      "description": "Optional description",
+      "original_filename": "protocol_v3_final.pdf",
+      "file_path": "documents/files/<id>.pdf",
+      "uploaded_by": "LD-HS-ADMIN",
+      "uploaded_at": "2026-07-08T14:32:05"
+    }
+  ]
+}
+```
+
+**Backend:**
+
+- `routes/documents.py` (new) — Blueprint with `before_request` admin-write-gate. Endpoints:
+  - `GET /api/list` — any authenticated user; returns `{documents: [...], categories: [...sorted, deduped]}`
+  - `POST /api/upload` — admin only; multipart: `title`, `category`, `description` (optional), `file` (PDF); saves via S3-or-local helper (`_save_document_pdf`), appends index entry with `uploaded_by`/`uploaded_at` server-stamped
+  - `GET /api/download/<doc_id>` — any authenticated user; serves PDF inline (`as_attachment=False`)
+  - `DELETE /api/delete/<doc_id>` — admin only; removes index entry and best-effort deletes file
+- `utils/data_access.py` — Added `get_documents_path()`, `read_documents_index()`, `write_documents_index()` — global (non-hospital-scoped) accessors, patterned after `read_patient_notes`/`write_patient_notes`, with S3-or-local branching and atomic file writes
+- `utils/s3_store.py` — Added `s3_delete_object(key)` for S3 file deletion
+- `main.py` — Import + register `documents_bp` with `url_prefix='/documents'`; add top-level `@app.route('/documents')` page route (no privilege redirect — every role can view)
+
+**Frontend:**
+
+- `templates/documents.html` (new) — Page template extending `base.html`, category-grouped sections (header + doc count per category), document rows (title, description, "Filed by <uploader> · <timestamp>", download link, admin-only delete icon), admin-only "Add Document" button in page_actions, modal with title/category-dropdown-with-new-option/description/PDF file input (auto-wired for pdf_preview.js live preview)
+- `static/js/app/documents.js` (new) — `initPage()` (auto-invoked, reveals Add button for admins), `loadDocuments()` (fetch list, render grouped sections), modal open/close/category-toggle, `saveNewDocument()` (client validates title/category/PDF, posts FormData), `deleteDocument(id)` (confirm + DELETE)
+- `templates/base.html` — Added plain "Documents" nav link after Devices (visible to all roles, no JS role-gating needed)
+
+**Validation (dual client + server):**
+
+| Field | Client | Server |
+|---|---|---|
+| title | required, trimmed non-empty | 400 if empty |
+| category | required (resolved from select-or-new), non-empty | 400 if empty |
+| file | required, ends `.pdf` | required, `.filename.lower().endswith('.pdf')` else 400 |
+| description | optional | stored as-is, trimmed |
+
+**Testing Verified:**
+
+- ✅ Fresh start (no `data/documents/` folder) loads `/documents` without error (empty list)
+- ✅ "Documents" nav link visible for all 5 roles
+- ✅ Admin can upload with new category, category reuses on second upload, `data/documents/` structure created
+- ✅ Non-admin sees no "Add Document" button; `POST /api/upload` returns 403 for non-admin
+- ✅ All roles can download (GET `/api/download/<id>` opens inline PDF); 401 without session
+- ✅ Admin can delete; non-admin DELETE returns 403; file removed from disk
+- ✅ Client-side validation blocks submission for missing title/category/file before POST; server validates same rules
+- ✅ Works with `Config.USE_S3=false` (dev default); S3 branch identical to local for file storage
+
+---
+
 logconvo-project: htDash

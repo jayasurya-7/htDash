@@ -20,6 +20,7 @@ from routes.sim_cards import bp as sim_cards_bp
 from routes.time_records import bp as time_records_bp
 from routes.expense_tracker import bp as expense_tracker_bp
 from routes.assessment import bp as assessment_bp
+from routes.documents import bp as documents_bp
 
 app = Flask(__name__)
 app.config.from_object(Config)
@@ -45,6 +46,7 @@ app.register_blueprint(devices_bp, url_prefix='/devices')
 app.register_blueprint(sim_cards_bp, url_prefix='/sim_cards')
 app.register_blueprint(time_records_bp, url_prefix='/time_records')
 app.register_blueprint(assessment_bp)
+app.register_blueprint(documents_bp, url_prefix='/documents')
 
 import time as _time
 _JS_VERSION = str(int(_time.time()))  # changes on every server restart
@@ -90,6 +92,13 @@ def devices():
     if privilege == 'therapist':
         return redirect(url_for('index'))
     return render_template('devices.html', active_page='devices')
+
+
+@app.route('/documents')
+def documents():
+    if not flask_session.get('login_place'):
+        return redirect(url_for('login'))
+    return render_template('documents.html', active_page='documents')
 
 
 if __name__ == '__main__':
