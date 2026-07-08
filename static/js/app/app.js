@@ -77,6 +77,17 @@
         if (currentUser.privilege === 'therapist') {
           document.querySelector('a[href="/devices"]')?.classList.add('hidden');
         }
+        // Assessment therapists see only Assessment link
+        if (currentUser.privilege === 'assessment_therapist') {
+          document.querySelector('a[href="/"]')?.classList.add('hidden');
+          document.querySelector('a[href="/patients"]')?.classList.add('hidden');
+          document.querySelector('a[href="/devices"]')?.classList.add('hidden');
+          document.getElementById('nav-assessment')?.classList.remove('hidden');
+          // Redirect to /assessment
+          if (window.location.pathname === '/' || window.location.pathname === '/dashboard') {
+            window.location.href = '/assessment';
+          }
+        }
       }
     }
 

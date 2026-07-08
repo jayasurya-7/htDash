@@ -1,5 +1,5 @@
 from datetime import date, datetime, timedelta
-from flask import Blueprint, jsonify
+from flask import Blueprint, jsonify, session as flask_session
 from models.user import current_session
 from utils.data_access import get_patients_for_user, derive_status, iter_patients_with_folder
 from utils.protocol_events import read_protocol_events, load_study_protocol
@@ -359,6 +359,13 @@ def events():
         for entry in events_data.get('incomplete', []):
             pid   = entry.get('protocol_event_id')
             sched = entry.get('scheduled_date')
+
+            # Hide A0/A1/A2 PDF upload stubs from non-assessment-therapist users
+            # These stubs are only for assessment therapists to upload PDFs
+            if pid in ('a0_pdf_upload', 'a1_pdf_upload', 'a2_pdf_upload'):
+                privilege = flask_session.get('privilege', '')
+                if privilege != 'assessment_therapist':
+                    continue
 
             if not sched or not isinstance(sched, list) or len(sched) < 2:
                 # Assessment events shown even without a scheduled appointment.

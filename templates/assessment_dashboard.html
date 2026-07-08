@@ -1,0 +1,214 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="p-6 lg:p-8">
+  <div class="mb-8">
+    <h1 class="text-3xl font-bold text-slate-900">Assessment PDF Upload</h1>
+    <p class="text-slate-600 mt-2">Upload A0, A1, and A2 assessment PDFs for completed assessments</p>
+  </div>
+
+  <!-- Loading state -->
+  <div id="loading" class="text-center py-8">
+    <div class="inline-flex items-center gap-2">
+      <div class="w-4 h-4 bg-blue-500 rounded-full animate-bounce"></div>
+      <span class="text-slate-600">Loading patients...</span>
+    </div>
+  </div>
+
+  <!-- Patients table -->
+  <div id="patients-container" class="hidden overflow-x-auto">
+    <table class="w-full border-collapse">
+      <thead>
+        <tr class="border-b-2 border-slate-200 bg-slate-50">
+          <th class="px-4 py-3 text-left font-semibold text-slate-700">Homer ID</th>
+          <th class="px-4 py-3 text-center font-semibold text-slate-700">A0</th>
+          <th class="px-4 py-3 text-center font-semibold text-slate-700">A1</th>
+          <th class="px-4 py-3 text-center font-semibold text-slate-700">A2</th>
+        </tr>
+      </thead>
+      <tbody id="patients-list">
+        <!-- Populated by JS -->
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Empty state -->
+  <div id="empty-state" class="hidden text-center py-12 bg-slate-50 rounded-lg">
+    <p class="text-slate-500">No patients available for assessment PDF uploads at this time.</p>
+  </div>
+
+  <!-- Error state -->
+  <div id="error-state" class="hidden">
+    <div class="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700">
+      <strong>Error:</strong> <span id="error-message"></span>
+    </div>
+  </div>
+</div>
+
+<!-- Upload Modal -->
+<div id="upload-modal" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" style="display: none;">
+  <div class="bg-white rounded-2xl shadow-xl max-w-md w-full p-6">
+    <div class="flex items-center justify-between mb-4">
+      <h3 class="text-xl font-bold text-slate-800">Upload Assessment PDF</h3>
+      <button onclick="closeUploadModal()" class="text-slate-400 hover:text-slate-600 text-2xl font-bold">×</button>
+    </div>
+
+    <div class="space-y-4">
+      <div>
+        <label class="block text-sm font-medium text-slate-700 mb-1">Patient ID</label>
+        <div id="modal-patient-id" class="text-slate-900 font-semibold"></div>
+      </div>
+
+      <div>
+        <label class="block text-sm font-medium text-slate-700 mb-1">Assessment Type</label>
+        <div id="modal-assessment-type" class="text-slate-900 font-semibold"></div>
+      </div>
+
+      <div>
+        <label class="block text-sm font-medium text-slate-700 mb-2">PDF File <span class="text-red-500">*</span></label>
+        <input type="file" id="upload-file" accept=".pdf" class="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+        <p class="text-xs text-slate-500 mt-1">PDF files only, max 10MB</p>
+      </div>
+
+      <div id="upload-error" class="hidden">
+        <p class="text-sm text-red-600" id="upload-error-text"></p>
+      </div>
+    </div>
+
+    <div class="flex gap-3 mt-6">
+      <button onclick="closeUploadModal()" class="flex-1 px-4 py-2 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 font-medium">
+        Cancel
+      </button>
+      <button id="upload-button" onclick="confirmUpload()" class="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium">
+        Upload
+      </button>
+    </div>
+  </div>
+</div>
+
+<script>
+let currentUpload = { homerId: null, type: null };
+let patients = [];
+
+async function loadPatients() {
+  try {
+    const res = await fetch('/assessment/api/patients', { credentials: 'include' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    patients = data.patients || [];
+
+    document.getElementById('loading').classList.add('hidden');
+
+    if (patients.length === 0) {
+      document.getElementById('empty-state').classList.remove('hidden');
+    } else {
+      document.getElementById('patients-container').classList.remove('hidden');
+      renderTable();
+    }
+  } catch (err) {
+    console.error('Error loading patients:', err);
+    document.getElementById('loading').classList.add('hidden');
+    document.getElementById('error-state').classList.remove('hidden');
+    document.getElementById('error-message').textContent = err.message;
+  }
+}
+
+function renderTable() {
+  const tbody = document.getElementById('patients-list');
+  tbody.innerHTML = patients.map(p => `
+    <tr class="border-b border-slate-200 hover:bg-slate-50">
+      <td class="px-4 py-3 font-medium text-slate-900">${escapeHtml(p.homer_id)}</td>
+      <td class="px-4 py-3 text-center">${renderAssessmentCell(p, 'a0')}</td>
+      <td class="px-4 py-3 text-center">${renderAssessmentCell(p, 'a1')}</td>
+      <td class="px-4 py-3 text-center">${renderAssessmentCell(p, 'a2')}</td>
+    </tr>
+  `).join('');
+}
+
+function renderAssessmentCell(patient, type) {
+  const readyKey = `${type}_ready`;
+  const uploadedKey = `${type}_uploaded_at`;
+
+  if (patient[uploadedKey]) {
+    const date = new Date(patient[uploadedKey]).toLocaleString();
+    return `<div class="text-green-600 font-semibold">✓ Done</div><div class="text-xs text-slate-500">${date}</div>`;
+  }
+
+  if (patient[readyKey]) {
+    return `<button onclick="openUploadModal('${patient.homer_id}', '${type}')" class="px-3 py-1 bg-blue-100 text-blue-700 rounded hover:bg-blue-200 font-medium text-sm">Upload</button>`;
+  }
+
+  return `<div class="text-slate-400 text-sm">Not ready</div>`;
+}
+
+function openUploadModal(homerId, type) {
+  currentUpload = { homerId, type };
+  document.getElementById('modal-patient-id').textContent = homerId;
+  document.getElementById('modal-assessment-type').textContent = type.toUpperCase();
+  document.getElementById('upload-file').value = '';
+  document.getElementById('upload-error').classList.add('hidden');
+  document.getElementById('upload-modal').style.display = 'flex';
+}
+
+function closeUploadModal() {
+  document.getElementById('upload-modal').style.display = 'none';
+  currentUpload = { homerId: null, type: null };
+}
+
+async function confirmUpload() {
+  const file = document.getElementById('upload-file').files[0];
+  if (!file) {
+    showUploadError('Please select a PDF file');
+    return;
+  }
+
+  if (!file.name.toLowerCase().endsWith('.pdf')) {
+    showUploadError('File must be a PDF');
+    return;
+  }
+
+  if (file.size > 10 * 1024 * 1024) {
+    showUploadError('File size must be less than 10MB');
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append('file', file);
+
+  try {
+    document.getElementById('upload-button').disabled = true;
+    const url = `/assessment/patients/${currentUpload.homerId}/upload-${currentUpload.type}`;
+    const res = await fetch(url, {
+      method: 'POST',
+      credentials: 'include',
+      body: formData
+    });
+
+    if (!res.ok) {
+      const data = await res.json();
+      throw new Error(data.error || `HTTP ${res.status}`);
+    }
+
+    closeUploadModal();
+    await loadPatients(); // Refresh the list
+  } catch (err) {
+    showUploadError(err.message);
+  } finally {
+    document.getElementById('upload-button').disabled = false;
+  }
+}
+
+function showUploadError(msg) {
+  document.getElementById('upload-error').classList.remove('hidden');
+  document.getElementById('upload-error-text').textContent = msg;
+}
+
+function escapeHtml(text) {
+  const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
+  return String(text).replace(/[&<>"']/g, m => map[m]);
+}
+
+// Load on page load
+loadPatients();
+</script>
+{% endblock %}

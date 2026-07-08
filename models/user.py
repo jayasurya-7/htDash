@@ -61,5 +61,9 @@ class _SessionProxy:
         """True for engineers — file device events, no clinical events."""
         return (flask_session.get("privilege") or "") == "engineer"
 
+    def is_assessment_therapist(self):
+        """True for assessment therapists — upload A0/A1/A2 PDFs only."""
+        return (flask_session.get("privilege") or "") == "assessment_therapist"
+
 
 current_session = _SessionProxy()

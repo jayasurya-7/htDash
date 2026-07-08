@@ -16,11 +16,12 @@ HOMER Therapy Dashboard (htDash) is a Flask-based clinical dashboard for managin
 **htDash** manages stroke patients across three hospital sites (Manipal, Ranipet, Ludhiana). Core features:
 
 - **Patient Management:** Enrollment, group assignment (experimental/control), status tracking
+- **Assessment Management:** A0/A1/A2 assessment completion, PDF uploads via dedicated assessment therapist dashboard
 - **Exercise Management:** VCG programs, ADL session recording, call logs
 - **Analytics:** Usage charts per hospital site
 - **Device Management:** Pluto & Mars device assignment, actigraph watch tracking, SIM card recharging
 - **Data Sync:** AWS S3 sync for device config data and call records
-- **Access Control:** Role-based: global admin, therapist, engineer
+- **Access Control:** Role-based: global admin, therapist, engineer, assessment therapist, supervisor
 
 **Stack:** Flask (Python) · Tailwind CSS · Vanilla JS · Chart.js · JSON/CSV file storage · AWS S3
 
@@ -28,20 +29,22 @@ HOMER Therapy Dashboard (htDash) is a Flask-based clinical dashboard for managin
 
 ## Role-Based Access Control (RBAC) — Implemented June 2026
 
-**4 Roles** with separate credentials (10 login IDs across 3 hospital sites + global supervisor):
+**5 Roles** with separate credentials (13 login IDs across 3 hospital sites + global supervisor):
 
 | Role | Credentials | Access |
 |------|---|---|
-| **Overall Supervisor** | `LAB-HS-DATA` (global) | View all 3 centres' data (read-only). Cannot modify any event. |
+| **Overall Supervisor** | `LAB-HS-DATA` (global) | View all 3 centres' data (read-only). Cannot modify any event. View devices read-only across all sites. |
 | **Site Admin** | `MP/RP/LD-HS-ADMIN` (1 per site) | Full access to all stubs, devices, patient management for their site. |
 | **Therapist** | `MP/RP/LD-HS-1002` (1 per site) | File clinical events (home visits, calls, prescriptions, assessments, AE). Cannot access Devices page. Cannot discontinue normal patients but CAN discontinue broken_protocol patients via synthetic `discontinuation_reminder` event. |
 | **Engineer** | `MP/RP/LD-HS-ENG` (1 per site) | Full device inventory & assignment management, watch records, device issue handling. Cannot file clinical events but sees them greyed (non-clickable). |
+| **Assessment Therapist** | `MP/RP/LD-HS-ASSESS` (1 per site) | Upload A0/A1/A2 assessment PDFs only. Access limited to `/assessment` dashboard. Cannot view patient details, timelines, or clinical events. |
 
 **Stub Visibility Rules:**
-- **Therapist sees engineer stubs greyed** (not clickable): device setup, watch record, device issues, device return, watch data upload
-- **Engineer sees therapy stubs greyed** (not clickable): home visits, calls, prescriptions, assessments
-- **Supervisor sees all stubs greyed** (view-only)
-- **Admin sees all stubs clickable**
+- **Therapist sees engineer stubs greyed** (not clickable): device setup, watch record, device issues, device return, watch data upload. A0/A1/A2 PDF upload stubs hidden from therapist view.
+- **Engineer sees therapy stubs greyed** (not clickable): home visits, calls, prescriptions, assessments. A0/A1/A2 PDF upload stubs hidden from engineer view.
+- **Supervisor sees all stubs greyed** (view-only). A0/A1/A2 PDF upload stubs hidden from supervisor view.
+- **Admin sees all stubs clickable** except A0/A1/A2 PDF upload stubs (only assessment therapist can see these).
+- **Assessment Therapist sees only A0/A1/A2 PDF upload stubs** in dedicated `/assessment` dashboard. Cannot access patient detail pages.
 
 **Broken Protocol Discontinuation:**
 - Normal discontinuation → admins only (button hidden for non-admins)
@@ -1933,7 +1936,7 @@ filed_at = _now_str()  # Returns timestamp in IST
 
 ### Assessment PDF Upload (Therapist) ✅ (July 2, 2026)
 
-**Feature:** Three simple protocol event stubs (`a0_pdf_upload`, `a1_pdf_upload`, `a2_pdf_upload`) allow regular therapists to upload scanned assessment PDFs directly from the patient detail page. Removed separate `assessment_therapist` role.
+**Feature:** Three simple protocol event stubs (`a0_pdf_upload`, `a1_pdf_upload`, `a2_pdf_upload`) allow assessment therapists to upload scanned assessment PDFs. Separate `assessment_therapist` role with dedicated `/assessment` dashboard.
 
 **Architecture:**
 
@@ -1942,40 +1945,99 @@ filed_at = _now_str()  # Returns timestamp in IST
 - `a1_pdf_upload` — seeded when `a1CompletionDate` is set, no existing stub
 - `a2_pdf_upload` — seeded when `a2CompletionDate` is set, no existing stub
 
-**Modal and upload:**
-- One generic modal `assessment-pdf-upload-modal` with dynamic title based on event type
-- PDF file input (required, `.pdf` only)
-- Optional notes textarea
-- Upload progress bar with percent and completion feedback
-- Stored at: `Assessment Documents/<homer_id>_<TYPE>.pdf` (reuses existing path convention)
+**Storage Location:**
+- Stored at: `data/<site>/patients/<homer_id>/assessment_pdfs/<homer_id>_A0.pdf`
 - Patient fields stamped: `a0/a1/a2PdfUploadedAt`
 
 **Access Control:**
-- Therapist role only (403 if not `therapist` or `admin`)
-- Events visible to therapist/admin in patient detail page
+- **Assessment Therapist role only** can upload PDFs via dedicated `/assessment` dashboard
+- A0/A1/A2 PDF upload stubs **hidden from therapist, admin, engineer, supervisor** views
+- Assessment therapist cannot access patient detail pages or timelines (403 redirected)
+- Events visible in `/assessment` dashboard and timeline only to assessment therapist
 - Events included in `_DISCONTINUED_VISIBLE` and all pause/broken-protocol visibility sets
+
+**Assessment Therapist Dashboard (`/assessment`):**
+- Minimal table listing patients with A0/A1/A2 status
+- Status indicators: "Completed", "Ready to Upload", "Uploaded"
+- Upload buttons for ready assessments
+- No group information displayed (therapist focus only)
+- Endpoints:
+  - `GET /assessment` — dashboard page
+  - `GET /assessment/api/patients` — patient list with status
+  - `POST /assessment/patients/<homer_id>/upload-a0` — upload A0 PDF
+  - `POST /assessment/patients/<homer_id>/upload-a1` — upload A1 PDF
+  - `POST /assessment/patients/<homer_id>/upload-a2` — upload A2 PDF
+  - `GET /assessment/download/<homer_id>/<type>` — download uploaded PDF
 
 **Upload Flow:**
 1. Therapist completes A0/A1/A2 assessment on patient, sets `a0/a1/a2CompletionDate`
-2. Patient detail page automatically seeds `a0/a1/a2_pdf_upload` stub
-3. Therapist clicks stub row → modal opens with dynamic title
-4. Selects PDF file → uploads immediately with progress bar
-5. Optionally adds notes
-6. Clicks Save → event moves from `incomplete` to `free.*`, timestamp stamped
-7. Stub one-shot: never re-appears after completion (immutable)
+2. Patient appears in `/assessment` dashboard as "Ready to Upload"
+3. Assessment therapist clicks Upload → modal opens
+4. Selects PDF file (required, `.pdf` only) → uploads immediately with progress bar
+5. Clicks Save → event moves from `incomplete` to `complete` in protocol_events.json
+6. PDF upload timestamp (`a0/a1/a2PdfUploadedAt`) stamped in patient JSON
+7. Event appears in patient Timeline tab with download link
+8. Green "✓ PDF" badge appears in patient Overview tab next to assessment date
 
-**Removed:**
-- `assessment_therapist` role and 3 login IDs (MP/RP/LD-HS-ASSESS)
-- `/assessment` route and page
-- `routes/assessment.py`, `templates/assessment.html`, `templates/assessment_placeholder.html`, `static/js/app/assessment.js`, `scripts/add_assessment_pdf_fields.py`
-- Redirects in `main.py`, `routes/user_management.py`, `models/user.py`, `routes/notes.py`, `static/js/app/app.js`, `templates/base.html`
+**Timeline Integration:**
+- "A0/A1/A2 Assessment PDF Upload" event appears in Timeline after upload
+- Shows upload timestamp and "filed by" assessment therapist
+- Includes download link: `/api/patients/<homer_id>/assessment-pdf/<event_id>`
+- Green "PDF" badge displayed in Overview tab with upload time on hover
 
 **Files Modified:**
-- `routes/user_management.py` — synthetic event defs, lazy-seeding, 3 new complete-event endpoints, visibility frozensets
-- `routes/dashboard.py` — mirror of event defs and frozensets
-- `templates/patient_detail.html` — new modal for assessment PDF upload
-- `static/js/app/patient_detail.js` — modal functions, EVENT_OPENERS entry, upload handlers
-- `config.py` — removed 3 assessment_therapist credentials
+- `routes/assessment.py` — full blueprint with dashboard, patient API, upload endpoints
+- `templates/assessment_dashboard.html` — assessment therapist dashboard page
+- `routes/user_management.py` — event filtering, access control, PDF download endpoint
+- `routes/dashboard.py` — event filtering logic (mirrors user_management.py)
+- `templates/patient_detail.html` — Overview tab A0/A1/A2 dates with PDF status
+- `static/js/app/patient_detail.js` — PDF badge display, timeline rendering
+- `static/js/app/app.js` — navigation control for assessment therapist
+- `templates/base.html` — Assessment Upload link in sidebar
+- `models/user.py` — `is_assessment_therapist()` method
+- `config.py` — 3 assessment_therapist credentials (MP/RP/LD-HS-ASSESS)
+
+### Assessment Therapist Access Restrictions ✅ (July 8, 2026)
+
+**Feature:** Assessment therapists have a focused, single-purpose role restricted to A0/A1/A2 PDF uploads only. Cannot access patient detail pages or timelines.
+
+**Access Control Implementation:**
+
+**Patient Detail Page (`/patients/<homer_id>`):**
+- Assessment therapist request → redirected to `/assessment` dashboard
+- `routes/user_management.py` line 243-248: Check `privilege == 'assessment_therapist'` and redirect
+
+**Patient Detail API (`/api/patients/<homer_id>`):**
+- Assessment therapist request → 403 Forbidden
+- `routes/user_management.py` line 251-259: Block with 403 Forbidden response
+
+**Patient Events API (`/api/patients/<homer_id>/events`):**
+- Assessment therapist request → 403 Forbidden
+- `routes/user_management.py` line 439-448: Block with 403 Forbidden response
+
+**Navigation Sidebar:**
+- Assessment therapist sees only "Assessment Upload" link
+- Dashboard, Patients, Devices links hidden
+- `static/js/app/app.js` lines 81-90: Hide links and auto-redirect to `/assessment`
+
+**A0/A1/A2 PDF Upload Stub Visibility:**
+- Stubs hidden from therapist, admin, engineer, supervisor views
+- Only visible to assessment therapist in `/assessment` dashboard
+- `routes/user_management.py` lines 926-931: Event filtering by privilege
+- `routes/dashboard.py` lines 363-368: Dashboard event filtering
+
+**User Experience:**
+- Assessment therapist logs in → auto-redirects to `/assessment` dashboard
+- Sidebar shows only "Assessment Upload" (no Dashboard/Patients/Devices)
+- Attempts to access patient detail (direct URL) → redirected to `/assessment`
+- Attempts to call patient APIs → 403 Forbidden response
+
+**Files Modified:**
+- `routes/user_management.py` — access control checks, event filtering
+- `routes/dashboard.py` — event filtering logic
+- `static/js/app/app.js` — navigation control
+- `templates/base.html` — sidebar link control
+- `models/user.py` — `is_assessment_therapist()` method (already existed)
 
 ### Device Management Fixes & Supervisor Enhancements ✅ (June 24, 2026)
 

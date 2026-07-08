@@ -244,6 +244,10 @@ def patients_page():
 def patient_detail_page(homer_id):
     if not flask_session.get('login_place'):
         return redirect(url_for('login'))
+    # Assessment therapists only see the assessment upload dashboard, not patient details
+    privilege = flask_session.get('privilege', '')
+    if privilege == 'assessment_therapist':
+        return redirect(url_for('assessment.dashboard'))
     return render_template('patient_detail.html', homer_id=homer_id, place=flask_session.get('login_place'),
                            active_page='patients', date_rules=get_date_rules())
 
@@ -252,6 +256,11 @@ def patient_detail_page(homer_id):
 def api_patient_detail(homer_id):
     if not flask_session.get('login_place'):
         return jsonify({'error': 'Not authenticated'}), 401
+
+    # Assessment therapists cannot access patient detail data
+    privilege = flask_session.get('privilege', '')
+    if privilege == 'assessment_therapist':
+        return jsonify({'error': 'Assessment therapists can only use the assessment upload dashboard'}), 403
 
     # Supervisor is global, use find_patient_folder to search all hospitals
     # Site users use get_hospital_folder for their specific site
@@ -432,6 +441,12 @@ def api_patient_events(homer_id):
     """Return overdue and upcoming incomplete protocol events for a single patient."""
     if not flask_session.get('login_place'):
         return jsonify({'error': 'Not authenticated'}), 401
+
+    # Assessment therapists cannot access patient event data
+    privilege = flask_session.get('privilege', '')
+    if privilege == 'assessment_therapist':
+        return jsonify({'error': 'Assessment therapists can only use the assessment upload dashboard'}), 403
+
     folder = find_patient_folder(flask_session['login_place'], homer_id)
     if not folder:
         return jsonify({'error': 'Patient not found'}), 404
@@ -922,6 +937,13 @@ def api_patient_events(homer_id):
                     end_date   = datetime.fromisoformat(_we_str).date()
                 except Exception:
                     pass
+
+        # Hide A0/A1/A2 PDF upload stubs from non-assessment-therapist users
+        # These stubs are only for assessment therapists to upload PDFs
+        if pid in ('a0_pdf_upload', 'a1_pdf_upload', 'a2_pdf_upload'):
+            privilege = flask_session.get('privilege', '')
+            if privilege != 'assessment_therapist':
+                continue
 
         # A2 assessment completed (all_completed): no overdue events shown,
         # EXCEPT PDF uploads which must still be filed.
@@ -6020,15 +6042,22 @@ def api_download_assessment_pdf(homer_id, event_id):
     if not events_data:
         return jsonify({'error': 'Protocol events not found'}), 404
 
-    # Search all three free buckets for the event
+    # Search for the event in free buckets and complete list
     entry = None
-    for stub_type in ('a0_pdf_upload', 'a1_pdf_upload', 'a2_pdf_upload'):
-        for e in events_data.get('free', {}).get(stub_type, []):
-            if e.get('id') == event_id:
-                entry = e
-                break
-        if entry:
+    # First search in complete list (for completed PDF uploads)
+    for e in events_data.get('complete', []):
+        if e.get('id') == event_id and e.get('protocol_event_id') in ('a0_pdf_upload', 'a1_pdf_upload', 'a2_pdf_upload'):
+            entry = e
             break
+    # Then search in free buckets (for incomplete uploads)
+    if not entry:
+        for stub_type in ('a0_pdf_upload', 'a1_pdf_upload', 'a2_pdf_upload'):
+            for e in events_data.get('free', {}).get(stub_type, []):
+                if e.get('id') == event_id:
+                    entry = e
+                    break
+            if entry:
+                break
 
     if not entry or not entry.get('data_file'):
         return jsonify({'error': 'PDF not found'}), 404

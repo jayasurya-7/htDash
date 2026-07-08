@@ -501,14 +501,24 @@ function renderOverview(p) {
     sub.innerHTML = `<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${cls}">${label}</span>`;
   }
 
-  set('date-a0',             fmtDate(p.a0CompletionDate));
+  // A0: show completion date with PDF upload indicator
+  const a0DateEl = document.getElementById('date-a0');
+  if (a0DateEl) {
+    if (p.a0CompletionDate) {
+      a0DateEl.innerHTML = fmtDate(p.a0CompletionDate)
+        + (p.a0PdfUploadedAt ? ` <span class="inline-flex items-center gap-0.5 text-xs font-semibold bg-green-100 text-green-700 border border-green-200 rounded-full px-1.5 py-0.5" title="PDF uploaded ${_fmtDateTime(p.a0PdfUploadedAt)}"><i class="fas fa-check text-[9px]"></i>PDF</span>` : '');
+    } else {
+      a0DateEl.textContent = '—';
+    }
+  }
+
   set('date-activation',     fmtDate(p.activationDate));
   set('date-training',       fmtDate(p.trainingCompletionDate));
   const discRow = document.getElementById('date-discontinuation-row');
   if (discRow) discRow.classList.toggle('hidden', !p.discontinuationDate);
   set('date-discontinuation',fmtDate(p.discontinuationDate));
 
-  // A1 key date: Missed / Delayed / normal
+  // A1 key date: Missed / Delayed / normal, with PDF upload indicator
   const a1DateEl = document.getElementById('date-a1');
   if (a1DateEl) {
     if (p.a1MissedDate) {
@@ -517,13 +527,14 @@ function renderOverview(p) {
       const a1Win = _assessmentWindows['a1_assessment'];
       const delayed = a1Win && p.a1CompletionDate.slice(0, 10) > a1Win.end;
       a1DateEl.innerHTML = fmtDate(p.a1CompletionDate)
-        + (delayed ? ' <span class="inline-flex items-center gap-0.5 text-xs font-semibold bg-amber-100 text-amber-700 border border-amber-200 rounded-full px-1.5 py-0.5"><i class="fas fa-clock text-[9px]"></i>Delayed</span>' : '');
+        + (delayed ? ' <span class="inline-flex items-center gap-0.5 text-xs font-semibold bg-amber-100 text-amber-700 border border-amber-200 rounded-full px-1.5 py-0.5"><i class="fas fa-clock text-[9px]"></i>Delayed</span>' : '')
+        + (p.a1PdfUploadedAt ? ` <span class="inline-flex items-center gap-0.5 text-xs font-semibold bg-green-100 text-green-700 border border-green-200 rounded-full px-1.5 py-0.5" title="PDF uploaded ${_fmtDateTime(p.a1PdfUploadedAt)}"><i class="fas fa-check text-[9px]"></i>PDF</span>` : '');
     } else {
       a1DateEl.textContent = '—';
     }
   }
 
-  // A2 key date: Missed / Delayed / normal
+  // A2 key date: Missed / Delayed / normal, with PDF upload indicator
   const a2DateEl = document.getElementById('date-a2');
   if (a2DateEl) {
     if (p.a2MissedDate) {
@@ -532,7 +543,8 @@ function renderOverview(p) {
       const a2Win = _assessmentWindows['a2_assessment'];
       const delayed = a2Win && p.a2CompletionDate.slice(0, 10) > a2Win.end;
       a2DateEl.innerHTML = fmtDate(p.a2CompletionDate)
-        + (delayed ? ' <span class="inline-flex items-center gap-0.5 text-xs font-semibold bg-amber-100 text-amber-700 border border-amber-200 rounded-full px-1.5 py-0.5"><i class="fas fa-clock text-[9px]"></i>Delayed</span>' : '');
+        + (delayed ? ' <span class="inline-flex items-center gap-0.5 text-xs font-semibold bg-amber-100 text-amber-700 border border-amber-200 rounded-full px-1.5 py-0.5"><i class="fas fa-clock text-[9px]"></i>Delayed</span>' : '')
+        + (p.a2PdfUploadedAt ? ` <span class="inline-flex items-center gap-0.5 text-xs font-semibold bg-green-100 text-green-700 border border-green-200 rounded-full px-1.5 py-0.5" title="PDF uploaded ${_fmtDateTime(p.a2PdfUploadedAt)}"><i class="fas fa-check text-[9px]"></i>PDF</span>` : '');
     } else {
       a2DateEl.textContent = '—';
     }

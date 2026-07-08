@@ -78,6 +78,10 @@ class Config:
         "LD-HS-ADMIN":  {"place": "Ludhiana", "privilege": "admin",               "password": "ludhianaadmin@123"},
         # Overall Supervisor (global view-only across all centres)
         "LAB-HS-DATA":  {"place": "admin",    "privilege": "supervisor",          "password": "lab@123"},
+        # Assessment Therapists (1 per site - upload A0/A1/A2 PDFs only)
+        "MP-HS-ASSESS": {"place": "Manipal",  "privilege": "assessment_therapist", "password": "manipalassess@123"},
+        "RP-HS-ASSESS": {"place": "Ranipet",  "privilege": "assessment_therapist", "password": "ranipetassess@123"},
+        "LD-HS-ASSESS": {"place": "Ludhiana", "privilege": "assessment_therapist", "password": "ludhianaassess@123"},
     }
     
     # Exercise Library

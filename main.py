@@ -19,6 +19,7 @@ from routes.devices import bp as devices_bp
 from routes.sim_cards import bp as sim_cards_bp
 from routes.time_records import bp as time_records_bp
 from routes.expense_tracker import bp as expense_tracker_bp
+from routes.assessment import bp as assessment_bp
 
 app = Flask(__name__)
 app.config.from_object(Config)
@@ -43,6 +44,7 @@ app.register_blueprint(expense_tracker_bp)
 app.register_blueprint(devices_bp, url_prefix='/devices')
 app.register_blueprint(sim_cards_bp, url_prefix='/sim_cards')
 app.register_blueprint(time_records_bp, url_prefix='/time_records')
+app.register_blueprint(assessment_bp)
 
 import time as _time
 _JS_VERSION = str(int(_time.time()))  # changes on every server restart
