@@ -1680,12 +1680,13 @@ def api_discontinue_patient(homer_id):
     # Append completed entry to free.discontinuation
     record_id = str(uuid.uuid4())
     record = {
-        'id':              record_id,
-        'completion_date': completion_date,
-        'filed_at':        filed_at,
-        'filed_by':   _filer(),
-        'reason':          reason,
-        'notes':           notes,
+        'id':                 record_id,
+        'protocol_event_id':  'discontinuation',
+        'completion_date':    completion_date,
+        'filed_at':           filed_at,
+        'filed_by':           _filer(),
+        'reason':             reason,
+        'notes':              notes,
     }
     events_data.setdefault('free', {})['discontinuation'] = record
     write_protocol_events(folder, homer_id, events_data)
@@ -2270,6 +2271,7 @@ _PRINTOUT_PDF_FILES = {
     'informed_consent': 'attachments/informed_consent.pdf',
     'prescription_printout_d01': 'attachments/prescription_d01.pdf',
     'prescription_printout_d15': 'attachments/prescription_d15.pdf',
+    'discontinuation': 'attachments/discontinuation.pdf',
 }
 
 
@@ -2430,7 +2432,10 @@ def api_generate_prescription_pdf(homer_id):
                 pdf_bytes = f.read()
 
             # Save PDF to patient folder (same location as upload-attachment)
-            pdf_rel_path = _PRINTOUT_PDF_FILES.get(protocol_event_id, 'prescription_attachment.pdf')
+            if protocol_event_id in _PRINTOUT_PDF_FILES:
+                pdf_rel_path = _PRINTOUT_PDF_FILES[protocol_event_id]
+            else:
+                pdf_rel_path = f'attachments/{event_id}.pdf'
 
             if Config.USE_S3:
                 from utils.s3_store import s3_upload_bytes
@@ -6365,6 +6370,10 @@ def api_upload_attachment(homer_id):
                 entry = next((e for e in val if e.get('id') == event_id), None)
                 if entry:
                     break
+            elif isinstance(val, dict) and val.get('id') == event_id:
+                # Handle singleton dict entries like discontinuation
+                entry = val
+                break
     if not entry:
         return jsonify({'error': 'Event not found'}), 404
 
@@ -6373,8 +6382,12 @@ def api_upload_attachment(homer_id):
     if protocol_event_id != 'informed_consent' and not caption:
         return jsonify({'error': 'Caption is required'}), 400
 
-    # Use predefined filename based on protocol_event_id
-    pdf_path_mapping = _PRINTOUT_PDF_FILES.get(protocol_event_id, 'prescription_attachment.pdf')
+    # Use predefined filename based on protocol_event_id, or fallback to event_id for generic events
+    if protocol_event_id in _PRINTOUT_PDF_FILES:
+        pdf_path_mapping = _PRINTOUT_PDF_FILES[protocol_event_id]
+    else:
+        # For all other events, use event_id to avoid collisions
+        pdf_path_mapping = f'attachments/{event_id}.pdf'
 
 #     # Save PDF as attachments/<event_id>.pdf
 #     #save file name using predeifned
@@ -6438,6 +6451,10 @@ def api_download_attachment(homer_id, event_id):
                     entry = next((e for e in val if e.get('id') == event_id), None)
                     if entry:
                         break
+                elif isinstance(val, dict) and val.get('id') == event_id:
+                    # Handle singleton dict entries like discontinuation
+                    entry = val
+                    break
         if entry:
             attachment_rel = entry.get('attachment')
     # Fall back to legacy path
@@ -6464,26 +6481,45 @@ def api_download_attachment(homer_id, event_id):
     if not attachment_path.exists():
         return jsonify({'error': 'Attachment not found'}), 404
 
-    # Get the friendly filename from protocol_event_id
+    # Get the friendly filename from protocol_event_id or stored attachment path
     events_data = read_protocol_events(folder, homer_id)
-    friendly_name = 'prescription_attachment.pdf'  # Default fallback
+    friendly_name = None
+    stored_attachment = None
+    protocol_event_id = None
 
     if events_data:
         # Search in complete events
         for entry in events_data.get('complete', []):
             if entry.get('id') == event_id:
                 protocol_event_id = entry.get('protocol_event_id', '')
-                friendly_name = _PRINTOUT_PDF_FILES.get(protocol_event_id, 'prescription_attachment.pdf')
+                stored_attachment = entry.get('attachment')
+                friendly_name = _PRINTOUT_PDF_FILES.get(protocol_event_id)
                 break
         # Search in free events if not found
-        if friendly_name == 'prescription_attachment.pdf':
+        if friendly_name is None:
             for val in events_data.get('free', {}).values():
                 if isinstance(val, list):
                     for entry in val:
                         if entry.get('id') == event_id:
                             protocol_event_id = entry.get('protocol_event_id', '')
-                            friendly_name = _PRINTOUT_PDF_FILES.get(protocol_event_id, 'prescription_attachment.pdf')
+                            stored_attachment = entry.get('attachment')
+                            friendly_name = _PRINTOUT_PDF_FILES.get(protocol_event_id)
                             break
+                elif isinstance(val, dict) and val.get('id') == event_id:
+                    # Handle singleton dict entries like discontinuation
+                    protocol_event_id = val.get('protocol_event_id', '')
+                    stored_attachment = val.get('attachment')
+                    friendly_name = _PRINTOUT_PDF_FILES.get(protocol_event_id)
+                    break
+
+    # Use stored attachment filename, protocol_event_id + .pdf, or event_id + .pdf as fallback
+    if friendly_name is None:
+        if stored_attachment:
+            friendly_name = stored_attachment.split('/')[-1]
+        elif protocol_event_id:
+            friendly_name = f'{protocol_event_id}.pdf'
+        else:
+            friendly_name = f'{event_id}.pdf'
 
     # Read the PDF file
     with open(str(attachment_path), 'rb') as f:
