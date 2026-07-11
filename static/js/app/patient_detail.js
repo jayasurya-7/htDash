@@ -9764,21 +9764,6 @@ function updateExpenseCategoryInput() {
   }
 }
 
-function updateBillSection() {
-  const hasBill = document.getElementById('expense-has-bill').checked;
-  const billSection = document.getElementById('expense-bill-section');
-  if (hasBill) {
-    billSection.classList.remove('hidden');
-    document.getElementById('expense-bill-file').focus();
-  } else {
-    billSection.classList.add('hidden');
-    document.getElementById('expense-bill-file').value = '';
-    document.getElementById('expense-bill-filename').textContent = 'No file selected';
-    document.getElementById('expense-bill-notes').value = '';
-    // Hide PDF preview panel when unchecking "Attach Bill"
-    if (window._hidePdfPreview) window._hidePdfPreview();
-  }
-}
 
 function updateBillFilename() {
   const fileInput = document.getElementById('expense-bill-file');
@@ -9828,6 +9813,9 @@ function openAddExpenseModal() {
   document.getElementById('expense-date').value = '';
   document.getElementById('expense-amount').value = '';
   document.getElementById('expense-notes').value = '';
+  document.getElementById('expense-bill-file').value = '';
+  document.getElementById('expense-bill-filename').textContent = 'No file selected';
+  document.getElementById('expense-bill-notes').value = '';
 
   // Populate category options and disable already-used static ones
   const select = document.getElementById('expense-category');
@@ -9882,7 +9870,6 @@ async function saveExpense() {
   const date = document.getElementById('expense-date').value.trim();
   const amount = document.getElementById('expense-amount').value.trim();
   const notes = document.getElementById('expense-notes').value.trim();
-  const hasBill = document.getElementById('expense-has-bill').checked;
   const billFile = document.getElementById('expense-bill-file').files[0];
   const billNotes = document.getElementById('expense-bill-notes').value.trim();
 
@@ -9912,16 +9899,14 @@ async function saveExpense() {
     return;
   }
 
-  // Bill validation
-  if (hasBill) {
-    if (!billFile) {
-      setError('add-expense-error', 'Please select a bill PDF.');
-      return;
-    }
-    if (!billNotes) {
-      setError('add-expense-error', 'Please enter a description for the bill.');
-      return;
-    }
+  // Bill validation (now required)
+  if (!billFile) {
+    setError('add-expense-error', 'Please select a bill PDF.');
+    return;
+  }
+  if (!billNotes) {
+    setError('add-expense-error', 'Please enter a description for the bill.');
+    return;
   }
 
   // DEBUG: Determine category type
@@ -9940,10 +9925,8 @@ async function saveExpense() {
   formData.append('date', date);
   formData.append('amount', parseFloat(amount));
   formData.append('notes', notes);
-  if (hasBill && billFile) {
-    formData.append('bill_file', billFile);
-    formData.append('bill_notes', billNotes);
-  }
+  formData.append('bill_file', billFile);
+  formData.append('bill_notes', billNotes);
 
   const res = await fetch(`/api/patients/${PATIENT_HOMER_ID}/expenses`, {
     method: 'POST',

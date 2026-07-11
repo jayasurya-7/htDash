@@ -209,6 +209,12 @@ def api_add_expense(homer_id):
     if not notes:
         return jsonify({'error': 'Notes are required.'}), 400
 
+    # Validate bill file and notes (now required)
+    if not bill_file:
+        return jsonify({'error': 'Bill/Receipt PDF is required.'}), 400
+    if not bill_notes:
+        return jsonify({'error': 'Bill description is required.'}), 400
+
     # Check for duplicate static category
     expenses_data = read_patient_expenses(folder, homer_id)
     expenses = expenses_data.get('expenses', [])
@@ -218,6 +224,12 @@ def api_add_expense(homer_id):
             return jsonify({
                 'error': f'{category} already logged — edit the existing entry instead.'
             }), 409
+
+    # Validate and save bill
+    if not bill_file.filename.lower().endswith('.pdf'):
+        return jsonify({'error': 'Bill file must be a PDF.'}), 400
+    if bill_file.content_length and bill_file.content_length > 5 * 1024 * 1024:
+        return jsonify({'error': 'Bill file size must be less than 5MB.'}), 400
 
     # Create entry
     expense_id = str(uuid.uuid4())
@@ -234,33 +246,26 @@ def api_add_expense(homer_id):
     }
 
     # Handle bill attachment
-    if bill_file and bill_notes:
-        # Validate and save bill
-        if not bill_file.filename.lower().endswith('.pdf'):
-            return jsonify({'error': 'Bill file must be a PDF.'}), 400
-        if bill_file.content_length and bill_file.content_length > 5 * 1024 * 1024:
-            return jsonify({'error': 'Bill file size must be less than 5MB.'}), 400
+    bill_path = f'expense_bills/{expense_id}.pdf'
+    if Config.USE_S3:
+        from utils.s3_store import s3_upload_file
+        import tempfile, os as _os
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp:
+            bill_file.save(tmp.name)
+            tmp_path = tmp.name
+        try:
+            s3_upload_file(tmp_path, f"{folder}/patients/{homer_id}/{bill_path}",
+                           content_type='application/pdf')
+        finally:
+            _os.unlink(tmp_path)
+    else:
+        from utils.data_access import get_patients_path
+        patient_dir = get_patients_path(folder) / homer_id / 'expense_bills'
+        patient_dir.mkdir(parents=True, exist_ok=True)
+        bill_file.save(str(patient_dir / f'{expense_id}.pdf'))
 
-        bill_path = f'expense_bills/{expense_id}.pdf'
-        if Config.USE_S3:
-            from utils.s3_store import s3_upload_file
-            import tempfile, os as _os
-            with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp:
-                bill_file.save(tmp.name)
-                tmp_path = tmp.name
-            try:
-                s3_upload_file(tmp_path, f"{folder}/patients/{homer_id}/{bill_path}",
-                               content_type='application/pdf')
-            finally:
-                _os.unlink(tmp_path)
-        else:
-            from utils.data_access import get_patients_path
-            patient_dir = get_patients_path(folder) / homer_id / 'expense_bills'
-            patient_dir.mkdir(parents=True, exist_ok=True)
-            bill_file.save(str(patient_dir / f'{expense_id}.pdf'))
-
-        expense['bill_attachment'] = bill_path
-        expense['bill_notes'] = bill_notes
+    expense['bill_attachment'] = bill_path
+    expense['bill_notes'] = bill_notes
 
     expenses.append(expense)
     expenses_data['expenses'] = expenses

@@ -3,6 +3,7 @@
 let _documents = [];
 let _categories = [];
 let _isAdmin = false;
+let _currentPreviewDoc = null;
 
 // Fallback showToast if not defined globally
 if (typeof showToast !== 'function') {
@@ -86,9 +87,11 @@ function _renderGroupedSections() {
     // Document rows
     const list = document.createElement('div');
     list.className = 'space-y-2';
-    docs.forEach(doc => {
+    docs.forEach((doc, idx) => {
+      const docId = `doc-${idx}-${doc.id}`;
       const row = document.createElement('div');
-      row.className = 'bg-slate-800/50 hover:bg-slate-800 border border-slate-700 rounded-lg p-4 transition';
+      row.className = 'bg-slate-800/50 hover:bg-slate-800 border border-slate-700 rounded-lg p-4 transition cursor-pointer';
+      row.onclick = () => openPdfPreview(doc);
       row.innerHTML = `
         <div class="flex items-start justify-between gap-4">
           <div class="flex-1">
@@ -99,11 +102,14 @@ function _renderGroupedSections() {
             </div>
           </div>
           <div class="flex items-center gap-2 flex-shrink-0">
-            <a href="/documents/api/download/${doc.id}" target="_blank" rel="noopener" class="px-3 py-2 bg-blue-600 hover:bg-blue-500 rounded text-sm font-medium text-white transition">
-              <i class="fas fa-download"></i> Download
+            <button id="${docId}-view" class="px-3 py-2 bg-blue-600 hover:bg-blue-500 rounded text-sm font-medium text-white transition" title="View PDF">
+              <i class="fas fa-eye"></i> View
+            </button>
+            <a href="/documents/api/download/${doc.id}" target="_blank" rel="noopener" class="px-3 py-2 bg-slate-700 hover:bg-slate-600 rounded text-sm font-medium text-slate-200 transition" title="Download PDF">
+              <i class="fas fa-download"></i>
             </a>
             ${_isAdmin ? `
-              <button onclick="deleteDocument('${doc.id}')" class="px-3 py-2 bg-red-600/40 hover:bg-red-600/60 rounded text-sm font-medium text-red-200 transition">
+              <button id="${docId}-delete" class="px-3 py-2 bg-red-600/40 hover:bg-red-600/60 rounded text-sm font-medium text-red-200 transition">
                 <i class="fas fa-trash"></i>
               </button>
             ` : ''}
@@ -111,6 +117,23 @@ function _renderGroupedSections() {
         </div>
       `;
       list.appendChild(row);
+
+      // Add event listeners after element is in DOM
+      const viewBtn = row.querySelector(`#${docId}-view`);
+      if (viewBtn) {
+        viewBtn.onclick = (e) => {
+          e.stopPropagation();
+          openPdfPreview(doc);
+        };
+      }
+
+      const delBtn = row.querySelector(`#${docId}-delete`);
+      if (delBtn) {
+        delBtn.onclick = (e) => {
+          e.stopPropagation();
+          deleteDocument(e, doc.id);
+        };
+      }
     });
     section.appendChild(list);
     sections.appendChild(section);
@@ -205,21 +228,51 @@ async function saveNewDocument() {
   }
 }
 
-async function deleteDocument(id) {
+function deleteDocument(e, id) {
+  e.stopPropagation();
   if (!confirm('Delete this document? This cannot be undone.')) return;
 
-  try {
-    const r = await fetch(`/documents/api/delete/${id}`, { method: 'DELETE' });
-    if (r.ok) {
-      loadDocuments();
-      showToast('Document deleted.', 'success');
-    } else {
-      const data = await r.json();
-      showToast(data.error || 'Delete failed.', 'error');
+  (async () => {
+    try {
+      const r = await fetch(`/documents/api/delete/${id}`, { method: 'DELETE' });
+      if (r.ok) {
+        loadDocuments();
+        closePdfPreview();
+        showToast('Document deleted.', 'success');
+      } else {
+        const data = await r.json();
+        showToast(data.error || 'Delete failed.', 'error');
+      }
+    } catch (e) {
+      showToast(`Delete failed: ${e.message}`, 'error');
     }
-  } catch (e) {
-    showToast(`Delete failed: ${e.message}`, 'error');
-  }
+  })();
+}
+
+function openPdfPreview(doc) {
+  if (!doc || !doc.id) return;
+
+  _currentPreviewDoc = doc;
+
+  // Show preview panel
+  document.getElementById('pdf-preview-panel').classList.remove('hidden');
+
+  // Set title and metadata
+  document.getElementById('pdf-preview-title').textContent = doc.title;
+  document.getElementById('pdf-preview-meta').textContent = `Filed by ${doc.uploaded_by} · ${formatDateTime(doc.uploaded_at)}`;
+
+  // Set download link
+  document.getElementById('pdf-download-btn').href = `/documents/api/download/${doc.id}`;
+
+  // Load PDF in iframe
+  const viewer = document.getElementById('pdf-preview-viewer');
+  viewer.src = `/documents/api/download/${doc.id}`;
+}
+
+function closePdfPreview() {
+  document.getElementById('pdf-preview-panel').classList.add('hidden');
+  document.getElementById('pdf-preview-viewer').src = '';
+  _currentPreviewDoc = null;
 }
 
 function escapeHtml(text) {

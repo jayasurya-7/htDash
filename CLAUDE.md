@@ -2162,18 +2162,18 @@ filed_at = _now_str()  # Returns timestamp in IST
 - ✅ Different device types can be assigned to same patient (Pluto + Mars + etc.)
 - ✅ Error messages clear and actionable
 
-### Expense Tracker ✅ (July 2026)
+### Expense Tracker ✅ (July 2026 — Updated with Mandatory PDF Attachments)
 
-**Feature:** Per-patient expense ledger with editable entries and mandatory audit trail. Tracks costs for standard protocol-day visits (Demo + Installation, Days 1/2/3/15/29) and ad-hoc visit types (Adverse Event Visit, Clinical Visit, Robot Issue Visit).
+**Feature:** Per-patient expense ledger with editable entries and mandatory audit trail. Tracks costs for standard protocol-day visits (Demo + Installation, Days 1/2/3/15/29) and ad-hoc visit types (Adverse Event Visit, Clinical Visit, Robot Issue Visit). **All expenses require a PDF bill/receipt attachment.**
 
 **Architecture:**
 
 - **New tab on Patient Detail page** (not a separate URL) — follows the same one-URL/JS-tab-switch convention as ADL, Adverse Events, and Notes.
-- **Data storage:** `expense_tracker.json` per patient (role-independent, unlike notes).
+- **Data storage:** `expense_tracker.json` per patient (role-independent, unlike notes). Bills stored at `expense_bills/<expense_id>.pdf`.
 - **Category model:**
-  - **Static** (one entry allowed per patient): `demo_installation` (experimental only), `day1`, `day2`, `day3`, `day15`, `day29`.
+  - **Static** (one entry allowed per patient): `demo_installation` (experimental only), `a0_assessment`, `day1`, `day2`, `day3`, `day15`, `day29`, `a1_assessment`, `a2_assessment`.
   - **Dynamic** (unlimited): `adverse_event_visit`, `clinical_visit`, `robot_issue_visit`, or user-typed custom names.
-- **Entry fields:** `amount` (positive number), `date` (YYYY-MM-DD, not future), `notes` (required on create), `filed_by`, `filed_at`.
+- **Entry fields:** `amount` (positive number), `date` (YYYY-MM-DD, not future), `notes` (required on create), `bill_attachment` (PDF file path, **required**), `bill_notes` (bill description, **required**), `filed_by`, `filed_at`.
 - **Edit-with-audit-trail:** Editing requires a mandatory `reason`. Previous values stored in `edit_history` array (mirrors `appointment_reschedules`/`appointment_cancellations` pattern in `api_reschedule_assessment_appointment`).
 
 **Access Control:**
@@ -2197,19 +2197,22 @@ filed_at = _now_str()  # Returns timestamp in IST
 
 **Validation:**
 
-- Client-side: date picker bounds, required fields (category, date, amount, notes on create; reason on edit), amount must be positive.
-- Server-side: same bounds + 400 for invalid category, 400 for demo_installation on control patients, 400 for empty notes/reason, 409 for duplicate static category.
+- Client-side: date picker bounds, required fields (category, date, amount, notes, bill PDF, bill description on create; reason on edit), amount must be positive, PDF file only (validated by file extension), max 5MB file size.
+- Server-side: same bounds + 400 for invalid category, 400 for demo_installation on control patients, 400 for empty notes/bill file/bill notes, 400 for non-PDF file, 400 for file > 5MB, 409 for duplicate static category.
 
 **Testing Verified:**
 - ✅ Expense Tracker tab appears after Notes tab.
-- ✅ Category picker shows 6 static + 3 dynamic options; `demo_installation` disabled for control patients and already-used static categories.
-- ✅ Add entry: amount, date, notes required; saved with `filed_by`/`filed_at` server-stamped.
+- ✅ Category picker shows 9 static + 3 dynamic options; `demo_installation` disabled for control patients and already-used static categories.
+- ✅ Add entry: amount, date, notes, **bill PDF, bill description all required**; cannot save without all fields.
+- ✅ Bill section always shown (no toggle checkbox); bill file and description always required.
+- ✅ File validation: only PDFs accepted, max 5MB enforced on both client and server.
 - ✅ Duplicate static category returns 409 error.
 - ✅ Edit entry: reason required; previous values appended to `edit_history`; live fields updated.
 - ✅ Multiple dynamic entries allowed (adverse_event_visit added twice succeeds).
 - ✅ Supervisor sees tab but Add/Edit buttons hidden and greyed.
 - ✅ Engineer doesn't see Expense Tracker tab at all.
-- ✅ `expense_tracker.json` created per patient with correct schema.
+- ✅ `expense_tracker.json` created per patient with bill_attachment and bill_notes fields.
+- ✅ PDF bills stored at `expense_bills/<expense_id>.pdf` (S3 or local).
 
 ---
 
