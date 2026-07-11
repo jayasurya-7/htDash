@@ -1852,7 +1852,7 @@ def api_complete_device_return(homer_id):
     session_id = flask_session.get('session_id', -1)
 
     # Close all open device assignments and process per-device outcomes
-    for dtype in ('pluto', 'mars', 'agwatch', 'modems', 'laptops'):
+    for dtype in ('pluto', 'mars', 'agwatch', 'modems', 'laptops', 'sims'):
         assignments = read_device_assignments(folder, dtype)
         inv_list    = read_device_inventory(folder, dtype)
         inv_map     = {d['id']: d for d in inv_list}

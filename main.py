@@ -98,6 +98,9 @@ def devices():
 def documents():
     if not flask_session.get('login_place'):
         return redirect(url_for('login'))
+    # Block assessment_therapist from accessing Documents
+    if flask_session.get('privilege') == 'assessment_therapist':
+        return redirect(url_for('assessment'))
     return render_template('documents.html', active_page='documents')
 
 

@@ -2322,7 +2322,8 @@ filed_at = _now_str()  # Returns timestamp in IST
 
 - `templates/documents.html` (new) — Page template extending `base.html`, category-grouped sections (header + doc count per category), document rows (title, description, "Filed by <uploader> · <timestamp>", download link, admin-only delete icon), admin-only "Add Document" button in page_actions, modal with title/category-dropdown-with-new-option/description/PDF file input (auto-wired for pdf_preview.js live preview)
 - `static/js/app/documents.js` (new) — `initPage()` (auto-invoked, reveals Add button for admins), `loadDocuments()` (fetch list, render grouped sections), modal open/close/category-toggle, `saveNewDocument()` (client validates title/category/PDF, posts FormData), `deleteDocument(id)` (confirm + DELETE)
-- `templates/base.html` — Added plain "Documents" nav link after Devices (visible to all roles, no JS role-gating needed)
+- `templates/base.html` — Added plain "Documents" nav link after Devices (visible to all roles except assessment_therapist)
+- `static/js/app/app.js` — Updated `updateUserInfo()` to hide Documents link for assessment_therapist role
 
 **Validation (dual client + server):**
 
@@ -2343,6 +2344,29 @@ filed_at = _now_str()  # Returns timestamp in IST
 - ✅ Admin can delete; non-admin DELETE returns 403; file removed from disk
 - ✅ Client-side validation blocks submission for missing title/category/file before POST; server validates same rules
 - ✅ Works with `Config.USE_S3=false` (dev default); S3 branch identical to local for file storage
+
+---
+
+## Device Return — SIM Disconnection Fix ✅ (July 10, 2026)
+
+**Status:** ✅ Complete
+
+**Issue:** When devices were returned, SIM cards showed as still linked to modems even though the modem was marked as returned.
+
+**Root Cause:** The `api_complete_device_return` endpoint was clearing `sim_id` from modem inventory but not closing SIM assignments. The SIM assignment remained open in the device assignments list.
+
+**Fix:** Added 'sims' to the device types loop in `api_complete_device_return` so that:
+1. When a modem is returned → modem assignment is closed with `returned_date`
+2. When a SIM is returned → SIM assignment is also closed with `returned_date`
+3. Modem inventory no longer shows `sim_id` (set to `null`)
+4. SIM is fully disconnected from the modem
+
+**Implementation:**
+
+- `routes/user_management.py` line 1855 — Added 'sims' to the device types tuple: `for dtype in ('pluto', 'mars', 'agwatch', 'modems', 'laptops', 'sims'):`
+- Now all device types including SIMs get their assignments properly closed when devices are returned
+
+**Result:** When devices are returned, SIM cards are fully disconnected from modems and show as available for reassignment.
 
 ---
 

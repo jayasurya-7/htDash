@@ -82,6 +82,7 @@
           document.querySelector('a[href="/"]')?.classList.add('hidden');
           document.querySelector('a[href="/patients"]')?.classList.add('hidden');
           document.querySelector('a[href="/devices"]')?.classList.add('hidden');
+          document.querySelector('a[href="/documents"]')?.classList.add('hidden');
           document.getElementById('nav-assessment')?.classList.remove('hidden');
           // Redirect to /assessment
           if (window.location.pathname === '/' || window.location.pathname === '/dashboard') {

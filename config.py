@@ -58,6 +58,13 @@ class Config:
     SECRET_KEY = os.environ.get('SECRET_KEY') or 'change-this-in-production'
     DEBUG = os.environ.get('FLASK_DEBUG', 'false').lower() == 'true'
 
+    # Session configuration: Clear session when browser closes
+    SESSION_PERMANENT = False  # Session expires when browser closes
+    PERMANENT_SESSION_LIFETIME = timedelta(hours=24)  # Fallback if session becomes permanent
+    SESSION_COOKIE_SECURE = False  # Set to True in production with HTTPS
+    SESSION_COOKIE_HTTPONLY = True  # Prevent JavaScript access to session cookie
+    SESSION_COOKIE_SAMESITE = 'Lax'  # CSRF protection
+
     # Set True in development to cache session in browser localStorage (survives server restarts).
     # Set False in production — server session is the sole source of truth.
     USE_LOCAL_STORAGE = os.environ.get('USE_LOCAL_STORAGE', 'true').lower() == 'true'
@@ -65,23 +72,23 @@ class Config:
     # Login credentials
     LOGIN_CREDENTIALS = {
         # Therapists (1 per site)
-        "MP-HS-1001":   {"place": "Manipal",  "privilege": "therapist",           "password": "manipal@123"},
-        "RP-HS-1002":   {"place": "Ranipet",  "privilege": "therapist",           "password": "ranipet@123"},
-        "LD-HS-1003":   {"place": "Ludhiana", "privilege": "therapist",           "password": "ludhiana@123"},
+        "MP-HS-IT":   {"place": "Manipal",  "privilege": "therapist",           "password": "MANIPAL@2026it"},
+        "RP-HS-IT":   {"place": "Ranipet",  "privilege": "therapist",           "password": "RANIPET@2026it"},
+        "LD-HS-IT":   {"place": "Ludhiana", "privilege": "therapist",           "password": "LUDHIANA@2026it"},
         # Engineers (1 per site)
-        "MP-HS-ENG":    {"place": "Manipal",  "privilege": "engineer",            "password": "manipaleng@123"},
-        "RP-HS-ENG":    {"place": "Ranipet",  "privilege": "engineer",            "password": "ranipeteng@123"},
-        "LD-HS-ENG":    {"place": "Ludhiana", "privilege": "engineer",            "password": "ludhianaeng@123"},
+        "MP-HS-ENG":    {"place": "Manipal",  "privilege": "engineer",            "password": "MANIPALeng@2026"},
+        "RP-HS-ENG":    {"place": "Ranipet",  "privilege": "engineer",            "password": "RANIPETeng@2026"},
+        "LD-HS-ENG":    {"place": "Ludhiana", "privilege": "engineer",            "password": "LUDHIANAeng@2026"},
         # Site Admins (1 per site)
-        "MP-HS-ADMIN":  {"place": "Manipal",  "privilege": "admin",               "password": "manipaladmin@123"},
-        "RP-HS-ADMIN":  {"place": "Ranipet",  "privilege": "admin",               "password": "ranipetadmin@123"},
-        "LD-HS-ADMIN":  {"place": "Ludhiana", "privilege": "admin",               "password": "ludhianaadmin@123"},
+        "MP-HS-ADMIN":  {"place": "Manipal",  "privilege": "admin",               "password": "MANIPALadmin@2026"},
+        "RP-HS-ADMIN":  {"place": "Ranipet",  "privilege": "admin",               "password": "RANIPETadmin@2026"},
+        "LD-HS-ADMIN":  {"place": "Ludhiana", "privilege": "admin",               "password": "LUDHIANAadmin@2026"},
         # Overall Supervisor (global view-only across all centres)
-        "LAB-HS-DATA":  {"place": "admin",    "privilege": "supervisor",          "password": "lab@123"},
+        "LAB-HS-DATA":  {"place": "admin",    "privilege": "supervisor",          "password": "lab@2026"},
         # Assessment Therapists (1 per site - upload A0/A1/A2 PDFs only)
-        "MP-HS-ASSESS": {"place": "Manipal",  "privilege": "assessment_therapist", "password": "manipalassess@123"},
-        "RP-HS-ASSESS": {"place": "Ranipet",  "privilege": "assessment_therapist", "password": "ranipetassess@123"},
-        "LD-HS-ASSESS": {"place": "Ludhiana", "privilege": "assessment_therapist", "password": "ludhianaassess@123"},
+        "MP-HS-AT": {"place": "Manipal",  "privilege": "assessment_therapist", "password": "MANIPALat@2026"},
+        "RP-HS-AT": {"place": "Ranipet",  "privilege": "assessment_therapist", "password": "RANIPETat@2026"},
+        "LD-HS-AT": {"place": "Ludhiana", "privilege": "assessment_therapist", "password": "LUDHIANAat@2026"},
     }
     
     # Exercise Library

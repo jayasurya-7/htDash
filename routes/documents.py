@@ -15,8 +15,12 @@ bp = Blueprint('documents', __name__)
 
 
 @bp.before_request
-def _require_admin_for_writes():
-    """View/download open to all authenticated roles; every mutation is admin-only."""
+def _check_access():
+    """Block assessment_therapist from accessing documents. Write access is admin-only."""
+    # Assessment therapists cannot access documents at all
+    if flask_session.get('privilege') == 'assessment_therapist':
+        return jsonify({'error': 'Forbidden — Documents not available for assessment therapists'}), 403
+    # Write access (non-GET/HEAD/OPTIONS) requires admin
     if request.method not in ('GET', 'HEAD', 'OPTIONS'):
         if flask_session.get('privilege') != 'admin':
             return jsonify({'error': 'Forbidden — admin only'}), 403
