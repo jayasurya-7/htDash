@@ -4,6 +4,7 @@ let _documents = [];
 let _categories = [];
 let _isAdmin = false;
 let _currentPreviewDoc = null;
+let _filteredDocuments = [];
 
 // Fallback showToast if not defined globally
 if (typeof showToast !== 'function') {
@@ -28,7 +29,10 @@ async function loadDocuments() {
     const data = await r.json();
     _documents = data.documents || [];
     _categories = data.categories || [];
-    _renderGroupedSections();
+    _filteredDocuments = _documents;
+    document.getElementById('documents-search').value = '';
+    document.getElementById('search-results-info').classList.add('hidden');
+    _renderGroupedSections(_filteredDocuments);
     _showLoading(false);
   } catch (e) {
     _showError(`Failed to load documents: ${e.message}`);
@@ -50,18 +54,25 @@ function _showError(msg) {
   document.getElementById('documents-error').textContent = msg;
 }
 
-function _renderGroupedSections() {
+function _renderGroupedSections(docs = _documents) {
   const sections = document.getElementById('documents-sections');
   sections.innerHTML = '';
+  document.getElementById('documents-empty').classList.add('hidden');
+  document.getElementById('documents-no-results').classList.add('hidden');
 
   if (_documents.length === 0) {
     document.getElementById('documents-empty').classList.remove('hidden');
     return;
   }
 
+  if (docs.length === 0) {
+    document.getElementById('documents-no-results').classList.remove('hidden');
+    return;
+  }
+
   // Group by category
   const grouped = {};
-  _documents.forEach(doc => {
+  docs.forEach(doc => {
     const cat = doc.category || 'Uncategorized';
     if (!grouped[cat]) grouped[cat] = [];
     grouped[cat].push(doc);
@@ -273,6 +284,34 @@ function closePdfPreview() {
   document.getElementById('pdf-preview-panel').classList.add('hidden');
   document.getElementById('pdf-preview-viewer').src = '';
   _currentPreviewDoc = null;
+}
+
+function filterDocuments() {
+  const searchInput = document.getElementById('documents-search');
+  const query = searchInput.value.trim().toLowerCase();
+  const resultsInfo = document.getElementById('search-results-info');
+
+  if (!query) {
+    // No search query - show all documents
+    _filteredDocuments = _documents;
+    resultsInfo.classList.add('hidden');
+  } else {
+    // Filter documents by title, description, category, or uploader
+    _filteredDocuments = _documents.filter(doc => {
+      const titleMatch = doc.title.toLowerCase().includes(query);
+      const descMatch = (doc.description || '').toLowerCase().includes(query);
+      const categoryMatch = (doc.category || '').toLowerCase().includes(query);
+      const uploaderMatch = (doc.uploaded_by || '').toLowerCase().includes(query);
+      return titleMatch || descMatch || categoryMatch || uploaderMatch;
+    });
+
+    // Show search results info
+    resultsInfo.textContent = `Found ${_filteredDocuments.length} of ${_documents.length} documents`;
+    resultsInfo.classList.remove('hidden');
+  }
+
+  // Re-render with filtered results
+  _renderGroupedSections(_filteredDocuments);
 }
 
 function escapeHtml(text) {
