@@ -6576,14 +6576,19 @@ def api_log_patient_call(homer_id):
             return jsonify({'error': 'Call date cannot be in the future.'}), 400
     except ValueError:
         return jsonify({'error': 'Invalid date format.'}), 400
-    if not duration_str:
-        return jsonify({'error': 'Duration is required.'}), 400
-    try:
-        duration_minutes = int(duration_str)
-        if duration_minutes <= 0:
-            raise ValueError
-    except ValueError:
-        return jsonify({'error': 'Duration must be a positive integer.'}), 400
+
+    # Duration is required for audio/video calls, but not for text calls
+    duration_minutes = None
+    if call_mode != 'text':
+        if not duration_str:
+            return jsonify({'error': 'Duration is required.'}), 400
+        try:
+            duration_minutes = int(duration_str)
+            if duration_minutes <= 0:
+                raise ValueError
+        except ValueError:
+            return jsonify({'error': 'Duration must be a positive integer.'}), 400
+
     if not notes:
         return jsonify({'error': 'Notes are required.'}), 400
     if call_type not in ('patient_initiated', 'therapist_initiated'):

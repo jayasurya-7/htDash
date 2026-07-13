@@ -7875,6 +7875,21 @@ function _pcToggleTherapistInitiated() {
   document.getElementById('pc-reason-wrap').classList.toggle('hidden', !checked);
 }
 
+function _updatePatientCallDurationVisibility() {
+  const callMode = document.querySelector('input[name="pc-call-mode"]:checked')?.value || '';
+  const durationWrap = document.getElementById('pc-duration-wrap');
+  const durationInput = document.getElementById('pc-duration');
+
+  if (callMode === 'text') {
+    // Hide duration for text calls
+    durationWrap.classList.add('hidden');
+    durationInput.value = '';
+  } else {
+    // Show duration for audio and video calls
+    durationWrap.classList.remove('hidden');
+  }
+}
+
 function openPatientCallModal() {
   document.getElementById('pc-date').value     = '';
   document.getElementById('pc-duration').value = '';
@@ -7888,6 +7903,9 @@ function openPatientCallModal() {
   // Outcome group visibility (group, watch-assigned, training-ended cutoff)
   // is centralised in _outcomeReset → _applyOutcomeVisibility.
   _outcomeReset('pc');
+
+  // Initialize duration visibility (hidden by default since no call mode selected yet)
+  _updatePatientCallDurationVisibility();
 
   setError('pc-error', '');
   _attachDateGuard('pc-date', 'pc-error');
@@ -7903,8 +7921,9 @@ async function savePatientCall() {
   const callMode = document.querySelector('input[name="pc-call-mode"]:checked')?.value || '';
 
   if (!dateVal)                            { setError('pc-error', 'Call date is required.'); return; }
-  if (!duration || parseInt(duration) < 1) { setError('pc-error', 'Duration must be at least 1 minute.'); return; }
-  if (!callMode)                           { setError('pc-error', 'Call mode (Audio / Video) is required.'); return; }
+  if (!callMode)                           { setError('pc-error', 'Call mode (Audio / Video / Text) is required.'); return; }
+  // Duration is required only for audio and video calls, not for text
+  if (callMode !== 'text' && (!duration || parseInt(duration) < 1)) { setError('pc-error', 'Duration must be at least 1 minute.'); return; }
   if (!notes)                              { setError('pc-error', 'Notes are required.'); return; }
   if (!_validateAttachment('pc', 'pc-error')) return;
 
@@ -7919,10 +7938,23 @@ async function savePatientCall() {
   const call_type = therapistInitiated ? 'therapist_initiated' : 'patient_initiated';
 
   saveBtn.disabled = true;
+  const payload = {
+    completion_date: dateVal,
+    notes,
+    triggered,
+    no_issue: noIssue,
+    call_type,
+    call_mode: callMode,
+    reason: therapistInitiated ? reason : undefined
+  };
+  // Only include duration for audio/video calls
+  if (callMode !== 'text') {
+    payload.duration_minutes = parseInt(duration);
+  }
+
   const { ok, data } = await apiPost(
     `/api/patients/${PATIENT_HOMER_ID}/log-patient-call`,
-    { completion_date: dateVal, duration_minutes: parseInt(duration), notes, triggered, no_issue: noIssue,
-      call_type, call_mode: callMode, reason: therapistInitiated ? reason : undefined }
+    payload
   );
   if (!ok) { setError('pc-error', data.error || 'Failed to save.'); saveBtn.disabled = false; return; }
 

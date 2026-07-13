@@ -1641,24 +1641,22 @@
         <label class="block text-sm font-medium text-slate-700 mb-1">Call Date &amp; Time <span class="text-red-500">*</span></label>
         <input type="datetime-local" id="pc-date" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" />
       </div>
-      <div class="grid gap-3" style="grid-template-columns: 0.8fr 1.2fr;">
-        <div>
-          <label class="block text-sm font-medium text-slate-700 mb-1">Duration (minutes) <span class="text-red-500">*</span></label>
-          <input id="pc-duration" type="number" min="1" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" placeholder="e.g. 10" />
-        </div>
-        <div>
-          <label class="block text-sm font-medium text-slate-700 mb-1">Call Mode <span class="text-red-500">*</span></label>
-          <div class="flex gap-2" id="pc-call-mode-group">
-            <label class="flex-1 flex items-center justify-center gap-2 px-3 py-2 border border-slate-200 rounded-xl text-sm cursor-pointer hover:bg-slate-50">
-              <input type="radio" name="pc-call-mode" value="audio" class="w-4 h-4 text-blue-500"> Audio
-            </label>
-            <label class="flex-1 flex items-center justify-center gap-2 px-3 py-2 border border-slate-200 rounded-xl text-sm cursor-pointer hover:bg-slate-50">
-              <input type="radio" name="pc-call-mode" value="video" class="w-4 h-4 text-blue-500"> Video
-            </label>
-            <label class="flex-1 flex items-center justify-center gap-2 px-3 py-2 border border-slate-200 rounded-xl text-sm cursor-pointer hover:bg-slate-50">
-              <input type="radio" name="pc-call-mode" value="text" class="w-4 h-4 text-blue-500"> Text
-            </label>
-          </div>
+      <div id="pc-duration-wrap">
+        <label class="block text-sm font-medium text-slate-700 mb-1">Duration (minutes) <span class="text-red-500">*</span></label>
+        <input id="pc-duration" type="number" min="1" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" placeholder="e.g. 10" />
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-slate-700 mb-1">Call Mode <span class="text-red-500">*</span></label>
+        <div class="flex gap-2" id="pc-call-mode-group">
+          <label class="flex-1 flex items-center justify-center gap-2 px-3 py-2 border border-slate-200 rounded-xl text-sm cursor-pointer hover:bg-slate-50">
+            <input type="radio" name="pc-call-mode" value="audio" onchange="_updatePatientCallDurationVisibility()" class="w-4 h-4 text-blue-500"> Audio
+          </label>
+          <label class="flex-1 flex items-center justify-center gap-2 px-3 py-2 border border-slate-200 rounded-xl text-sm cursor-pointer hover:bg-slate-50">
+            <input type="radio" name="pc-call-mode" value="video" onchange="_updatePatientCallDurationVisibility()" class="w-4 h-4 text-blue-500"> Video
+          </label>
+          <label class="flex-1 flex items-center justify-center gap-2 px-3 py-2 border border-slate-200 rounded-xl text-sm cursor-pointer hover:bg-slate-50">
+            <input type="radio" name="pc-call-mode" value="text" onchange="_updatePatientCallDurationVisibility()" class="w-4 h-4 text-blue-500"> Text
+          </label>
         </div>
       </div>
       <div>
