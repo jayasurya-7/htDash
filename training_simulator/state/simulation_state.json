@@ -1,0 +1,89 @@
+{
+  "version": 1,
+  "created_at": "2026-07-13T11:47:26.743461",
+  "cohort": {
+    "patient_ids": [
+      {
+        "homer_id": "HOCMCV001",
+        "group": "experimental",
+        "training_side": "Right"
+      },
+      {
+        "homer_id": "HOCMCV002",
+        "group": "experimental",
+        "training_side": "Left"
+      },
+      {
+        "homer_id": "HOCMCV003",
+        "group": "experimental",
+        "training_side": "Right"
+      },
+      {
+        "homer_id": "HOCMCV004",
+        "group": "experimental",
+        "training_side": "Left"
+      },
+      {
+        "homer_id": "HOCMCV005",
+        "group": "experimental",
+        "training_side": "Right"
+      },
+      {
+        "homer_id": "HOCMCV006",
+        "group": "control",
+        "training_side": "Right"
+      },
+      {
+        "homer_id": "HOCMCV007",
+        "group": "control",
+        "training_side": "Left"
+      },
+      {
+        "homer_id": "HOCMCV008",
+        "group": "control",
+        "training_side": "Right"
+      },
+      {
+        "homer_id": "HOCMCV009",
+        "group": "control",
+        "training_side": "Left"
+      },
+      {
+        "homer_id": "HOCMCV010",
+        "group": "control",
+        "training_side": "Right"
+      }
+    ],
+    "active": true,
+    "hospital": "ranipet"
+  },
+  "simulation": {
+    "simulated_day_number": 1,
+    "session_start": "2026-07-13T11:48:10.196402"
+  },
+  "expected_events": [
+    {
+      "day": 1,
+      "patient_id": "HOCMCV001",
+      "protocol_event_id": "adverse_event",
+      "free_type": "adverse_event",
+      "suggested_values": {
+        "description": "Mild swelling observed in training arm",
+        "action_taken": "Discussed with patient and provided modified exercise recommendations",
+        "training_blocked": false,
+        "severity": "Investigator"
+      },
+      "verified": false,
+      "verdict": null,
+      "actual_completion_date": null
+    }
+  ],
+  "logs": [
+    "[2026-07-13T11:47:26.744460] Cohort reset \u2014 Cleared 10 patients",
+    "[2026-07-13T11:48:10.141679] Creating cohort \u2014 Seeding 10 patients\u2026",
+    "[2026-07-13T11:48:10.197397] Cohort created \u2014 10 patients initialized",
+    "[2026-07-13T11:49:49.132914] Scenario system \u2014 Activated patient HOCMCV001 detected \u2014 scenarios enabled",
+    "[2026-07-13T11:49:49.132914] Scenario injection \u2014 Day 1: adverse_event scenario type",
+    "[2026-07-13T11:49:49.136915] Day advanced \u2014 Day 1: 0 protocol events + 1 scenarios injected"
+  ]
+}

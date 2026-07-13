@@ -27,6 +27,62 @@ HOMER Therapy Dashboard (htDash) is a Flask-based clinical dashboard for managin
 
 ---
 
+## Training Simulator ✅ (July 2026)
+
+**New standalone tool** for training therapists and engineers on htDash without real patient data.
+
+**Location**: `training_simulator/` folder (sibling to `routes/`, `utils/`, `scripts/`)
+
+**Features**:
+- Creates 10 simulated patients (5 experimental, 5 control) in `data/ranipet/`
+- Advances through 187-day protocol timeline by shifting `activationDate` backward
+- Injects realistic scenarios (adverse events, robot issues, device problems, patient calls) with "answer key" field values
+- Verifies that trainee correctly filed events in htDash against expected results
+- Produces per-patient and cohort-wide pass/fail reports
+
+**Running the Simulator**:
+```bash
+python training_simulator/simulator_app.py
+```
+
+**Architecture**:
+- No changes to htDash code — only imports existing utilities (`utils/data_access.py`, `utils/protocol_events.py`, `config/study_protocol.json`)
+- Pure filesystem I/O (reads/writes the same `data/` tree htDash uses)
+- Tkinter GUI (stdlib, zero new dependencies)
+- Persistent state ledger (`training_simulator/state/simulation_state.json`)
+
+**Core Modules**:
+| Module | Purpose |
+|--------|---------|
+| `state_store.py` | Persistent ledger of cohort & expected events |
+| `patient_seed.py` | Creates 10 fresh simulator patients |
+| `protocol_engine.py` | Date advancement (shifts `activationDate`, recomputes windows) |
+| `scenarios.py` | Randomized scenario injection (AE, robot issues, calls) |
+| `verification.py` | Diffs expected events vs. actual `protocol_events.json` filings |
+| `simulator_app.py` | Tkinter GUI: cohort setup, run/verify/report buttons |
+| `test_simulator.py` | Smoke tests (all passing) |
+
+**Key Algorithm**:
+Each "Run" press advances the simulation by 1 day:
+1. For each activated, not-training-ended patient, shift `activationDate` backward by 1 calendar day
+2. Re-read `protocol_events.json` and recompute `scheduled_date` for all `incomplete` entries using the new `activationDate` + window offsets from `study_protocol.json`
+3. Preserve time-of-day and leave `complete`/`cancelled` entries untouched (immutable)
+4. Call `populate_activation_dates()` to fill any still-null stubs
+
+This mirrors `scripts/shift_activation.py`'s backward-shift mechanism and ensures real `derive_status()` works with the actual system clock.
+
+**Testing**: All modules pass smoke tests (state store, protocol engine, scenarios, verification).
+
+**Next Steps**:
+- Complete GUI Verify & Report buttons (logic implemented, UI integration needed)
+- Add scenario injection to instructions panel
+- Test with real trainer/trainee workflow
+- Optional: multi-hospital support, instructor dashboard, auto-filing via htDash API
+
+See `training_simulator/README.md` and `training_simulator/IMPLEMENTATION_SUMMARY.md` for full details.
+
+---
+
 ## Role-Based Access Control (RBAC) — Implemented June 2026
 
 **5 Roles** with separate credentials (13 login IDs across 3 hospital sites + global supervisor):
