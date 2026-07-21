@@ -1,0 +1,443 @@
+﻿"""
+Experimental group track 1 (Right side) â€” 187-day curriculum.
+
+Patient TRN001: experimental group, Right training side.
+Includes robot issue and other-device-issue chains.
+Full implementation mirrors ctrl1_track.py with additional RI/ODI scenarios.
+
+NOTE: For MVP, this is a simplified version focusing on key differences from control.
+Full 187-day arc would follow the same pattern as ctrl1_track.py.
+"""
+
+from training_simulator.curriculum.schema import DayEntry, ScriptedEvent
+from training_simulator import device_pool as dp
+
+
+TRACK = [
+    # â”€â”€ Day 0: Informed Consent â”€â”€
+    DayEntry(cohort_day=0, role='exp1', events=[
+        ScriptedEvent(
+            event_key='informed_consent', kind='stub',
+            narrative='Therapist obtains signed informed consent from patient.',
+            fields={'completion_date': '{today} 06:00', 'notes': 'Patient consented with witness.'},
+        ),
+    ]),
+
+    # â”€â”€ Day 0b: Device Setup (immediately after consent) â”€â”€
+    # NOTE: This is technically Day 0-1 boundary; both should be filed before activation
+    DayEntry(cohort_day=0, role='exp1', events=[
+        ScriptedEvent(
+            event_key='exp_device_install', kind='stub',
+            narrative='Therapist installs Pluto, Mars, modem, laptop, and assigns AG watches.',
+            fields={
+                'completion_date': '{today} 07:00',
+                'pluto_id': dp.PLUTO_1,
+                'mars_id': dp.MARS_1,
+                'modem_id': dp.MODEM_1,
+                'laptop_id': dp.LAPTOP_1,
+                'sim_id': dp.SIM_1,
+                'demo_done': True,
+                'notes': 'All devices installed and working.',
+            },
+        ),
+    ]),
+
+    # â”€â”€ Day 1: Activation and Prescriptions â”€â”€
+    DayEntry(cohort_day=1, role='exp1', events=[
+        ScriptedEvent(
+            event_key='activation', kind='stub',
+            narrative='Therapist activates patient. Explains protocol, demonstrates Pluto/Mars.',
+            fields={
+                'session_start': '{today} 06:00',
+                'session_end': '{today} 08:00',
+                'vcg_group': 'VCG2',
+                'no_issue': True,
+                'notes': 'Activation successful, patient ready.',
+                'attachment': '',
+            },
+        ),
+        ScriptedEvent(
+            event_key='adl_prescription_d01', kind='stub',
+            narrative='Therapist prescribes ADL exercises.',
+            fields={
+                'prescribed_exercises': [
+                    {'exercise_name': 'Practice Brushing Your Teeth', 'sets': 2, 'repetitions': 8, 'notes': ''},
+                    {'exercise_name': 'Practice Combing Your Hair', 'sets': 2, 'repetitions': 8, 'notes': ''},
+                ],
+                'notes': 'ADL Phase 1 prescribed.',
+            },
+        ),
+        ScriptedEvent(
+            event_key='agwatch_timing_d01', kind='stub',
+            narrative='Record timing for Day 1 ADL exercises.',
+            fields={
+                'exercises': [
+                    {'exercise_name': 'Practice Brushing Your Teeth', 'type': 'adl', 'start': '06:00', 'end': '06:08', 'notes': ''},
+                    {'exercise_name': 'Practice Combing Your Hair', 'type': 'adl', 'start': '06:10', 'end': '06:25', 'notes': ''},
+                ],
+                'notes': 'Timing recorded for ADL exercises.',
+                'attachment': '',
+            },
+        ),
+        ScriptedEvent(
+            event_key='watch_record', kind='free',
+            narrative='Therapist checks and records AG watch status on Day 1. Right affected hand.',
+            fields={
+                'ag_watch_right': {'watch_number': 'TRNDEV-AGW-1', 'old_lost': False},
+                'sync_datetime': '{today} 08:00',
+                'worn_datetime': '{today} 08:00',
+                'notes': 'Initial watch check on right hand, patient ready to start wearing.',
+            },
+        ),
+        ScriptedEvent(
+            event_key='prescription_printout_d01', kind='stub',
+            narrative='Therapist generates therapy prescription printout on Day 1.',
+            fields={
+                'language': 'Tamil',
+                'notes': 'Prescription printout generated and given to patient.',
+            },
+        ),
+    ]),
+
+    # â”€â”€ Day 2: Home Visit + AG Watch Timing â”€â”€
+    DayEntry(cohort_day=2, role='exp1', events=[
+        ScriptedEvent(
+            event_key='home_visit_d02', kind='stub',
+            narrative='Therapist conducts home visit on Day 2. Patient settling into routine.',
+            fields={
+                'session_start': '{today} 06:00',
+                'session_end': '{today} 08:00',
+                'no_issue': True,
+                'notes': 'Day 2 home visit completed. Patient on schedule.',
+                'attachment': '',
+            },
+        ),
+        ScriptedEvent(
+            event_key='agwatch_timing_d02', kind='stub',
+            narrative='Therapist records ADL exercise timing on Day 2.',
+            fields={
+                'exercises': [
+                    {'exercise_name': 'Practice Brushing Your Teeth', 'type': 'adl', 'start': '06:00', 'end': '06:08', 'notes': ''},
+                    {'exercise_name': 'Practice Combing Your Hair', 'type': 'adl', 'start': '06:10', 'end': '06:25', 'notes': ''},
+                ],
+                'notes': 'Day 2 ADL timing recorded.',
+                'attachment': '',
+            },
+        ),
+    ]),
+
+    # â”€â”€ Day 3: Home Visit + AG Watch Timing â”€â”€
+    DayEntry(cohort_day=3, role='exp1', events=[
+        ScriptedEvent(
+            event_key='home_visit_d03', kind='stub',
+            narrative='Therapist conducts home visit on Day 3. Patient comfortable with routine.',
+            fields={
+                'session_start': '{today} 06:00',
+                'session_end': '{today} 08:00',
+                'no_issue': True,
+                'notes': 'Day 3 home visit completed.',
+                'attachment': '',
+            },
+        ),
+        ScriptedEvent(
+            event_key='agwatch_timing_d03', kind='stub',
+            narrative='Therapist records ADL exercise timing on Day 3.',
+            fields={
+                'exercises': [
+                    {'exercise_name': 'Practice Brushing Your Teeth', 'type': 'adl', 'start': '06:00', 'end': '06:08', 'notes': ''},
+                    {'exercise_name': 'Practice Combing Your Hair', 'type': 'adl', 'start': '06:10', 'end': '06:25', 'notes': ''},
+                ],
+                'notes': 'Day 3 ADL timing recorded.',
+                'attachment': '',
+            },
+        ),
+    ]),
+
+    # Days 4-6: Quiet
+    *[
+        DayEntry(cohort_day=day, role='exp1', events=[], trainer_note='No activities due.')
+        for day in range(4, 7)
+    ],
+
+    # â”€â”€ Day 7: Follow-up call (protocol) â”€â”€
+    DayEntry(cohort_day=7, role='exp1', events=[
+        ScriptedEvent(
+            event_key='followup_call_d07', kind='stub',
+            narrative=(
+                'Therapist calls patient on Day 7 for scheduled follow-up. '
+                'Patient reports good progress, no issues.'
+            ),
+            fields={
+                'completion_date': '{today} 06:00',
+                'duration_minutes': 12,
+                'call_mode': 'audio',
+                'no_issue': True,
+                'notes': 'Good progress. Patient on track.',
+                'attachment': '',
+            },
+        ),
+    ]),
+
+    # â”€â”€ Day 8: Patient calls about robot issue â”€â”€
+    DayEntry(cohort_day=8, role='exp1', events=[
+        ScriptedEvent(
+            event_key='patient_call', kind='free',
+            narrative='Patient calls therapist to report that Pluto robot is not responding properly.',
+            fields={
+                'completion_date': '{today} 09:00',
+                'call_type': 'patient',
+                'call_mode': 'audio',
+                'duration_minutes': 8,
+                'reason': 'Pluto not responding properly',
+                'no_issue': False,
+                'triggered': [{'type': 'robot_issue_call'}],
+                'notes': 'Patient concerned about robot malfunction.',
+                'attachment': '',
+            },
+        ),
+        ScriptedEvent(
+            event_key='robot_issue_call', kind='free',
+            narrative='Therapist calls engineer to report Pluto issue. Diagnosed as calibration problem.',
+            fields={
+                'completion_date': '{today} 15:00',
+                'call_mode': 'audio',
+                'devices': [{'device': 'pluto', 'outcome': 'visit_required', 'notes': 'Needs recalibration'}],
+                'notes': 'Robot visit required.',
+                'attachment': '',
+            },
+            lookup_hint='Engineer will visit Day 9 for Pluto calibration.',
+        ),
+    ]),
+
+    # â”€â”€ Day 9: Robot issue visit â”€â”€
+    DayEntry(cohort_day=9, role='exp1', events=[
+        ScriptedEvent(
+            event_key='robot_issue_visit', kind='free',
+            narrative='Engineer visits to fix Pluto calibration. Successfully recalibrated.',
+            fields={
+                'completion_date': '{today} 06:00',
+                'device_outcomes': [
+                    {'device': 'pluto', 'outcome': 'repaired_on_site', 'notes': 'Recalibrated and tested'}
+                ],
+                'notes': 'Pluto working normally again.',
+                'attachment': '',
+            },
+        ),
+    ]),
+
+    # Days 10-14: Quiet
+    *[
+        DayEntry(cohort_day=day, role='exp1', events=[], trainer_note='No activities due.')
+        for day in range(10, 15)
+    ],
+
+    # â”€â”€ Day 15: Home visit, watch record, ADL prescription Phase 2 â”€â”€
+    DayEntry(cohort_day=15, role='exp1', events=[
+        ScriptedEvent(
+            event_key='watch_record', kind='free',
+            narrative='Check AG watch on right hand. Battery low, swap to new watch.',
+            fields={
+                'completion_date': '{today} 06:00',
+                'ag_watch_right': {'watch_number': 'TRNDEV-AGW-2', 'old_lost': False},
+                'sync_datetime': '{today} 06:00',
+                'worn_datetime': '{today} 06:00',
+                'notes': 'Right watch battery low, swapped to TRNDEV-AGW-2.',
+            },
+        ),
+        ScriptedEvent(
+            event_key='home_visit_d15', kind='stub',
+            narrative='Home visit Day 15 (Phase 2). Patient progressing well with new exercises.',
+            fields={
+                'session_start': '{today} 06:00',
+                'session_end': '{today} 08:00',
+                'no_issue': True,
+                'notes': 'Day 15 Phase 2 home visit (2 hours). Patient demonstrates new exercises.',
+                'attachment': '',
+            },
+        ),
+        ScriptedEvent(
+            event_key='adl_prescription_d15', kind='stub',
+            narrative='Update ADL prescription for Phase 2 with new exercises.',
+            fields={
+                'prescribed_exercises': [
+                    {'exercise_name': 'Practice Reaching', 'sets': 2, 'repetitions': 10, 'notes': 'Phase 2 progression'},
+                    {'exercise_name': 'Practice Lifting', 'sets': 2, 'repetitions': 8, 'notes': 'Phase 2 progression'},
+                ],
+                'notes': 'ADL Phase 2 with new exercises.',
+            },
+        ),
+        ScriptedEvent(
+            event_key='agwatch_timing_d15', kind='stub',
+            narrative='Record timing for all ADL exercises (Phase 1 + Phase 2).',
+            fields={
+                'exercises': [
+                    {'exercise_name': 'Practice Brushing Your Teeth', 'type': 'adl', 'start': '06:00', 'end': '06:08', 'notes': 'Phase 1'},
+                    {'exercise_name': 'Practice Combing Your Hair', 'type': 'adl', 'start': '06:10', 'end': '06:25', 'notes': 'Phase 1'},
+                    {'exercise_name': 'Practice Reaching', 'type': 'adl', 'start': '10:30', 'end': '10:40', 'notes': 'Phase 2 new'},
+                    {'exercise_name': 'Practice Lifting', 'type': 'adl', 'start': '10:45', 'end': '07:00', 'notes': 'Phase 2 new'},
+                ],
+                'notes': 'Day 15 timing for all exercises (Phase 1 + Phase 2).',
+                'attachment': '',
+            },
+        ),
+        ScriptedEvent(
+            event_key='prescription_printout_d15', kind='stub',
+            narrative='Therapist generates Phase 2 therapy prescription printout on Day 15.',
+            fields={
+                'language': 'Tamil',
+                'notes': 'Phase 2 prescription printout generated and given to patient.',
+            },
+        ),
+    ]),
+
+    # Days 16-20: Quiet
+    *[
+        DayEntry(cohort_day=day, role='exp1', events=[], trainer_note='No activities due.')
+        for day in range(16, 21)
+    ],
+
+    # â”€â”€ Day 21: Final follow-up call â”€â”€
+    DayEntry(cohort_day=21, role='exp1', events=[
+        ScriptedEvent(
+            event_key='followup_call_d21', kind='stub',
+            narrative='Final follow-up call before training completion. Patient reports excellent progress.',
+            fields={
+                'completion_date': '{today} 06:00',
+                'duration_minutes': 12,
+                'call_mode': 'audio',
+                'no_issue': True,
+                'notes': 'Patient ready to complete training.',
+                'attachment': '',
+            },
+        ),
+    ]),
+
+    # Days 22-28: Quiet
+    *[
+        DayEntry(cohort_day=day, role='exp1', events=[], trainer_note='No activities due.')
+        for day in range(22, 29)
+    ],
+
+    # â”€â”€ Day 29: Training completion + Schedule A1 â”€â”€
+    DayEntry(cohort_day=29, role='exp1', events=[
+        ScriptedEvent(
+            event_key='training_completion_d29', kind='stub',
+            narrative='Training completion on Day 29. Patient has successfully completed 28-day protocol.',
+            fields={
+                'completion_date': '{today} 06:00',
+                'notes': 'Patient successfully completed 28-day training protocol with excellent adherence.',
+                'feedback_form_notes': 'Patient very satisfied with training and progress.',
+                'qualitative_recruited': False,
+                'attachment': '',
+            },
+        ),
+        ScriptedEvent(
+            event_key='schedule_a1_call', kind='free',
+            narrative='Therapist schedules A1 assessment appointment with patient.',
+            fields={
+                'completion_date': '{today} 07:00',
+                'call_type': 'therapist',
+                'call_mode': 'audio',
+                'duration_minutes': 5,
+                'new_appointment_date': '{today} + 4d',
+                'notes': 'A1 assessment scheduled for Day 33.',
+            },
+        ),
+    ]),
+
+    # â”€â”€ Days 30-31: Quiet â”€â”€
+    *[
+        DayEntry(cohort_day=day, role='exp1', events=[], trainer_note='No activities due.')
+        for day in range(30, 32)
+    ],
+
+    # â”€â”€ Day 32: Patient reschedules A1 assessment â”€â”€
+    DayEntry(cohort_day=32, role='exp1', events=[
+        ScriptedEvent(
+            event_key='patient_call', kind='free',
+            narrative='Patient calls therapist to reschedule A1 assessment from Day 33 to Day 37.',
+            fields={
+                'completion_date': '{today} 14:00',
+                'call_type': 'patient',
+                'call_mode': 'audio',
+                'duration_minutes': 5,
+                'reason': 'Reschedule A1 assessment to Day 37',
+                'no_issue': True,
+                'notes': 'Patient requested to postpone A1 assessment. Rescheduled to Day 37.',
+                'attachment': '',
+            },
+        ),
+    ]),
+
+    # â”€â”€ Day 33: (A1 originally scheduled but rescheduled - no event) â”€â”€
+    DayEntry(cohort_day=33, role='exp1', events=[], trainer_note='A1 assessment rescheduled to Day 37.'),
+
+    # â”€â”€ Days 34-36: Quiet â”€â”€
+    *[
+        DayEntry(cohort_day=day, role='exp1', events=[], trainer_note='No activities due.')
+        for day in range(34, 37)
+    ],
+
+    # â”€â”€ Day 37: A1 Assessment (rescheduled) â”€â”€
+    DayEntry(cohort_day=37, role='exp1', events=[
+        ScriptedEvent(
+            event_key='a1_assessment', kind='stub',
+            narrative='A1 assessment completed (rescheduled from Day 33).',
+            fields={
+                'completion_date': '{today} 06:00',
+                'notes': 'Patient completed A1 assessment successfully (rescheduled date).',
+            },
+        ),
+    ]),
+
+    # â”€â”€ Days 38-179: Quiet filler â”€â”€
+    *[
+        DayEntry(cohort_day=day, role='exp1', events=[], trainer_note='No activities due.')
+        for day in range(38, 180)
+    ],
+
+    # â”€â”€ Day 180: Schedule A2 Assessment â”€â”€
+    DayEntry(cohort_day=180, role='exp1', events=[
+        ScriptedEvent(
+            event_key='schedule_a2_call', kind='free',
+            narrative='Therapist schedules A2 assessment appointment with patient.',
+            fields={
+                'completion_date': '{today} 06:00',
+                'call_type': 'therapist',
+                'call_mode': 'audio',
+                'duration_minutes': 5,
+                'new_appointment_date': '{today} + 3d',
+                'notes': 'A2 assessment scheduled for Day 183.',
+            },
+        ),
+    ]),
+
+    # â”€â”€ Days 181-182: Quiet â”€â”€
+    *[
+        DayEntry(cohort_day=day, role='exp1', events=[], trainer_note='No activities due.')
+        for day in range(181, 183)
+    ],
+
+    # â”€â”€ Day 183: A2 Assessment â”€â”€
+    DayEntry(cohort_day=183, role='exp1', events=[
+        ScriptedEvent(
+            event_key='a2_assessment', kind='stub',
+            narrative='A2 assessment completed. Study protocol complete.',
+            fields={
+                'completion_date': '{today} 06:00',
+                'notes': 'Patient completed A2 assessment successfully. Study complete.',
+            },
+        ),
+    ]),
+
+    # â”€â”€ Days 184-187: Study complete â”€â”€
+    *[
+        DayEntry(cohort_day=day, role='exp1', events=[], trainer_note='Study complete.')
+        for day in range(184, 188)
+    ],
+]
+
+
+
+
+

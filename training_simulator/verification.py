@@ -1,212 +1,359 @@
 """
-Verification engine: compares expected events against actual protocol_events.json.
+Event verification — compare curriculum instructions against actual htDash patient data.
 
-Diffs the simulator's expected-event ledger against what htDash recorded,
-producing per-event verdicts (done-on-time, done-late, missing, wrong-fields).
+For each patient on each day, check:
+1. What events should be filed (from curriculum)
+2. What events are actually in protocol_events.json
+3. Flag missing, extra, or incomplete events
 """
 
-import sys
+from dataclasses import dataclass, field
+from typing import List, Dict, Set, Optional
 from pathlib import Path
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))
-
-from utils.data_access import derive_status
-from utils.protocol_events import read_protocol_events
+from training_simulator.bootstrap import Config
+from training_simulator.curriculum import entries_for_day
+from utils.data_access import get_patients_path, read_patient_meta
 
 
-def parse_dt(value: str) -> datetime:
-    """Parse datetime string."""
-    formats = ['%Y-%m-%dT%H:%M:%S', '%Y-%m-%dT%H:%M', '%Y-%m-%d']
-    for fmt in formats:
-        try:
-            return datetime.strptime(value, fmt)
-        except ValueError:
-            continue
-    raise ValueError(f"Unable to parse datetime: {value}")
+@dataclass
+class EventStatus:
+    """Status of a single event."""
+    event_key: str
+    role: str
+    cohort_day: int
+    expected: bool  # Should exist according to curriculum
+    actual: bool    # Exists in protocol_events.json
+    completed: bool # Is marked as complete
+    notes: str = ""
+
+    @property
+    def status(self) -> str:
+        """Return status label."""
+        if self.expected and self.actual:
+            if self.completed:
+                return "✓ COMPLETE"
+            else:
+                return "⚠ FILED (incomplete)"
+        elif self.expected and not self.actual:
+            return "✗ MISSING"
+        elif not self.expected and self.actual:
+            return "? EXTRA"
+        else:
+            return "- NOT DUE"
+
+    def is_pass(self) -> bool:
+        """Return True if event status is acceptable."""
+        if self.expected and not self.actual:
+            return False  # Missing
+        return True
 
 
-class VerificationEngine:
-    """Verifies expected events against actual protocol_events.json."""
+@dataclass
+class PatientVerification:
+    """Verification results for one patient."""
+    homer_id: str
+    role: str
+    group: str
+    current_day: int
+    events: List[EventStatus] = field(default_factory=list)
 
-    def __init__(self, hospital: str = 'ranipet'):
-        self.hospital = hospital
+    @property
+    def total_expected(self) -> int:
+        """Count of events that should have been filed by current_day."""
+        return sum(1 for e in self.events if e.expected and e.cohort_day <= self.current_day)
 
-    def verify_expected_event(
-        self,
-        patient_id: str,
-        protocol_event_id: str,
-        free_type: Optional[str],
-        expected_day: int,
-        expected_completion_date_range: Tuple[datetime, datetime],
-    ) -> Tuple[str, Optional[str]]:
-        """
-        Verify a single expected event against protocol_events.json.
+    @property
+    def total_filed(self) -> int:
+        """Count of events actually filed by current_day."""
+        return sum(1 for e in self.events if e.actual and e.cohort_day <= self.current_day)
 
-        Args:
-            patient_id: Homer ID.
-            protocol_event_id: Event ID from study_protocol.json (or free-event name).
-            free_type: If free event, its type (adverse_event, robot_issue_call, etc).
-            expected_day: Expected simulated day of completion.
-            expected_completion_date_range: (min_datetime, max_datetime) for allowed completion dates.
+    @property
+    def total_completed(self) -> int:
+        """Count of events marked complete by current_day."""
+        return sum(1 for e in self.events if e.completed and e.cohort_day <= self.current_day)
 
-        Returns:
-            Tuple (verdict, actual_completion_date):
-            - verdict: 'done_on_time', 'done_late', 'missing', 'wrong_fields'.
-            - actual_completion_date: The actual completion_date found (or None).
-        """
-        events_data = read_protocol_events(self.hospital, patient_id)
-        if not events_data:
-            return ('missing', None)
+    @property
+    def pass_rate(self) -> float:
+        """Percentage of expected events that were filed (0-100)."""
+        if self.total_expected == 0:
+            return 100.0
+        return (self.total_filed / self.total_expected) * 100
 
-        actual_entry = None
-        actual_completion_date = None
+    def missing_events(self) -> List[EventStatus]:
+        """Return list of missing events due by current_day."""
+        return [
+            e for e in self.events
+            if e.expected and not e.actual and e.cohort_day <= self.current_day
+        ]
 
-        # Search for the event in 'complete' or 'free' sections
-        if protocol_event_id in [e.get('protocol_event_id') for e in events_data.get('complete', [])]:
-            # Protocol event in 'complete'
-            for entry in events_data.get('complete', []):
-                if entry.get('protocol_event_id') == protocol_event_id:
-                    actual_entry = entry
-                    actual_completion_date = entry.get('completion_date')
-                    break
+    def extra_events(self) -> List[EventStatus]:
+        """Return list of extra events filed."""
+        return [e for e in self.events if not e.expected and e.actual]
 
-        elif free_type:
-            # Free event — look in 'free' bucket
-            free_bucket = events_data.get('free', {}).get(free_type)
-            if free_bucket:
-                if isinstance(free_bucket, dict):
-                    # Singleton free event (e.g., discontinuation)
-                    actual_entry = free_bucket
-                    actual_completion_date = free_bucket.get('completion_date')
-                elif isinstance(free_bucket, list):
-                    # List of free events — find the most recent matching this protocol_event_id
-                    matching = [e for e in free_bucket if e.get('protocol_event_id') == protocol_event_id]
-                    if matching:
-                        # Use most recent by filed_at or completion_date
-                        actual_entry = max(
-                            matching,
-                            key=lambda e: e.get('filed_at', e.get('completion_date', ''))
+
+@dataclass
+class CohortVerification:
+    """Verification results for entire cohort."""
+    cohort_day: int
+    patients: List[PatientVerification] = field(default_factory=list)
+
+    @property
+    def total_patients(self) -> int:
+        return len(self.patients)
+
+    @property
+    def avg_pass_rate(self) -> float:
+        """Average pass rate across all patients."""
+        if not self.patients:
+            return 0.0
+        return sum(p.pass_rate for p in self.patients) / len(self.patients)
+
+    @property
+    def total_expected_events(self) -> int:
+        """Total events expected across all patients."""
+        return sum(p.total_expected for p in self.patients)
+
+    @property
+    def total_filed_events(self) -> int:
+        """Total events actually filed."""
+        return sum(p.total_filed for p in self.patients)
+
+    def patients_by_status(self) -> Dict[str, List[PatientVerification]]:
+        """Group patients by pass/fail status."""
+        result = {'pass': [], 'fail': []}
+        for p in self.patients:
+            if p.pass_rate >= 100:
+                result['pass'].append(p)
+            else:
+                result['fail'].append(p)
+        return result
+
+
+def verify_cohort(cohort_day: int, patient_defs: List[dict]) -> CohortVerification:
+    """
+    Verify all patients in the cohort.
+
+    Args:
+        cohort_day: Current day of simulation
+        patient_defs: List of patient definitions with role, homer_id, group
+
+    Returns:
+        CohortVerification with detailed results
+    """
+    cohort_result = CohortVerification(cohort_day=cohort_day)
+    patients_path = get_patients_path('ranipet')
+
+    for defn in patient_defs:
+        role = defn['role']
+        homer_id = defn['homer_id']
+        group = defn['group']
+
+        patient_result = PatientVerification(
+            homer_id=homer_id,
+            role=role,
+            group=group,
+            current_day=cohort_day
+        )
+
+        # Load patient's protocol_events.json
+        patient_dir = patients_path / homer_id
+        events_file = patient_dir / 'protocol_events.json'
+
+        actual_stubs: Dict[str, bool] = {}  # event_key -> is_completed (only user-filed)
+        actual_free_events: Dict[str, int] = {}  # free_type -> count (how many were filed)
+
+        if events_file.exists():
+            import json
+            try:
+                with open(events_file, 'r') as f:
+                    events_data = json.load(f)
+
+                # ════════════════════════════════════════════════════════════════
+                # FREE EVENT TYPES — Can be stored in MULTIPLE LOCATIONS
+                # ════════════════════════════════════════════════════════════════
+                #
+                # When a user files a free event like watch_record or patient_call,
+                # it can appear in:
+                #
+                #   1. complete[] array (primary filing location)
+                #   2. free.<event_type>[] bucket (for chained entries)
+                #   3. free.<event_type> object (for single standalone events)
+                #
+                # Example - watch_record:
+                #   • First filing: appears in complete[] with filed_by + completion_date
+                #   • Future chain entries: appear in free.watch_record[] for auto-seeded stubs
+                #   • Subsequent filings: appear in both locations
+                #
+                # VERIFICATION COUNTS:
+                #   • Events in complete[]: counted if has filed_by OR completion_date
+                #   • Events in free.*[]: counted if has filed_by OR completion_date
+                #   • This ensures each filing is counted exactly once
+                # ════════════════════════════════════════════════════════════════
+                FREE_EVENT_TYPES = {
+                    'watch_record', 'patient_call', 'adverse_event', 'adverse_event_followup',
+                    'adverse_event_followup_visit', 'adverse_event_clinical_visit',
+                    'robot_issue_call', 'robot_issue_visit', 'resolve_robot_issue_visit',
+                    'other_device_issue_call', 'other_device_issue_visit',
+                    'watch_data_upload', 'discontinuation', 'schedule_a1_call', 'schedule_a2_call'
+                }
+
+                # Track ONLY entries that user explicitly filed
+                # ──── COMPLETE ARRAY ────
+                for entry in events_data.get('complete', []):
+                    event_id = entry['protocol_event_id']
+                    has_filed_by = 'filed_by' in entry
+                    has_completion_date = bool(entry.get('completion_date'))
+
+                    if event_id in FREE_EVENT_TYPES:
+                        # Free events in complete array (watch_record, patient_call, etc.)
+                        # Count if they have filed_by or completion_date
+                        if has_filed_by or has_completion_date:
+                            actual_free_events[event_id] = actual_free_events.get(event_id, 0) + 1
+                    else:
+                        # Regular stubs in complete array (activation, home_visit, etc.)
+                        # Only count if explicitly filed
+                        if has_filed_by:
+                            actual_stubs[event_id] = True
+
+                # ──── INCOMPLETE ARRAY ────
+                for entry in events_data.get('incomplete', []):
+                    event_id = entry['protocol_event_id']
+                    has_filed_by = 'filed_by' in entry
+                    has_completion_date = bool(entry.get('completion_date'))
+
+                    if not event_id in FREE_EVENT_TYPES:
+                        # Regular stubs: mark as incomplete if user started filing
+                        if has_filed_by or has_completion_date:
+                            actual_stubs[event_id] = False
+
+                # ──── FREE.* BUCKETS (Chained free events) ────
+                # These hold chains like watch_record, patient_call sequences, etc.
+                for free_type, entries in events_data.get('free', {}).items():
+                    if free_type not in FREE_EVENT_TYPES:
+                        continue
+
+                    if isinstance(entries, list):
+                        # Count completed entries in the chain
+                        for e in entries:
+                            if isinstance(e, dict):
+                                has_filed_by = 'filed_by' in e
+                                has_completion_date = bool(e.get('completion_date'))
+                                if has_filed_by or has_completion_date:
+                                    actual_free_events[free_type] = actual_free_events.get(free_type, 0) + 1
+                    elif isinstance(entries, dict):
+                        # Single object case (e.g., discontinuation as standalone object)
+                        if entries.get('filed_by') or entries.get('completion_date'):
+                            actual_free_events[free_type] = actual_free_events.get(free_type, 0) + 1
+
+            except Exception as e:
+                patient_result.notes = f"Error reading events: {e}"
+
+        # Build event status list from curriculum
+        # Track which stubs we've already processed to avoid duplicates
+        processed_stubs: Set[str] = set()
+        processed_free: Dict[str, int] = {}  # free_type -> count processed
+
+        for day in range(cohort_day + 1):
+            day_entries = entries_for_day(role, day)
+            for day_entry in day_entries:
+                for scripted_event in day_entry.events:
+                    event_key = scripted_event.event_key
+
+                    if scripted_event.kind == 'stub':
+                        # Only process each stub type once
+                        if event_key not in processed_stubs:
+                            is_completed = actual_stubs.get(event_key, False)
+                            is_filed = event_key in actual_stubs
+
+                            status = EventStatus(
+                                event_key=event_key,
+                                role=role,
+                                cohort_day=day,
+                                expected=True,
+                                actual=is_filed,
+                                completed=is_completed,
+                            )
+                            patient_result.events.append(status)
+                            processed_stubs.add(event_key)
+
+                    else:  # free events
+                        # Count free event instances
+                        filed_count = actual_free_events.get(event_key, 0)
+                        expected_count = processed_free.get(event_key, 0) + 1
+                        processed_free[event_key] = expected_count
+
+                        is_filed = filed_count >= expected_count
+
+                        status = EventStatus(
+                            event_key=event_key,
+                            role=role,
+                            cohort_day=day,
+                            expected=True,
+                            actual=is_filed,
+                            completed=is_filed,
                         )
-                        actual_completion_date = actual_entry.get('completion_date')
+                        patient_result.events.append(status)
 
-        # Verdict logic
-        if not actual_entry:
-            return ('missing', None)
+        cohort_result.patients.append(patient_result)
 
-        if not actual_completion_date:
-            return ('wrong_fields', None)  # Filed but missing completion_date
+    return cohort_result
 
-        try:
-            actual_dt = parse_dt(actual_completion_date)
-        except ValueError:
-            return ('wrong_fields', actual_completion_date)
 
-        min_dt, max_dt = expected_completion_date_range
+def format_verification_report(result: CohortVerification) -> str:
+    """
+    Format verification results as a readable text report.
 
-        if min_dt <= actual_dt <= max_dt:
-            return ('done_on_time', actual_completion_date)
-        elif actual_dt < min_dt:
-            return ('done_late', actual_completion_date)  # Actually filed early (wrong day)
-        else:
-            return ('done_late', actual_completion_date)  # Filed after the window
+    Args:
+        result: CohortVerification instance
 
-    def verify_all_expected_events(
-        self,
-        patient_id: str,
-        expected_events: List[Dict],
-    ) -> List[Dict]:
-        """
-        Verify all expected events for a patient.
+    Returns:
+        Multi-line string report
+    """
+    lines = [
+        "=" * 80,
+        f"TRAINING SIMULATOR VERIFICATION REPORT",
+        f"Cohort Day: {result.cohort_day} / 187",
+        f"Patients: {result.total_patients}",
+        "=" * 80,
+        "",
+        f"SUMMARY",
+        f"  Total Expected Events: {result.total_expected_events}",
+        f"  Total Filed Events: {result.total_filed_events}",
+        f"  Overall Pass Rate: {result.avg_pass_rate:.1f}%",
+        "",
+        "BY PATIENT:",
+        "-" * 80,
+    ]
 
-        Args:
-            patient_id: Homer ID.
-            expected_events: List of expected-event dicts from state_store
-              (each with: day, protocol_event_id, free_type, suggested_values, etc).
+    by_status = result.patients_by_status()
 
-        Returns:
-            List of verdict dicts (one per expected event, with verdict + actual_completion_date).
-        """
-        verdicts = []
-
-        for expected in expected_events:
-            day = expected.get('day')
-            protocol_event_id = expected.get('protocol_event_id')
-            free_type = expected.get('free_type')
-
-            # Assume each day is within a 24-hour window
-            # (in reality, this depends on simulated day counter, but we use a reasonable range)
-            min_dt = datetime.now().replace(hour=0, minute=0, second=0) + timedelta(days=day-1)
-            max_dt = min_dt + timedelta(hours=23, minutes=59, seconds=59)
-
-            verdict, actual_completion_date = self.verify_expected_event(
-                patient_id,
-                protocol_event_id,
-                free_type,
-                day,
-                (min_dt, max_dt),
+    # Show passing patients
+    if by_status['pass']:
+        lines.append(f"✓ PASS ({len(by_status['pass'])} patients):")
+        for p in by_status['pass']:
+            lines.append(
+                f"  {p.homer_id:8} ({p.role:6})  "
+                f"Expected: {p.total_expected:3}  Filed: {p.total_filed:3}  "
+                f"Complete: {p.total_completed:3}  [{p.pass_rate:5.1f}%]"
             )
+        lines.append("")
 
-            verdicts.append({
-                'protocol_event_id': protocol_event_id,
-                'free_type': free_type,
-                'verdict': verdict,
-                'actual_completion_date': actual_completion_date,
-            })
-
-        return verdicts
-
-    def generate_summary_report(self, all_verdicts: Dict[str, List[Dict]]) -> Dict:
-        """
-        Generate a summary report across all patients.
-
-        Args:
-            all_verdicts: Dict mapping patient_id → list of verdict dicts.
-
-        Returns:
-            Summary dict with per-patient and overall scores.
-        """
-        summary = {
-            'per_patient': {},
-            'overall': {
-                'done_on_time': 0,
-                'done_late': 0,
-                'missing': 0,
-                'wrong_fields': 0,
-                'total': 0,
-            }
-        }
-
-        for patient_id, verdicts in all_verdicts.items():
-            patient_summary = {
-                'done_on_time': 0,
-                'done_late': 0,
-                'missing': 0,
-                'wrong_fields': 0,
-                'total': len(verdicts),
-            }
-
-            for v in verdicts:
-                verdict = v.get('verdict')
-                if verdict in patient_summary:
-                    patient_summary[verdict] += 1
-
-            summary['per_patient'][patient_id] = patient_summary
-
-            # Update overall
-            for key in ('done_on_time', 'done_late', 'missing', 'wrong_fields'):
-                summary['overall'][key] += patient_summary[key]
-            summary['overall']['total'] += patient_summary['total']
-
-        # Calculate pass rates
-        total = summary['overall']['total']
-        if total > 0:
-            summary['overall']['pass_rate'] = (
-                (summary['overall']['done_on_time'] / total) * 100
+    # Show failing patients
+    if by_status['fail']:
+        lines.append(f"✗ FAIL ({len(by_status['fail'])} patients):")
+        for p in by_status['fail']:
+            lines.append(
+                f"  {p.homer_id:8} ({p.role:6})  "
+                f"Expected: {p.total_expected:3}  Filed: {p.total_filed:3}  "
+                f"Complete: {p.total_completed:3}  [{p.pass_rate:5.1f}%]"
             )
-        else:
-            summary['overall']['pass_rate'] = 0.0
+            missing = p.missing_events()
+            if missing:
+                lines.append("    Missing:")
+                for evt in missing:
+                    lines.append(f"      - {evt.event_key} (Day {evt.cohort_day})")
+        lines.append("")
 
-        return summary
+    lines.append("=" * 80)
+    return "\n".join(lines)

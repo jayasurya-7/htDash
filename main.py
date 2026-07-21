@@ -115,3 +115,4 @@ if __name__ == '__main__':
             os.makedirs(os.path.join(Config.DATA_ROOT, hospital, 'devices', device), exist_ok=True)
     
     app.run(host="0.0.0.0", port=8080, debug=Config.DEBUG)
+    
