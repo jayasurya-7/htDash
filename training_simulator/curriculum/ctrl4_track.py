@@ -1,5 +1,5 @@
 ﻿"""
-Experimental group track 4 (Discontinuation scenario) — 187-day curriculum.
+Control group track 4 (Discontinuation scenario) — 187-day curriculum.
 
 Patient TRN009: control group, Left training side.
 Demonstrates real-world scenario: patient discontinues training on Day 17 due to personal reasons,
@@ -17,20 +17,11 @@ TRACK = [
         ScriptedEvent(
             event_key='informed_consent', kind='stub',
             narrative='Therapist obtains signed informed consent from patient.',
-            fields={'completion_date': '{today} 06:00', 'notes': 'Patient consented with witness.'},
-        ),
-        ScriptedEvent(
-            event_key='# Device setup not applicable for control', kind='stub',
-            narrative='Therapist installs Pluto, Mars, modem, laptop, and assigns AG watches.',
             fields={
-                'completion_date': '{today} 07:00',
-                'pluto_id': dp.PLUTO_4,
-                'mars_id': dp.MARS_4,
-                'modem_id': dp.MODEM_4,
-                'laptop_id': dp.LAPTOP_4,
-                'sim_id': dp.SIM_4,
-                'demo_done': True,
-                'notes': 'All devices installed and working.',
+                'completion_date': '{today} 06:00',
+                'notes': 'Patient consented with witness.',
+                'attachment': 'consent_form_signed.pdf',
+                'attachment_caption': 'Signed informed consent form, witnessed.',
             },
         ),
     ]),
@@ -44,11 +35,12 @@ TRACK = [
                 'session_start': '{today} 06:00','session_end': '{today} 08:00','vcg_group': 'VCG3',
                 'no_issue': True,
                 'notes': 'Activation successful, patient ready.',
-                'attachment': '',
+                'attachment': 'activation_session_photos.pdf',
+                'attachment_caption': 'Photos and notes from activation session demonstrating exercise setup.',
             },
         ),
         ScriptedEvent(
-            event_key='vcg_prescription_d01', kind='stub',
+            event_key='adl_prescription_d01', kind='stub',
             narrative='Therapist prescribes ADL exercises.',
             fields={
                 'prescribed_exercises': [
@@ -59,14 +51,28 @@ TRACK = [
             },
         ),
         ScriptedEvent(
+            event_key='vcg_prescription_d01', kind='stub',
+            narrative='Therapist prescribes VCG exercises.',
+            fields={
+                'vcg_group': 'VCG3',
+                'prescribed_exercises': [
+                    {'exercise_name': 'Supination/Pronation', 'sets': 3, 'repetitions': 10, 'notes': ''},
+                    {'exercise_name': 'Wrist flexion/Extension', 'sets': 3, 'repetitions': 8, 'notes': ''},
+                ],
+                'notes': 'VCG Phase 1 prescribed.',
+            },
+        ),
+        ScriptedEvent(
             event_key='agwatch_timing_d01', kind='stub',
-            narrative='Record timing for Day 1 ADL exercises.',
+            narrative='Record timing for Day 1 ADL and VCG exercises.',
             fields={
                 'exercises': [
                     {'exercise_name': 'Practice Brushing Your Teeth', 'type': 'adl', 'start': '06:00', 'end': '06:08', 'notes': ''},
                     {'exercise_name': 'Practice Combing Your Hair', 'type': 'adl', 'start': '06:10', 'end': '06:25', 'notes': ''},
+                    {'exercise_name': 'Supination/Pronation', 'type': 'vcg', 'start': '06:30', 'end': '10:15', 'notes': ''},
+                    {'exercise_name': 'Wrist flexion/Extension', 'type': 'vcg', 'start': '10:15', 'end': '08:00', 'notes': ''},
                 ],
-                'notes': 'Timing recorded for ADL exercises.',
+                'notes': 'Timing recorded for ADL and VCG exercises.',
                 'attachment': '',
             },
         ),
@@ -77,7 +83,10 @@ TRACK = [
                 'ag_watch_left': {'watch_number': 'TRNDEV-AGW-9', 'old_lost': False},
                 'sync_datetime': '{today} 08:00',
                 'worn_datetime': '{today} 08:00',
+                'next_followup_days': 14,
                 'notes': 'Initial watch check on left hand, patient ready to start wearing.',
+                'attachment': 'watch_check_photo.pdf',
+                'attachment_caption': 'Photo of AG watch fitted to patient on Day 1.',
             },
         ),
         ScriptedEvent(
@@ -105,13 +114,15 @@ TRACK = [
         ),
         ScriptedEvent(
             event_key='agwatch_timing_d02', kind='stub',
-            narrative='Therapist records ADL exercise timing on Day 2.',
+            narrative='Therapist records ADL and VCG exercise timing on Day 2.',
             fields={
                 'exercises': [
                     {'exercise_name': 'Practice Brushing Your Teeth', 'type': 'adl', 'start': '06:00', 'end': '06:08', 'notes': ''},
                     {'exercise_name': 'Practice Combing Your Hair', 'type': 'adl', 'start': '06:10', 'end': '06:25', 'notes': ''},
+                    {'exercise_name': 'Supination/Pronation', 'type': 'vcg', 'start': '06:30', 'end': '14:15', 'notes': ''},
+                    {'exercise_name': 'Wrist flexion/Extension', 'type': 'vcg', 'start': '14:15', 'end': '08:00', 'notes': ''},
                 ],
-                'notes': 'Day 2 ADL timing recorded.',
+                'notes': 'Day 2 ADL and VCG timing recorded.',
                 'attachment': '',
             },
         ),
@@ -126,18 +137,21 @@ TRACK = [
                 'session_end': '{today} 08:00',
                 'no_issue': True,
                 'notes': 'Day 3 home visit completed.',
-                'attachment': '',
+                'attachment': 'home_visit_d03_notes.pdf',
+                'attachment_caption': 'Session notes from Day 3 home visit.',
             },
         ),
         ScriptedEvent(
             event_key='agwatch_timing_d03', kind='stub',
-            narrative='Therapist records ADL exercise timing on Day 3.',
+            narrative='Therapist records ADL and VCG exercise timing on Day 3.',
             fields={
                 'exercises': [
                     {'exercise_name': 'Practice Brushing Your Teeth', 'type': 'adl', 'start': '06:00', 'end': '06:08', 'notes': ''},
                     {'exercise_name': 'Practice Combing Your Hair', 'type': 'adl', 'start': '06:10', 'end': '06:25', 'notes': ''},
+                    {'exercise_name': 'Supination/Pronation', 'type': 'vcg', 'start': '06:30', 'end': '14:15', 'notes': ''},
+                    {'exercise_name': 'Wrist flexion/Extension', 'type': 'vcg', 'start': '14:15', 'end': '08:00', 'notes': ''},
                 ],
-                'notes': 'Day 3 ADL timing recorded.',
+                'notes': 'Day 3 ADL and VCG timing recorded.',
                 'attachment': '',
             },
         ),
@@ -156,7 +170,8 @@ TRACK = [
                 'call_mode': 'audio',
                 'no_issue': True,
                 'notes': 'Good progress. Patient on track.',
-                'attachment': '',
+                'attachment': 'followup_call_d07_notes.pdf',
+                'attachment_caption': 'Call summary notes from Day 7 follow-up call.',
             },
         ),
     ]),
@@ -195,7 +210,8 @@ TRACK = [
                 'reason': 'AG watch battery status and Mars device software update notification',
                 'no_issue': True,
                 'notes': 'Patient concerned about watch battery lasting until next scheduled check. Therapist assured it would last. Also addressed Mars device system update prompt. Patient reassured.',
-                'attachment': '',
+                'attachment': 'device_battery_faq.pdf',
+                'attachment_caption': 'Reference sheet given to patient regarding AG watch battery care.',
             },
         ),
     ]),
@@ -212,14 +228,48 @@ TRACK = [
                 'completion_date': '{today} 09:00',
                 'reason': 'Personal circumstances require attention; unable to continue daily training commitment',
                 'notes': 'Patient appreciated training so far and expressed willingness to complete A1 and A2 assessments for research purposes. Therapist documented and confirmed assessments still possible. Supportive closure conversation. Patient committed to follow-up assessments.',
-                'attachment': '',
+                'attachment': 'discontinuation_signed_form.pdf',
+                'attachment_caption': 'Signed discontinuation acknowledgment form.',
             },
         ),
     ]),
 
-    # ── Days 18-179: Training halted - No training events after discontinuation ──
+    # ── Day 18: Training halted - No training events after discontinuation ──
+    *[DayEntry(cohort_day=day, role='ctrl4', events=[], trainer_note='Patient discontinued. Training paused. Awaiting A1/A2 assessments.') for day in range(18, 19)],
+
+    # ── Day 19: Device Return + Final AG Watch Data Upload ──
+    DayEntry(cohort_day=19, role='ctrl4', events=[
+        ScriptedEvent(
+            event_key='device_return', kind='free',
+            narrative='Engineer visits to collect the AG watch since patient has discontinued training.',
+            fields={
+                'completion_date': '{today} 10:00',
+                'devices': [
+                    {'type': 'agwatch', 'device_id': dp.AGW_9, 'status': 'working', 'notes': 'Returned, functioning normally.'},
+                ],
+                'notes': 'AG watch collected following patient discontinuation.',
+                'attachment': 'device_return_checklist.pdf',
+                'attachment_caption': 'Signed device return checklist with condition notes.',
+            },
+        ),
+        ScriptedEvent(
+            event_key='watch_data_upload', kind='free',
+            narrative='Engineer uploads final AG watch data pulled from the watch just returned.',
+            fields={
+                'watch_id': dp.AGW_9,
+                'limb': 'left',
+                'removed_date': '{today}',
+                'data_start': '{today}',
+                'data_end': '{today}',
+                'skipped': False,
+                'notes': 'Final watch data uploaded successfully at device return.',
+            },
+        ),
+    ]),
+
+    # ── Days 20-179: Training halted - No training events after discontinuation ──
     # (Only assessment events remain)
-    *[DayEntry(cohort_day=day, role='ctrl4', events=[], trainer_note='Patient discontinued. Training paused. Awaiting A1/A2 assessments.') for day in range(18, 180)],
+    *[DayEntry(cohort_day=day, role='ctrl4', events=[], trainer_note='Patient discontinued. Training paused. Awaiting A1/A2 assessments.') for day in range(20, 180)],
 
     # ── Day 180: Schedule A1 Assessment ──
     DayEntry(cohort_day=180, role='ctrl4', events=[

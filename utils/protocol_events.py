@@ -8,6 +8,7 @@ It is created at group assignment and updated throughout the patient's journey.
 import json
 import os
 import uuid
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
@@ -53,7 +54,22 @@ def write_protocol_events(hospital_folder: str, homer_id: str, data: dict) -> No
     tmp = path.with_suffix('.tmp')
     with open(tmp, 'w', encoding='utf-8') as f:
         json.dump(data, f, indent=2)
-    os.replace(tmp, path)
+
+    # Retry logic for Windows file locking issues
+    # (Flask server or monitor thread may be reading the file)
+    max_retries = 5
+    retry_delay = 0.2  # 200ms between retries
+
+    for attempt in range(max_retries):
+        try:
+            os.replace(tmp, path)
+            return
+        except (PermissionError, OSError) as e:
+            if attempt < max_retries - 1:
+                time.sleep(retry_delay)
+            else:
+                # Last attempt failed, raise the error
+                raise
 
 
 def _date_add(base_iso: str, days: int) -> str:

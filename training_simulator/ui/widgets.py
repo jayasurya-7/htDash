@@ -1,4 +1,8 @@
-"""Reusable Tkinter widgets for the training simulator UI."""
+"""Reusable Tkinter widgets for the training simulator UI.
+
+Professional light-theme design with clean colors, excellent readability,
+and modern visual hierarchy. Primary accent: Sky-blue (#0ea5e9) for focus & actions.
+"""
 
 import tkinter as tk
 from tkinter import ttk
@@ -6,172 +10,188 @@ from typing import Optional
 
 from training_simulator.instructions import RenderedInstruction, RenderedField
 
+# ── Professional light-theme design tokens (modern, clean, professional) ──
+BG_DARK = '#f8fafc'       # Light background — page background
+BG_DARKER = '#e8eef7'     # Light blue-gray — top bar / sidebar
+BG_CARD = '#ffffff'       # White — card background
+BORDER = '#e2e8f0'        # Subtle light gray — dividers, card outline
+FG_LIGHT = '#1e293b'      # Dark slate — headings
+FG_BODY = '#334155'       # Slate — body text
+FG_MUTED = '#64748b'      # Muted slate — secondary text
+FG_DIM = '#475569'        # Dim slate — tertiary text
+ACCENT = '#0ea5e9'        # Bright sky-blue — primary accent (professional, readable)
+ACCENT_HOVER = '#0284c7'  # Darker sky-blue — hover state
+VALUE_COLOR = '#0369a1'   # Teal-blue — field values (professional, readable)
+FONT_UI = 'Segoe UI'
+FONT_MONO = 'Consolas'
+
+# Status → (icon, label, accent color, card tint) — light theme with professional colors
+STATUS_STYLE = {
+    'pending':    ('⏳', 'Pending',      '#94a3b8', '#f1f5f9'),   # slate-gray
+    'incomplete': ('◐', 'In Progress',  '#f59e0b', '#fef3c7'),   # amber
+    'correct':    ('◐', 'In Progress',  '#0284c7', '#e0f2fe'),   # sky-blue
+    'incorrect':  ('✗', 'Needs Fixes',  '#dc2626', '#fee2e2'),   # red
+    'completed':  ('✓', 'Complete',     '#16a34a', '#dcfce7'),   # green
+}
+
 
 class FieldChecklistRow(tk.Frame):
     """A single field label + value row in an instruction checklist."""
 
-    def __init__(self, parent, label: str, value: str, **kwargs):
-        super().__init__(parent, bg='#334155', **kwargs)
+    def __init__(self, parent, label: str, value: str, zebra: bool = False, **kwargs):
+        row_bg = '#f0f4f8' if zebra else BG_CARD
+        super().__init__(parent, bg=row_bg, **kwargs)
         self.pack_propagate(True)
 
-        # Checkbox column (unfilled, just placeholder)
+        # Checkbox column (clean checkmark style)
         checkbox = tk.Label(
-            self, text='[ ]', font=('Courier', 10), fg='#94a3b8', bg='#334155', width=3
+            self, text='☐', font=(FONT_MONO, 11), fg=ACCENT, bg=row_bg, width=2
         )
-        checkbox.pack(side=tk.LEFT, padx=(10, 5), pady=4, anchor=tk.NW)
+        checkbox.pack(side=tk.LEFT, padx=(12, 8), pady=8, anchor=tk.NW)
 
         # Label + Value container (vertical layout for better text wrapping)
-        content_frame = tk.Frame(self, bg='#334155')
-        content_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=4)
+        content_frame = tk.Frame(self, bg=row_bg)
+        content_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 12), pady=8)
 
-        # Label row
         label_widget = tk.Label(
-            content_frame,
-            text=label,
-            font=('Arial', 9, 'bold'),
-            fg='#cbd5e1',
-            bg='#334155',
-            anchor=tk.W,
-            justify=tk.LEFT
+            content_frame, text=label, font=(FONT_UI, 9, 'bold'),
+            fg=FG_DIM, bg=row_bg, anchor=tk.W, justify=tk.LEFT,
         )
         label_widget.pack(fill=tk.X, anchor=tk.NW)
 
-        # Value row (monospace for readability, with word wrapping)
         value_widget = tk.Label(
-            content_frame,
-            text=value,
-            font=('Courier', 9),
-            fg='#60a5fa',  # blue-400
-            bg='#334155',
-            anchor=tk.NW,
-            justify=tk.LEFT,
-            wraplength=600
+            content_frame, text=value, font=(FONT_MONO, 9),
+            fg=VALUE_COLOR, bg=row_bg, anchor=tk.NW, justify=tk.LEFT, wraplength=600,
         )
-        value_widget.pack(fill=tk.BOTH, expand=True, anchor=tk.NW)
+        value_widget.pack(fill=tk.BOTH, expand=True, anchor=tk.NW, pady=(2, 0))
+
+        # Subtle bottom divider
+        tk.Frame(self, bg=BORDER, height=1).pack(side=tk.BOTTOM, fill=tk.X)
 
 
 class InstructionCard(tk.Frame):
-    """A collapsible card displaying one instruction with narrative + field checklist."""
+    """A collapsible card displaying one instruction with narrative + field checklist.
+
+    Visually: a colored left accent bar signals status at a glance (matches the
+    STATUS_STYLE accent color), with an icon + text badge in the header for
+    anyone who can't rely on color alone.
+    """
 
     def __init__(self, parent, instruction: RenderedInstruction, status_callback=None, **kwargs):
-        super().__init__(parent, bg='#334155', relief=tk.FLAT, bd=1, **kwargs)
+        super().__init__(parent, bg=BORDER, **kwargs)  # outer frame = card outline color
         self.instruction = instruction
         self.status_callback = status_callback
         self._expanded = True
-        self.status = 'pending'  # pending, incomplete, correct, incorrect, completed
+        self.status = 'pending'
         self.errors = []
 
+        # Inner frame holds all real content, inset by 1px to fake a border
+        self.inner = tk.Frame(self, bg=BG_CARD)
+        self.inner.pack(fill=tk.BOTH, expand=True, padx=1, pady=1)
+
+        # Left accent bar (status color)
+        self.accent_bar = tk.Frame(self.inner, bg=STATUS_STYLE['pending'][2], width=4)
+        self.accent_bar.pack(side=tk.LEFT, fill=tk.Y)
+
+        # Content column
+        content = tk.Frame(self.inner, bg=BG_CARD)
+        content.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
         # Header row (collapsible)
-        header_frame = tk.Frame(self, bg='#334155', cursor='hand2')
-        header_frame.pack(fill=tk.X, padx=10, pady=10)
+        header_frame = tk.Frame(content, bg=BG_CARD, cursor='hand2')
+        header_frame.pack(fill=tk.X, padx=12, pady=10)
         header_frame.bind('<Button-1>', self._toggle_expand)
 
-        # Status indicator
-        self.status_indicator = tk.Label(
-            header_frame, text='⏳', font=('Arial', 12, 'bold'),
-            fg='#64748b', bg='#334155', width=2, cursor='hand2'
+        self.status_icon = tk.Label(
+            header_frame, text=STATUS_STYLE['pending'][0], font=(FONT_UI, 13, 'bold'),
+            fg=STATUS_STYLE['pending'][2], bg=BG_CARD, width=2, cursor='hand2',
         )
-        self.status_indicator.pack(side=tk.LEFT, padx=(0, 8))
-        self.status_indicator.bind('<Button-1>', self._toggle_expand)
+        self.status_icon.pack(side=tk.LEFT, padx=(0, 6))
+        self.status_icon.bind('<Button-1>', self._toggle_expand)
 
-        # Chevron (expand/collapse indicator)
         self.chevron = tk.Label(
-            header_frame, text='▼', font=('Arial', 10, 'bold'),
-            fg='#a855f7', bg='#334155', width=2, cursor='hand2'
+            header_frame, text='▼', font=(FONT_UI, 9, 'bold'),
+            fg=ACCENT, bg=BG_CARD, width=2, cursor='hand2',
         )
         self.chevron.pack(side=tk.LEFT, padx=(0, 8))
         self.chevron.bind('<Button-1>', self._toggle_expand)
 
-        # Event title
         title = tk.Label(
-            header_frame,
-            text=instruction.event_title,
-            font=('Arial', 11, 'bold'),
-            fg='#e2e8f0',
-            bg='#334155',
-            cursor='hand2'
+            header_frame, text=instruction.event_title, font=(FONT_UI, 11, 'bold'),
+            fg=FG_LIGHT, bg=BG_CARD, cursor='hand2', anchor=tk.W,
         )
         title.pack(side=tk.LEFT, fill=tk.X, expand=True)
         title.bind('<Button-1>', self._toggle_expand)
 
-        # Body container (collapsible)
-        self.body = tk.Frame(self, bg='#334155')
-        self.body.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
-
-        # Narrative
-        narrative = tk.Label(
-            self.body,
-            text=instruction.narrative,
-            font=('Arial', 9),
-            fg='#cbd5e1',
-            bg='#334155',
-            wraplength=500,
-            justify=tk.LEFT
+        self.status_badge = tk.Label(
+            header_frame, text=STATUS_STYLE['pending'][1], font=(FONT_UI, 8, 'bold'),
+            fg='#ffffff', bg=STATUS_STYLE['pending'][2], padx=8, pady=2, cursor='hand2',
         )
-        narrative.pack(fill=tk.X, pady=(0, 10))
+        self.status_badge.pack(side=tk.RIGHT)
+        self.status_badge.bind('<Button-1>', self._toggle_expand)
 
-        # Separator
-        separator = tk.Frame(self.body, bg='#475569', height=1)
-        separator.pack(fill=tk.X, pady=8)
+        # Body container (collapsible)
+        self.body = tk.Frame(content, bg=BG_CARD)
+        self.body.pack(fill=tk.BOTH, expand=True, padx=12, pady=(0, 12))
 
-        # Fields checklist container
-        fields_frame = tk.Frame(self.body, bg='#334155')
-        fields_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+        narrative = tk.Label(
+            self.body, text=instruction.narrative, font=(FONT_UI, 9),
+            fg=FG_DIM, bg=BG_CARD, wraplength=520, justify=tk.LEFT,
+        )
+        narrative.pack(fill=tk.X, pady=(0, 10), anchor=tk.W)
 
-        for field in instruction.fields:
-            FieldChecklistRow(fields_frame, field.label, field.value).pack(
+        tk.Frame(self.body, bg=BORDER, height=1).pack(fill=tk.X, pady=(0, 8))
+
+        # Fields checklist container (zebra-striped rows)
+        fields_frame = tk.Frame(self.body, bg=BG_CARD)
+        fields_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 4))
+
+        for i, field in enumerate(instruction.fields):
+            FieldChecklistRow(fields_frame, field.label, field.value, zebra=(i % 2 == 1)).pack(
                 fill=tk.X, side=tk.TOP
             )
 
         # Lookup hint (if present)
         if instruction.lookup_hint:
-            separator2 = tk.Frame(self.body, bg='#475569', height=1)
-            separator2.pack(fill=tk.X, pady=8)
+            tk.Frame(self.body, bg=BORDER, height=1).pack(fill=tk.X, pady=(8, 8))
             hint = tk.Label(
-                self.body,
-                text=f"💡 {instruction.lookup_hint}",
-                font=('Arial', 8, 'italic'),
-                fg='#a8adb5',
-                bg='#334155',
-                wraplength=500,
-                justify=tk.LEFT
+                self.body, text=f'\U0001f4a1 {instruction.lookup_hint}', font=(FONT_UI, 8, 'italic'),
+                fg=FG_MUTED, bg=BG_CARD, wraplength=520, justify=tk.LEFT,
             )
-            hint.pack(fill=tk.X, pady=5)
+            hint.pack(fill=tk.X, anchor=tk.W)
+
+        self._error_frame: Optional[tk.Frame] = None
 
     def _show_errors(self):
         """Display validation errors if any."""
+        if self._error_frame is not None:
+            self._error_frame.destroy()
+            self._error_frame = None
         if not self.errors:
             return
 
-        error_frame = tk.Frame(self.body, bg='#ef444415')
-        error_frame.pack(fill=tk.X, pady=(10, 0))
+        error_bg = '#fee2e2'  # Light red background for light theme
+        self._error_frame = tk.Frame(self.body, bg=error_bg, highlightthickness=1, highlightbackground='#dc2626')
+        self._error_frame.pack(fill=tk.X, pady=(10, 0))
 
-        error_title = tk.Label(
-            error_frame,
-            text=f"⚠️ Validation Errors ({len(self.errors)})",
-            font=('Arial', 9, 'bold'),
-            fg='#ef4444',
-            bg='#ef444415'
-        )
-        error_title.pack(anchor=tk.W, padx=10, pady=(5, 3))
+        tk.Label(
+            self._error_frame, text=f'⚠ Validation Issues ({len(self.errors)})',
+            font=(FONT_UI, 9, 'bold'), fg='#dc2626', bg=error_bg,
+        ).pack(anchor=tk.W, padx=10, pady=(6, 3))
 
         for error in self.errors:
-            error_label = tk.Label(
-                error_frame,
-                text=f"• {error}",
-                font=('Arial', 8),
-                fg='#fca5a5',
-                bg='#ef444415',
-                wraplength=400,
-                justify=tk.LEFT
-            )
-            error_label.pack(anchor=tk.W, padx=20, pady=1)
+            tk.Label(
+                self._error_frame, text=f'• {error}', font=(FONT_UI, 8),
+                fg='#991b1b', bg=error_bg, wraplength=460, justify=tk.LEFT,
+            ).pack(anchor=tk.W, padx=20, pady=1)
+
+        tk.Frame(self._error_frame, bg=error_bg, height=6).pack()  # bottom breathing room
 
     def _toggle_expand(self, event=None):
         """Toggle card expansion."""
         self._expanded = not self._expanded
         if self._expanded:
-            self.body.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
+            self.body.pack(fill=tk.BOTH, expand=True, padx=12, pady=(0, 12))
             self.chevron.config(text='▼')
         else:
             self.body.pack_forget()
@@ -182,67 +202,68 @@ class InstructionCard(tk.Frame):
         self.status = status
         self.errors = errors or []
 
-        # Map status to icon and color
-        status_map = {
-            'pending': ('⏳', '#64748b'),           # Gray - waiting
-            'incomplete': ('◐', '#f59e0b'),        # Amber - partially filled
-            'correct': ('◐', '#6366f1'),           # Indigo - good progress
-            'incorrect': ('✗', '#ef4444'),         # Red - errors
-            'completed': ('✓', '#10b981'),         # Green - done!
-        }
+        icon, label, accent, tint = STATUS_STYLE.get(status, STATUS_STYLE['pending'])
 
-        icon, color = status_map.get(status, ('?', '#64748b'))
-        self.status_indicator.config(text=icon, fg=color)
+        self.status_icon.config(text=icon, fg=accent)
+        self.status_badge.config(text=label, bg=accent)
+        self.accent_bar.config(bg=accent)
 
-        # Also change card background tint based on status
-        bg_map = {
-            'completed': '#1a7a4a',    # Green tint
-            'incorrect': '#8b2e2e',    # Red tint
-            'correct': '#2e3a66',      # Indigo tint
-            'incomplete': '#6b5218',   # Amber tint
-            'pending': '#334155',      # Normal
-        }
-        self.config(bg=bg_map.get(status, '#334155'))
+        # Tint every card surface consistently (card bg cascades through children
+        # that were built against BG_CARD — repaint the ones that matter).
+        self.inner.config(bg=tint)
+        for widget in (self.status_icon, self.chevron, self.status_badge):
+            pass  # icon/badge already carry their own accent bg, leave as-is
 
-        # Show errors if any
         if self.errors and self._expanded:
             self._show_errors()
+        elif self._error_frame is not None:
+            self._error_frame.destroy()
+            self._error_frame = None
 
 
 class RoleTab(tk.Frame):
     """A tab showing all instructions for a single role on the current day."""
 
-    def __init__(self, parent, role: str, instructions: list[RenderedInstruction], patient_id: str = None, **kwargs):
-        super().__init__(parent, bg='#1e293b', **kwargs)
+    def __init__(self, parent, role: str, instructions: list[RenderedInstruction],
+                 patient_id: str = None, display_name: str = None, **kwargs):
+        super().__init__(parent, bg=BG_DARK, **kwargs)
         self.role = role
         self.patient_id = patient_id
         self.monitor = None
         self.cards = {}  # Map event_key -> InstructionCard
 
         # Title bar
-        title_frame = tk.Frame(self, bg='#1e293b')
-        title_frame.pack(fill=tk.X, padx=15, pady=15)
+        title_frame = tk.Frame(self, bg=BG_DARK)
+        title_frame.pack(fill=tk.X, padx=16, pady=(16, 12))
 
-        role_name = {
-            'exp1': 'Experimental 1 (Right)',
-            'exp2': 'Experimental 2 (Left)',
-            'ctrl1': 'Control 1 (Right)',
-            'ctrl2': 'Control 2 (Left)',
-        }.get(role, role)
+        # Falls back to the raw role id (e.g. 'exp3') only if the caller didn't
+        # pass a display name — main_window.py always supplies one, built from
+        # the live cohort roster, so no scenario is ever silently mislabeled.
+        role_label = display_name or role
 
         title_label = tk.Label(
-            title_frame,
-            text=f"📋 {role_name} — {len(instructions)} event(s)",
-            font=('Arial', 13, 'bold'),
-            fg='#a855f7',
-            bg='#1e293b'
+            title_frame, text=f'\U0001f4cb {role_label}', font=(FONT_UI, 13, 'bold'),
+            fg=ACCENT, bg=BG_DARK,
         )
         title_label.pack(side=tk.LEFT)
 
+        count_badge = tk.Label(
+            title_frame, text=f'{len(instructions)} event(s) today',
+            font=(FONT_UI, 9, 'bold'), fg=FG_LIGHT if instructions else FG_MUTED,
+            bg=ACCENT if instructions else BG_CARD, padx=10, pady=3,
+        )
+        count_badge.pack(side=tk.LEFT, padx=(12, 0))
+
+        if patient_id:
+            tk.Label(
+                title_frame, text=patient_id, font=(FONT_MONO, 9),
+                fg=FG_MUTED, bg=BG_DARK,
+            ).pack(side=tk.RIGHT)
+
         # Cards container with thin scrollbar
-        canvas = tk.Canvas(self, bg='#1e293b', highlightthickness=0)
+        canvas = tk.Canvas(self, bg=BG_DARK, highlightthickness=0)
         scrollbar = ttk.Scrollbar(self, orient=tk.VERTICAL, command=canvas.yview)
-        scrollable_frame = tk.Frame(canvas, bg='#1e293b')
+        scrollable_frame = tk.Frame(canvas, bg=BG_DARK)
 
         scrollable_frame.bind(
             '<Configure>',
@@ -252,35 +273,32 @@ class RoleTab(tk.Frame):
         canvas.create_window((0, 0), window=scrollable_frame, anchor=tk.NW)
         canvas.configure(yscrollcommand=scrollbar.set)
 
-        # Mousewheel scrolling support
         def _on_mousewheel(event):
-            # event.delta is positive for scroll up, negative for scroll down
             delta = -1 * (event.delta // 120)
-            canvas.yview_scroll(delta, "units")
+            canvas.yview_scroll(delta, 'units')
 
-        # Bind to canvas
         canvas.bind('<MouseWheel>', _on_mousewheel)
-        # Also bind to scrollable_frame for when focus is on cards
         scrollable_frame.bind('<MouseWheel>', _on_mousewheel)
 
         # Add instruction cards
         if not instructions:
-            no_events_label = tk.Label(
-                scrollable_frame,
-                text='😴 No events scheduled for this day.',
-                font=('Arial', 11),
-                fg='#94a3b8',
-                bg='#1e293b'
-            )
-            no_events_label.pack(pady=40)
+            empty = tk.Frame(scrollable_frame, bg=BG_DARK)
+            empty.pack(fill=tk.X, pady=60)
+            tk.Label(
+                empty, text='\U0001f634', font=(FONT_UI, 28), fg=FG_MUTED, bg=BG_DARK,
+            ).pack()
+            tk.Label(
+                empty, text='No events scheduled for this day.', font=(FONT_UI, 11),
+                fg=FG_MUTED, bg=BG_DARK,
+            ).pack(pady=(6, 0))
         else:
             for instr in instructions:
                 card = InstructionCard(scrollable_frame, instr)
-                card.pack(fill=tk.X, pady=8, padx=5)
+                card.pack(fill=tk.X, pady=6, padx=6)
                 self.cards[instr.event_key] = card
 
         canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y, padx=(0, 5))
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y, padx=(0, 6))
 
         # Start monitoring if patient_id provided
         if patient_id:
@@ -306,6 +324,10 @@ class RoleTab(tk.Frame):
                     class ScriptedEventProxy:
                         def __init__(self, instr):
                             self.event_key = instr.event_key
+                            # 'stub' (single, pre-seeded) vs 'free' (repeatable/chain) — the monitor
+                            # needs this to tell a one-time protocol stub apart from a chain event
+                            # like watch_record or a repeating free event like patient_call.
+                            self.kind = getattr(instr, 'kind', 'stub')
                             # Convert RenderedField list back to dict for comparison
                             self.fields = {f.label: f.value for f in instr.fields}
 
@@ -339,68 +361,105 @@ class RoleTab(tk.Frame):
 
 
 class CohortStatusBar(tk.Frame):
-    """Top bar showing cohort status and control buttons."""
+    """Top bar showing cohort status, day progress, and control buttons."""
 
     def __init__(self, parent, on_new_cohort=None, on_teardown=None, on_advance=None, on_verify=None, **kwargs):
-        super().__init__(parent, bg='#0f172a', height=60, **kwargs)
+        super().__init__(parent, bg=BG_DARKER, height=68, **kwargs)
         self.pack_propagate(False)
 
-        # Status text
+        left = tk.Frame(self, bg=BG_DARKER)
+        left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=18, pady=10)
+
         self.status_label = tk.Label(
-            self,
-            text='No cohort loaded',
-            font=('Arial', 11, 'bold'),
-            fg='#a855f7',
-            bg='#0f172a'
+            left, text='No cohort loaded', font=(FONT_UI, 11, 'bold'),
+            fg=FG_MUTED, bg=BG_DARKER, anchor=tk.W,
         )
-        self.status_label.pack(side=tk.LEFT, padx=15, pady=15, fill=tk.X, expand=True)
+        self.status_label.pack(anchor=tk.W)
+
+        # Day progress bar (thin, accent-colored, fills as cohort_day approaches 187)
+        self._progress_track = tk.Canvas(left, height=6, bg=BORDER, highlightthickness=0)
+        self._progress_track.pack(fill=tk.X, pady=(8, 0), anchor=tk.W)
+        self._progress_bar_id = None
 
         # Control buttons
-        button_frame = tk.Frame(self, bg='#0f172a')
+        button_frame = tk.Frame(self, bg=BG_DARKER)
         button_frame.pack(side=tk.RIGHT, padx=15, pady=10)
 
-        # Button styling
         button_style = {
-            'font': ('Arial', 9, 'bold'),
-            'bg': '#334155',
-            'fg': '#e2e8f0',
-            'activebackground': '#a855f7',
+            'font': (FONT_UI, 9, 'bold'),
+            'bg': BG_CARD,
+            'fg': FG_BODY,
+            'activebackground': ACCENT,
             'activeforeground': '#ffffff',
+            'disabledforeground': '#475569',
             'border': 0,
-            'padx': 15,
-            'pady': 8,
-            'cursor': 'hand2'
+            'padx': 14,
+            'pady': 9,
+            'cursor': 'hand2',
         }
 
         self.new_cohort_btn = tk.Button(
-            button_frame, text='New Cohort', command=on_new_cohort or (lambda: None), **button_style
+            button_frame, text='\U0001f504 New Cohort', command=on_new_cohort or (lambda: None), **button_style
         )
-        self.new_cohort_btn.pack(side=tk.LEFT, padx=5)
+        self.new_cohort_btn.pack(side=tk.LEFT, padx=4)
 
         self.verify_btn = tk.Button(
-            button_frame, text='Verify Events', command=on_verify or (lambda: None), **button_style,
-            state=tk.DISABLED, disabledforeground='#64748b'
+            button_frame, text='✓ Verify Events', command=on_verify or (lambda: None), **button_style,
+            state=tk.DISABLED,
         )
-        self.verify_btn.pack(side=tk.LEFT, padx=5)
+        self.verify_btn.pack(side=tk.LEFT, padx=4)
 
         self.advance_btn = tk.Button(
-            button_frame, text='Advance Day', command=on_advance or (lambda: None), **button_style,
-            state=tk.DISABLED, disabledforeground='#64748b'
+            button_frame, text='▶ Advance Day', command=on_advance or (lambda: None), **button_style,
+            state=tk.DISABLED,
         )
-        self.advance_btn.pack(side=tk.LEFT, padx=5)
+        self.advance_btn.pack(side=tk.LEFT, padx=4)
 
-        # Teardown button with red styling
         teardown_style = button_style.copy()
-        teardown_style.update({'bg': '#dc2626', 'activebackground': '#b91c1c'})
+        teardown_style.update({'bg': '#dc2626', 'activebackground': '#b91c1c', 'fg': '#ffffff'})
         self.teardown_btn = tk.Button(
-            button_frame, text='Teardown', command=on_teardown or (lambda: None), **teardown_style,
-            state=tk.DISABLED, disabledforeground='#64748b'
+            button_frame, text='\U0001f5d1 Teardown', command=on_teardown or (lambda: None), **teardown_style,
+            state=tk.DISABLED,
         )
-        self.teardown_btn.pack(side=tk.LEFT, padx=5)
+        self.teardown_btn.pack(side=tk.LEFT, padx=4)
+
+        self._add_hover(self.new_cohort_btn, BG_CARD, ACCENT)
+        self._add_hover(self.verify_btn, BG_CARD, ACCENT)
+        self._add_hover(self.advance_btn, BG_CARD, ACCENT)
+        self._add_hover(self.teardown_btn, '#dc2626', '#b91c1c')
+
+    @staticmethod
+    def _add_hover(btn: tk.Button, base: str, hover: str):
+        def on_enter(_e):
+            if btn['state'] != tk.DISABLED:
+                btn.configure(bg=hover)
+
+        def on_leave(_e):
+            if btn['state'] != tk.DISABLED:
+                btn.configure(bg=base)
+
+        btn.bind('<Enter>', on_enter)
+        btn.bind('<Leave>', on_leave)
 
     def set_status(self, text: str, cohort_active: bool = False):
         """Update status label and button states."""
-        self.status_label.config(text=text, fg='#a855f7' if cohort_active else '#64748b')
-        self.verify_btn.config(state=tk.NORMAL if cohort_active else tk.DISABLED)
-        self.advance_btn.config(state=tk.NORMAL if cohort_active else tk.DISABLED)
-        self.teardown_btn.config(state=tk.NORMAL if cohort_active else tk.DISABLED)
+        self.status_label.config(text=text, fg=ACCENT if cohort_active else FG_MUTED)
+        state = tk.NORMAL if cohort_active else tk.DISABLED
+        self.verify_btn.config(state=state)
+        self.advance_btn.config(state=state)
+        self.teardown_btn.config(state=state)
+        if not cohort_active:
+            self.set_progress(0, 187)
+
+    def set_progress(self, current_day: int, total_days: int = 187):
+        """Redraw the thin day-progress bar (current_day / total_days)."""
+        self._progress_track.delete('all')
+        self._progress_track.update_idletasks()
+        width = max(self._progress_track.winfo_width(), 1)
+        height = 6
+        frac = max(0.0, min(1.0, current_day / total_days)) if total_days else 0.0
+        fill_width = int(width * frac)
+        if fill_width > 0:
+            self._progress_track.create_rectangle(
+                0, 0, fill_width, height, fill=ACCENT, width=0,
+            )

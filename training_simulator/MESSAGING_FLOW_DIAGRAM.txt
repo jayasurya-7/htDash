@@ -1,0 +1,264 @@
+================================================================================
+TRAINING SIMULATOR — INTELLIGENT MESSAGING FLOW DIAGRAM
+================================================================================
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         SIMULATOR STARTS DAY X                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    ↓
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  Check: Does Day X have events for ANY patient?                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+         ↙                                                    ↘
+    YES                                                      NO
+    ↓                                                        ↓
+[Load Instructions]                            [All Patients Done - Day X]
+                                                            ↓
+                                               Show: 🎉 Day X Complete!
+                                               Show: Next Events Preview
+                                               Show: "Click Advance Day"
+                                                            ↓
+                                                   [User clicks Advance Day]
+
+
+================================================================================
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                   WHEN USER CLICKS ON PATIENT TAB                           │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    ↓
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  Check: Does this patient have events for current day?                      │
+└─────────────────────────────────────────────────────────────────────────────┘
+         ↙                                                    ↘
+    YES                                                      NO
+    ↓                                                        ↓
+[Show Instruction Cards]                    [Check: All Other Patients Done?]
+                                                    ↙              ↘
+                                                YES              NO
+                                                ↓                ↓
+                                    [All Done]              [Others Working]
+                                        ↓                        ↓
+                                   Show: 🎉              Show: ✓
+                                 Day X Complete!        All Events Completed!
+                                 Next Events Preview    "Switch to Another Patient"
+                                 "Click Advance Day"                ↓
+                                                    [User switches to next patient]
+
+
+================================================================================
+
+DETAILED STATE TRANSITIONS
+
+┌─────────────────────────────┐
+│   PATIENT HAS EVENTS        │
+└─────────────────────────────┘
+             ↓
+    [Show Instruction Cards]
+    ├─ Event 1: Device Setup
+    ├─ Event 2: Activation
+    └─ Event 3: Follow-up Call
+             ↓
+    [User Completes Events]
+             ↓
+    ┌─────────────────────────────┐
+    │  PATIENT NO EVENTS          │
+    └─────────────────────────────┘
+             ↓
+    [Check All Patients Status]
+             ↓
+        ┌────┴────┐
+        ↙         ↘
+   ALL DONE    OTHERS BUSY
+       ↓            ↓
+    [🎉]         [✓]
+    Day Complete  Patient Complete
+    Next Events   Switch Patient
+    Advance Day   Guidance
+
+
+================================================================================
+
+NEXT EVENTS PREVIEW GENERATION
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  trigger: User completes last event of day (all patients done)              │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    ↓
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  _get_next_events(current_day + 1)                                          │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    ↓
+            ┌───────────────────────┼───────────────────────┐
+            ↓                       ↓                       ↓
+        [Patient A]             [Patient B]             [Patient C]
+            ↓                       ↓                       ↓
+    Look for first day        Look for first day      Look for first day
+    with events               with events             with events
+    (start day+1)             (start day+1)           (start day+1)
+            ↓                       ↓                       ↓
+    "Day 8" (2 events)     "Day 7" (1 event)    "Day 10" (3 events)
+            ↓                       ↓                       ↓
+    ┌───────────────────────────────────────────────────────┐
+    │  Collect: (patient_name, day, event_count)           │
+    │  - (A, 8, 2)                                          │
+    │  - (B, 7, 1)                                          │
+    │  - (C, 10, 3)                                         │
+    └───────────────────────────────────────────────────────┘
+                                    ↓
+                    [Sort by day, then by name]
+                                    ↓
+    ┌───────────────────────────────────────────────────────┐
+    │  Sorted Results:                                      │
+    │  1. (B, 7, 1)  ← Patient B, Day 7, 1 event          │
+    │  2. (A, 8, 2)  ← Patient A, Day 8, 2 events         │
+    │  3. (C, 10, 3) ← Patient C, Day 10, 3 events        │
+    └───────────────────────────────────────────────────────┘
+                                    ↓
+                      [Return top 3 results]
+                                    ↓
+        ┌─────────────────────────────────────────────────┐
+        │  Display in "Next Events Preview":             │
+        │                                                 │
+        │  📋 Next Events Preview                         │
+        │  • Patient B — Day 7 (1 event)                 │
+        │  • Patient A — Day 8 (2 events)                │
+        │  • Patient C — Day 10 (3 events)               │
+        └─────────────────────────────────────────────────┘
+
+
+================================================================================
+
+DECISION TREE: WHAT MESSAGE TO SHOW
+
+                        ┌─ User opens patient tab ─┐
+                        │                          │
+                   Patient has events?
+                        │                          │
+                   YES  │                          │  NO
+                        ↓                          ↓
+                 [Show instruction cards]   [Check all patients]
+                                                   │
+                                              All done?
+                                                   │
+                                          YES      │      NO
+                                          ↓        ↓
+                                      ┌───────────────┐
+                                      │   Show 🎉     │  Show ✓
+                                      │  Day Complete │  Patient Complete
+                                      │  + Preview    │  + Switch Guidance
+                                      │  + Advance    │
+                                      └───────────────┘
+
+
+================================================================================
+
+COLOR CODING IN MESSAGES
+
+Patient Completion (✓):
+  ✓ emoji in sky-blue (#0ea5e9)
+  "All Events Completed!" in dark slate (#1e293b)
+  Body text in slate (#334155)
+  Guidance in bold sky-blue (#0ea5e9)
+
+Day Completion (🎉):
+  🎉 emoji in sky-blue (#0ea5e9)
+  "Day X Complete!" in dark slate (#1e293b)
+  Body text in slate (#334155)
+  "📋 Next Events Preview" header in sky-blue (#0ea5e9)
+  Event items in slate (#334155)
+  Guidance in bold sky-blue (#0ea5e9)
+
+All backgrounds: light (#f8fafc)
+All dividers: light gray (#e2e8f0)
+
+
+================================================================================
+
+MESSAGE TIMING & TRIGGERS
+
+Event                    Trigger                  Message Type
+─────────────────────────────────────────────────────────────────────────
+Patient completes        User clicks patient      ✓ Patient Complete
+all events              tab with no events
+                        (others still busy)
+
+All patients            All patients have         🎉 Day Complete
+complete day            no events                 + Next Events Preview
+
+Day has no events       Initial load of day       🎉 Day Complete
+from start              with no patient events   + Next Events Preview
+
+User switches           User clicks sidebar      ✓ Patient Complete
+to completed patient    when already done        (if still done)
+
+
+================================================================================
+
+USER INTERFACE REGIONS
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                          MAIN SIMULATOR WINDOW                               │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ [ NEW COHORT ] [ VERIFY ] [ ADVANCE DAY ] [ TEARDOWN ]  [Day spinbox: 1-187] │ ← Control bar
+├──────────────────────────┬──────────────────────────────────────────────────┤
+│                          │                                                   │
+│  SIDEBAR                 │              TAB CONTENT AREA                    │
+│  Patients:               │  ┌───────────────────────────────────────────┐   │
+│  • Exp-Right             │  │         PATIENT TAB NAME                 │   │
+│    (TRN001)              │  │  [X events scheduled for this day]        │   │
+│                          │  ├───────────────────────────────────────────┤   │
+│  • Exp-Left              │  │                                           │   │
+│    (TRN002)              │  │  ✓ (OR)  Instruction Cards               │   │
+│                          │  │  🎉      Day Complete Message             │   │
+│  • Ctrl-Right            │  │          Next Events Preview             │   │
+│    (TRN003)              │  │          + Advance Day Button            │   │
+│                          │  │                                           │   │
+│  • Ctrl-Left             │  │  (Content area = 70% of screen)           │   │
+│    (TRN004)              │  │                                           │   │
+│                          │  │                                           │   │
+│                          │  └───────────────────────────────────────────┘   │
+│  (Sidebar = 16% width)   │  (Content area = 84% width)                     │
+└──────────────────────────┴──────────────────────────────────────────────────┘
+
+
+================================================================================
+
+EXAMPLE WORKFLOW: 2-PATIENT SIMULATION
+
+Day 1 Start:
+┌─ Tab A: Event 1, Event 2, Event 3 [3 events]
+└─ Tab B: Event 1, Event 2 [2 events]
+
+User completes Tab A:
+┌─ Tab A: ✓ All Events Completed! Switch to another patient
+└─ Tab B: Event 1, Event 2 [2 events]
+
+User switches to Tab B:
+┌─ Tab A: [hidden]
+└─ Tab B: Event 1, Event 2 [2 events]
+
+User completes Tab B:
+┌─ Tab A: [hidden]
+└─ Tab B: 🎉 Day 1 Complete! Next Events Preview: Patient A - Day 3, Patient B - Day 7
+          👉 Click "Advance Day"
+
+User clicks "Advance Day":
+Day 2 Start:
+┌─ Tab A: No events scheduled for Day 2
+└─ Tab B: No events scheduled for Day 2
+
+Display ALL TABS:
+┌─ Tab A: 🎉 Day 2 Complete! Next Events Preview: Patient A - Day 3, Patient B - Day 7
+└─ Tab B: 🎉 Day 2 Complete! Next Events Preview: Patient A - Day 3, Patient B - Day 7
+         👉 Click "Advance Day"
+
+User clicks "Advance Day":
+Day 3 Start:
+┌─ Tab A: Event 1 [1 event]
+└─ Tab B: No events scheduled for Day 3
+
+...continues...
+
+
+================================================================================

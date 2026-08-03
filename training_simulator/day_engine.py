@@ -30,12 +30,23 @@ from shift_activation import (
 )
 
 HOSPITAL = 'ranipet'
-ROLE_DEFS = [
-    {'homer_id': 'TRN001'},
-    {'homer_id': 'TRN002'},
-    {'homer_id': 'TRN003'},
-    {'homer_id': 'TRN004'},
-]
+
+
+def _discover_trn_patients() -> list[str]:
+    """
+    Find every TRN* patient folder actually on disk, regardless of cohort size.
+
+    Mirrors the discovery pattern already used by cohort.teardown_cohort() —
+    the cohort can have anywhere from 2 to 10+ patients depending on the
+    CohortConfig chosen at setup, so this must never be a fixed list.
+    """
+    patients_path = get_patients_path(HOSPITAL)
+    if not patients_path.exists():
+        return []
+    return sorted(
+        item.name for item in patients_path.iterdir()
+        if item.is_dir() and item.name.startswith('TRN')
+    )
 
 
 def shift_patient_by(hospital: str, homer_id: str, delta_days: int) -> None:
@@ -144,12 +155,9 @@ def advance_day(state: state_store.CohortState) -> dict:
 
     print(f"Advancing to Day {new_day}...")
 
-    # Shift each patient by -1 day
-    for defn in ROLE_DEFS:
-        homer_id = defn['homer_id']
-        patient_dir = get_patients_path(HOSPITAL) / homer_id
-        if patient_dir.exists():
-            shift_patient_by(HOSPITAL, homer_id, -1)
+    # Shift every TRN* patient currently on disk by -1 day (dynamic — not a fixed count)
+    for homer_id in _discover_trn_patients():
+        shift_patient_by(HOSPITAL, homer_id, -1)
 
     # Persist the new state
     state_store.save(state)

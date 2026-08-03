@@ -17,7 +17,12 @@ TRACK = [
         ScriptedEvent(
             event_key='informed_consent', kind='stub',
             narrative='Therapist obtains signed informed consent from patient.',
-            fields={'completion_date': '{today} 06:00', 'notes': 'Patient consented with witness.'},
+            fields={
+                'completion_date': '{today} 06:00',
+                'notes': 'Patient consented with witness.',
+                'attachment': 'consent_form_signed.pdf',
+                'attachment_caption': 'Signed informed consent form, witnessed.',
+            },
         ),
         ScriptedEvent(
             event_key='exp_device_install', kind='stub',
@@ -31,6 +36,8 @@ TRACK = [
                 'sim_id': dp.SIM_4,
                 'demo_done': True,
                 'notes': 'All devices installed and working.',
+                'attachment': 'device_setup_checklist.pdf',
+                'attachment_caption': 'Signed device installation checklist confirming Pluto, Mars, modem, laptop and SIM setup.',
             },
         ),
     ]),
@@ -67,7 +74,8 @@ TRACK = [
                     {'exercise_name': 'Practice Combing Your Hair', 'type': 'adl', 'start': '06:10', 'end': '06:25', 'notes': ''},
                 ],
                 'notes': 'Timing recorded for ADL exercises.',
-                'attachment': '',
+                'attachment': 'agwatch_timing_d01_log.pdf',
+                'attachment_caption': 'Manual exercise timing log for Day 1.',
             },
         ),
         ScriptedEvent(
@@ -77,7 +85,10 @@ TRACK = [
                 'ag_watch_left': {'watch_number': 'TRNDEV-AGW-6', 'old_lost': False},
                 'sync_datetime': '{today} 08:00',
                 'worn_datetime': '{today} 08:00',
+                'next_followup_days': 14,
                 'notes': 'Initial watch check on left hand, patient ready to start wearing.',
+                'attachment': '',
+                'attachment_caption': '',
             },
         ),
         ScriptedEvent(
@@ -100,7 +111,8 @@ TRACK = [
                 'session_end': '{today} 08:00',
                 'no_issue': True,
                 'notes': 'Day 2 home visit completed. Patient on schedule.',
-                'attachment': '',
+                'attachment': 'home_visit_d02_photo.pdf',
+                'attachment_caption': 'Session notes and exercise photos from Day 2 visit.',
             },
         ),
         ScriptedEvent(
@@ -138,7 +150,8 @@ TRACK = [
                     {'exercise_name': 'Practice Combing Your Hair', 'type': 'adl', 'start': '06:10', 'end': '06:25', 'notes': ''},
                 ],
                 'notes': 'Day 3 ADL timing recorded.',
-                'attachment': '',
+                'attachment': 'agwatch_timing_d03_log.pdf',
+                'attachment_caption': 'Manual exercise timing log for Day 3.',
             },
         ),
     ]),
@@ -174,7 +187,8 @@ TRACK = [
                 'reason': 'Questions about proper exercise technique and daily frequency',
                 'no_issue': True,
                 'notes': 'Patient asked if exercises should be done once or twice per day. Clarified daily schedule and proper form. Patient satisfied.',
-                'attachment': '',
+                'attachment': 'patient_call_notes.pdf',
+                'attachment_caption': 'Written notes from the patient call.',
             },
         ),
     ]),
@@ -212,14 +226,53 @@ TRACK = [
                 'completion_date': '{today} 09:00',
                 'reason': 'Personal circumstances require attention; unable to continue daily training commitment',
                 'notes': 'Patient appreciated training so far and expressed willingness to complete A1 and A2 assessments for research purposes. Therapist documented and confirmed assessments still possible. Supportive closure conversation. Patient committed to follow-up assessments.',
-                'attachment': '',
+                'attachment': 'discontinuation_form_signed.pdf',
+                'attachment_caption': 'Signed discontinuation form documenting patient withdrawal.',
             },
         ),
     ]),
 
-    # ── Days 18-179: Training halted - No training events after discontinuation ──
+    # ── Day 18: Training halted - No training events after discontinuation ──
+    DayEntry(cohort_day=18, role='exp4', events=[], trainer_note='Patient discontinued. Training paused. Awaiting A1/A2 assessments.'),
+
+    # ── Day 19: Device return + final watch data upload ──
+    DayEntry(cohort_day=19, role='exp4', events=[
+        ScriptedEvent(
+            event_key='device_return', kind='free',
+            narrative='Engineer visits to collect all devices now that the patient has discontinued training.',
+            fields={
+                'completion_date': '{today} 10:00',
+                'devices': [
+                    {'type': 'pluto', 'device_id': dp.PLUTO_4, 'status': 'working', 'notes': 'Returned in good condition.'},
+                    {'type': 'mars', 'device_id': dp.MARS_4, 'status': 'working', 'notes': 'Returned in good condition.'},
+                    {'type': 'agwatch', 'device_id': 'TRNDEV-AGW-6', 'status': 'working', 'notes': 'Returned, functioning normally.'},
+                    {'type': 'modems', 'device_id': dp.MODEM_4, 'status': 'working', 'notes': 'Returned in good condition.'},
+                    {'type': 'laptops', 'device_id': dp.LAPTOP_4, 'status': 'working', 'notes': 'Returned in good condition.'},
+                    {'type': 'sims', 'device_id': dp.SIM_4, 'status': 'working', 'notes': 'Returned, deactivated.'},
+                ],
+                'notes': 'All devices collected and inventoried following discontinuation.',
+                'attachment': 'device_return_checklist.pdf',
+                'attachment_caption': 'Signed device return checklist with condition notes.',
+            },
+        ),
+        ScriptedEvent(
+            event_key='watch_data_upload', kind='free',
+            narrative='Engineer uploads final AG watch data pulled from the watch just returned.',
+            fields={
+                'watch_id': 'TRNDEV-AGW-6',
+                'limb': 'left',
+                'removed_date': '{today}',
+                'data_start': '{today}',
+                'data_end': '{today}',
+                'skipped': False,
+                'notes': 'Final watch data uploaded successfully at device return following discontinuation.',
+            },
+        ),
+    ]),
+
+    # ── Days 20-179: Training halted - No training events after discontinuation ──
     # (Only assessment events remain)
-    *[DayEntry(cohort_day=day, role='exp4', events=[], trainer_note='Patient discontinued. Training paused. Awaiting A1/A2 assessments.') for day in range(18, 180)],
+    *[DayEntry(cohort_day=day, role='exp4', events=[], trainer_note='Patient discontinued. Training paused. Awaiting A1/A2 assessments.') for day in range(20, 180)],
 
     # ── Day 180: Schedule A1 Assessment ──
     DayEntry(cohort_day=180, role='exp4', events=[

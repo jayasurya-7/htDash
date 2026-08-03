@@ -16,7 +16,12 @@ TRACK = [
         ScriptedEvent(
             event_key='informed_consent', kind='stub',
             narrative='Therapist obtains signed informed consent from patient.',
-            fields={'completion_date': '{today} 06:00', 'notes': 'Patient consented with witness.'},
+            fields={
+                'completion_date': '{today} 06:00',
+                'notes': 'Patient consented with witness.',
+                'attachment': 'consent_form_signed.pdf',
+                'attachment_caption': 'Signed informed consent form, witnessed.',
+            },
         ),
         ScriptedEvent(
             event_key='exp_device_install', kind='stub',
@@ -30,6 +35,8 @@ TRACK = [
                 'sim_id': dp.SIM_3,
                 'demo_done': True,
                 'notes': 'All devices installed and working.',
+                'attachment': 'device_setup_checklist.pdf',
+                'attachment_caption': 'Signed device installation checklist confirming Pluto, Mars, modem, laptop and SIM setup.',
             },
         ),
     ]),
@@ -66,7 +73,8 @@ TRACK = [
                     {'exercise_name': 'Practice Combing Your Hair', 'type': 'adl', 'start': '06:10', 'end': '06:25', 'notes': ''},
                 ],
                 'notes': 'Timing recorded for ADL exercises.',
-                'attachment': '',
+                'attachment': 'agwatch_timing_d01_log.pdf',
+                'attachment_caption': 'Manual exercise timing log for Day 1.',
             },
         ),
         ScriptedEvent(
@@ -76,7 +84,10 @@ TRACK = [
                 'ag_watch_right': {'watch_number': 'TRNDEV-AGW-5', 'old_lost': False},
                 'sync_datetime': '{today} 08:00',
                 'worn_datetime': '{today} 08:00',
+                'next_followup_days': 14,
                 'notes': 'Initial watch check on right hand, patient ready to start wearing.',
+                'attachment': '',
+                'attachment_caption': '',
             },
         ),
         ScriptedEvent(
@@ -111,7 +122,8 @@ TRACK = [
                     {'exercise_name': 'Practice Combing Your Hair', 'type': 'adl', 'start': '06:10', 'end': '06:25', 'notes': ''},
                 ],
                 'notes': 'Day 2 ADL timing recorded.',
-                'attachment': '',
+                'attachment': 'agwatch_timing_d02_log.pdf',
+                'attachment_caption': 'Manual exercise timing log for Day 2.',
             },
         ),
     ]),
@@ -126,7 +138,8 @@ TRACK = [
                 'session_end': '{today} 08:00',
                 'no_issue': True,
                 'notes': 'Day 3 home visit completed.',
-                'attachment': '',
+                'attachment': 'home_visit_d03_notes.pdf',
+                'attachment_caption': 'Session notes from Day 3 home visit.',
             },
         ),
         ScriptedEvent(
@@ -157,7 +170,8 @@ TRACK = [
                 'no_issue': False,
                 'triggered': [{'type': 'adverse_event'}],
                 'notes': 'Patient reports onset of wrist pain on Day 3 evening. Pain level: moderate (5/10).',
-                'attachment': '',
+                'attachment': 'patient_call_notes.pdf',
+                'attachment_caption': 'Written notes from the patient call.',
             },
         ),
         ScriptedEvent(
@@ -169,7 +183,8 @@ TRACK = [
                 'action_taken': 'Advised patient to rest wrist, apply ice. Scheduled clinical visit for Day 5. Training paused until AE resolved.',
                 'training_blocked': True,
                 'notes': 'AE requires clinical evaluation. Patient cooperative. Phone assessment only - clinical visit needed.',
-                'attachment': '',
+                'attachment': 'ae_photo_evidence.pdf',
+                'attachment_caption': 'Photo evidence of the reported adverse event site.',
             },
             lookup_hint='AE-001: Wrist Pain (Right Side)',
         ),
@@ -182,8 +197,8 @@ TRACK = [
             narrative='Therapist conducts in-home clinical assessment of wrist pain. Examination and palpation done. No fracture suspected.',
             fields={
                 'completion_date': '{today} 06:00',
-                'session_start': '{today} 06:00',
-                'session_end': '{today} 10:45',
+                'visit_start': '{today} 06:00',
+                'visit_end': '{today} 10:45',
                 'ae_discussions': [
                     {
                         'adverse_event_id': 'AE-001',
@@ -194,6 +209,7 @@ TRACK = [
                 ],
                 'notes': 'Clinical visit completed. Recommended modified exercises (reduced sets/reps). Will reassess in 2 days.',
                 'attachment': '',
+                'attachment_caption': '',
             },
             lookup_hint='Clinical visit for AE-001 (wrist pain assessment)',
         ),
@@ -215,7 +231,8 @@ TRACK = [
                     }
                 ],
                 'notes': 'Patient understood modified plan. Agreed to continue modified exercises. Pain currently 3/10.',
-                'attachment': '',
+                'attachment': 'ae_followup_notes.pdf',
+                'attachment_caption': 'Follow-up call notes regarding the adverse event.',
             },
         ),
     ]),
@@ -277,13 +294,50 @@ TRACK = [
                 'call_mode': 'audio',
                 'no_issue': True,
                 'notes': 'Day 7 protocol follow-up. Patient back on track. Good adherence to modified then regular exercises.',
-                'attachment': '',
+                'attachment': 'followup_d07_call_summary.pdf',
+                'attachment_caption': 'Written summary of the Day 7 follow-up call.',
             },
         ),
     ]),
 
-    # ── Days 8-14: Resume Normal Protocol ──
-    *[DayEntry(cohort_day=day, role='exp3', events=[], trainer_note='No activities due.') for day in range(8, 15)],
+    # ── Days 8-10: Resume Normal Protocol ──
+    *[DayEntry(cohort_day=day, role='exp3', events=[], trainer_note='No activities due.') for day in range(8, 11)],
+
+    # ── Day 11: Patient reports modem connectivity issue ──
+    DayEntry(cohort_day=11, role='exp3', events=[
+        ScriptedEvent(
+            event_key='other_device_issue_call', kind='free',
+            narrative='Patient reports modem repeatedly losing connection during exercise sessions.',
+            fields={
+                'completion_date': '{today} 14:00',
+                'issue_occur_date': '{today} 10:00',
+                'call_mode': 'audio',
+                'devices': [
+                    {'device': 'modem', 'outcome': 'visit_required', 'notes': 'Intermittent connectivity, needs on-site check.'}
+                ],
+                'notes': 'Engineer scheduled for site visit to diagnose modem connectivity issue.',
+            },
+            lookup_hint='Engineer visit auto-created for Day 12.',
+        ),
+    ]),
+
+    # ── Day 12: Engineer visit — modem replaced ──
+    DayEntry(cohort_day=12, role='exp3', events=[
+        ScriptedEvent(
+            event_key='other_device_issue_visit', kind='free',
+            narrative='Engineer visits and diagnoses faulty modem; replaces with new unit.',
+            fields={
+                'completion_date': '{today} 09:00',
+                'device_outcomes': [
+                    {'device_type': 'modems', 'outcome': 'replaced', 'notes': 'Old modem faulty, swapped with working unit.'}
+                ],
+                'notes': 'New modem installed and connectivity confirmed stable.',
+            },
+        ),
+    ]),
+
+    # ── Days 13-14: Resume Normal Protocol ──
+    *[DayEntry(cohort_day=day, role='exp3', events=[], trainer_note='No activities due.') for day in range(13, 15)],
 
     # ── Day 15: Phase 2 Update ──
     DayEntry(cohort_day=15, role='exp3', events=[
@@ -294,7 +348,10 @@ TRACK = [
                 'ag_watch_right': {'watch_number': 'TRNDEV-AGW-5', 'old_lost': False},
                 'sync_datetime': '{today} 06:00',
                 'worn_datetime': '{today} 06:00',
+                'next_followup_days': 14,
                 'notes': 'Right watch functioning well. No issues during modified exercise period.',
+                'attachment': '',
+                'attachment_caption': '',
             },
         ),
         ScriptedEvent(
@@ -304,7 +361,8 @@ TRACK = [
                 'session_start': '{today} 06:00','session_end': '{today} 08:00','vcg_group': 'VCG2',
                 'no_issue': True,
                 'notes': 'Day 15 Phase 2 home visit. Patient fully recovered. Progressing to Phase 2 exercises.',
-                'attachment': '',
+                'attachment': 'home_visit_d15_photo.pdf',
+                'attachment_caption': 'Session notes and exercise photos from Day 15 Phase 2 visit.',
             },
         ),
         ScriptedEvent(
@@ -356,7 +414,8 @@ TRACK = [
                 'call_mode': 'audio',
                 'no_issue': True,
                 'notes': 'Patient ready to complete training. No residual effects from wrist AE.',
-                'attachment': '',
+                'attachment': 'followup_d21_call_summary.pdf',
+                'attachment_caption': 'Written summary of the Day 21 follow-up call.',
             },
         ),
     ]),
@@ -389,10 +448,47 @@ TRACK = [
                 'notes': 'A1 assessment scheduled for Day 33.',
             },
         ),
+        ScriptedEvent(
+            event_key='device_return', kind='free',
+            narrative='Engineer visits to collect all devices now that active training has ended.',
+            fields={
+                'completion_date': '{today} 11:00',
+                'devices': [
+                    {'type': 'pluto', 'device_id': dp.PLUTO_3, 'status': 'working', 'notes': 'Returned in good condition.'},
+                    {'type': 'mars', 'device_id': dp.MARS_3, 'status': 'working', 'notes': 'Returned in good condition.'},
+                    {'type': 'agwatch', 'device_id': 'TRNDEV-AGW-5', 'status': 'working', 'notes': 'Returned, functioning normally.'},
+                    {'type': 'modems', 'device_id': dp.MODEM_3, 'status': 'working', 'notes': 'Returned in good condition.'},
+                    {'type': 'laptops', 'device_id': dp.LAPTOP_3, 'status': 'working', 'notes': 'Returned in good condition.'},
+                    {'type': 'sims', 'device_id': dp.SIM_3, 'status': 'working', 'notes': 'Returned, deactivated.'},
+                ],
+                'notes': 'All devices collected and inventoried. Study equipment returned in full.',
+                'attachment': 'device_return_checklist.pdf',
+                'attachment_caption': 'Signed device return checklist with condition notes.',
+            },
+        ),
+        ScriptedEvent(
+            event_key='watch_data_upload', kind='free',
+            narrative='Engineer uploads final AG watch data pulled from the watch just returned.',
+            fields={
+                'watch_id': 'TRNDEV-AGW-5',
+                'limb': 'right',
+                'removed_date': '{today}',
+                'data_start': '{today}',
+                'data_end': '{today}',
+                'skipped': False,
+                'notes': 'Final watch data uploaded successfully at study device return.',
+            },
+        ),
     ]),
 
-    # ── Days 30-36: Quiet ──
-    *[DayEntry(cohort_day=day, role='exp3', events=[], trainer_note='No activities due.') for day in range(30, 37)],
+    # ── Days 30-31: Quiet ──
+    *[
+        DayEntry(cohort_day=day, role='exp3', events=[], trainer_note='No activities due.')
+        for day in range(30, 32)
+    ],
+
+    # ── Days 32-36: Quiet ──
+    *[DayEntry(cohort_day=day, role='exp3', events=[], trainer_note='No activities due.') for day in range(32, 37)],
 
     # ── Day 37: A1 Assessment ──
     DayEntry(cohort_day=37, role='exp3', events=[

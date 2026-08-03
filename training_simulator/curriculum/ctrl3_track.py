@@ -15,7 +15,12 @@ TRACK = [
         ScriptedEvent(
             event_key='informed_consent', kind='stub',
             narrative='Therapist obtains signed informed consent from patient.',
-            fields={'completion_date': '{today} 06:00', 'notes': 'Patient consented with witness.'},
+            fields={
+                'completion_date': '{today} 06:00',
+                'notes': 'Patient consented with witness.',
+                'attachment': 'consent_form_signed.pdf',
+                'attachment_caption': 'Signed informed consent form, witnessed.',
+            },
         ),
     ]),
 
@@ -28,7 +33,19 @@ TRACK = [
                 'session_start': '{today} 06:00','session_end': '{today} 08:00','vcg_group': 'VCG2',
                 'no_issue': True,
                 'notes': 'Activation successful, patient ready.',
-                'attachment': '',
+                'attachment': 'activation_photo.pdf',
+                'attachment_caption': 'Photo of device demonstration during activation session.',
+            },
+        ),
+        ScriptedEvent(
+            event_key='adl_prescription_d01', kind='stub',
+            narrative='Therapist prescribes ADL exercises.',
+            fields={
+                'prescribed_exercises': [
+                    {'exercise_name': 'Practice Brushing Your Teeth', 'sets': 2, 'repetitions': 8, 'notes': ''},
+                    {'exercise_name': 'Practice Combing Your Hair', 'sets': 2, 'repetitions': 8, 'notes': ''},
+                ],
+                'notes': 'ADL Phase 1 prescribed.',
             },
         ),
         ScriptedEvent(
@@ -45,13 +62,15 @@ TRACK = [
         ),
         ScriptedEvent(
             event_key='agwatch_timing_d01', kind='stub',
-            narrative='Record timing for Day 1 VCG exercises.',
+            narrative='Record timing for Day 1 ADL and VCG exercises.',
             fields={
                 'exercises': [
-                    {'exercise_name': 'Forward arm slide', 'type': 'vcg', 'start': '06:00', 'end': '10:15', 'notes': ''},
+                    {'exercise_name': 'Practice Brushing Your Teeth', 'type': 'adl', 'start': '06:00', 'end': '06:08', 'notes': ''},
+                    {'exercise_name': 'Practice Combing Your Hair', 'type': 'adl', 'start': '06:10', 'end': '06:25', 'notes': ''},
+                    {'exercise_name': 'Forward arm slide', 'type': 'vcg', 'start': '06:30', 'end': '10:15', 'notes': ''},
                     {'exercise_name': 'Ball roll', 'type': 'vcg', 'start': '10:15', 'end': '08:00', 'notes': ''},
                 ],
-                'notes': 'Timing recorded for VCG exercises.',
+                'notes': 'Timing recorded for ADL and VCG exercises.',
                 'attachment': '',
             },
         ),
@@ -62,7 +81,10 @@ TRACK = [
                 'ag_watch_right': {'watch_number': 'TRNDEV-AGW-8', 'old_lost': False},
                 'sync_datetime': '{today} 08:00',
                 'worn_datetime': '{today} 08:00',
+                'next_followup_days': 14,
                 'notes': 'Initial watch check on right hand, patient ready to start wearing.',
+                'attachment': 'watch_check_photo.pdf',
+                'attachment_caption': 'Photo of watch worn correctly on right wrist.',
             },
         ),
         ScriptedEvent(
@@ -86,19 +108,23 @@ TRACK = [
                     'session_end': '{today} 08:00',
                     'no_issue': True,
                     'notes': f'Day {day} home visit completed.',
-                    'attachment': '',
+                    'attachment': 'home_visit_d02_notes.pdf' if day == 2 else '',
+                    'attachment_caption': 'Session notes and exercise photos from Day 2 visit.' if day == 2 else '',
                 },
             ),
             ScriptedEvent(
                 event_key='agwatch_timing_d02' if day == 2 else 'agwatch_timing_d03', kind='stub',
-                narrative=f'Therapist records VCG exercise timing on Day {day}.',
+                narrative=f'Therapist records ADL and VCG exercise timing on Day {day}.',
                 fields={
                     'exercises': [
-                        {'exercise_name': 'Forward arm slide', 'type': 'vcg', 'start': '06:00', 'end': '14:15', 'notes': ''},
+                        {'exercise_name': 'Practice Brushing Your Teeth', 'type': 'adl', 'start': '06:00', 'end': '06:08', 'notes': ''},
+                        {'exercise_name': 'Practice Combing Your Hair', 'type': 'adl', 'start': '06:10', 'end': '06:25', 'notes': ''},
+                        {'exercise_name': 'Forward arm slide', 'type': 'vcg', 'start': '06:30', 'end': '14:15', 'notes': ''},
                         {'exercise_name': 'Ball roll', 'type': 'vcg', 'start': '14:15', 'end': '08:00', 'notes': ''},
                     ],
-                    'notes': f'Day {day} VCG timing recorded.',
-                    'attachment': '',
+                    'notes': f'Day {day} ADL and VCG timing recorded.',
+                    'attachment': 'agwatch_d03_log.pdf' if day == 3 else '',
+                    'attachment_caption': 'Day 3 AG watch timing log export.' if day == 3 else '',
                 },
             ),
         ])
@@ -138,7 +164,8 @@ TRACK = [
                 'no_issue': False,
                 'triggered': [{'type': 'adverse_event'}],
                 'notes': 'Patient reports mild hand cramping during exercises.',
-                'attachment': '',
+                'attachment': 'followup_d07_notes.pdf',
+                'attachment_caption': 'Follow-up call notes documenting reported hand cramping.',
             },
         ),
         ScriptedEvent(
@@ -150,7 +177,8 @@ TRACK = [
                 'action_taken': 'Advised rest, stretching, and modified grip. Training continued with adapted technique.',
                 'training_blocked': False,
                 'notes': 'Mild musculoskeletal cramping. No pause required. Continue with modified approach.',
-                'attachment': '',
+                'attachment': 'ae_cramping_notes.pdf',
+                'attachment_caption': 'Photo of hand position during cramping episode.',
             },
         ),
     ]),
@@ -176,8 +204,33 @@ TRACK = [
     # ── Days 9-14: Quiet days ──
     *[DayEntry(cohort_day=day, role='ctrl3', events=[], trainer_note='No activities due.') for day in range(9, 15)],
 
-    # ── Day 15: Phase 2 update ──
+    # ── Day 15: Phase 2 update + watch swap ──
     DayEntry(cohort_day=15, role='ctrl3', events=[
+        ScriptedEvent(
+            event_key='watch_record', kind='free',
+            narrative='Therapist checks and records AG watch status on right hand. Watch battery low, swap to new watch.',
+            fields={
+                'ag_watch_right': {'watch_number': 'TRNDEV-AGW-10', 'old_lost': False},
+                'sync_datetime': '{today} 14:00',
+                'worn_datetime': '{today} 14:00',
+                'next_followup_days': 14,
+                'notes': 'Right watch battery low. Swapped old watch (TRNDEV-AGW-8) to new watch (TRNDEV-AGW-10). Patient wearing consistently.',
+                'attachment': '',
+                'attachment_caption': '',
+            },
+        ),
+        ScriptedEvent(
+            event_key='watch_data_upload', kind='free',
+            narrative='Engineer uploads watch data from old watch that was just removed.',
+            fields={
+                'watch_id': 'TRNDEV-AGW-8',
+                'limb': 'right',
+                'removed_date': '{today}',
+                'data_start': '{today}',
+                'data_end': '{today}',
+                'notes': 'Watch data uploaded from removed watch. New watch TRNDEV-AGW-10 now assigned.',
+            },
+        ),
         ScriptedEvent(
             event_key='home_visit_d15', kind='stub',
             narrative='Home visit Day 15 (Phase 2). Patient recovered from AE, ready for progression.',
@@ -185,7 +238,19 @@ TRACK = [
                 'session_start': '{today} 06:00','session_end': '{today} 08:00','vcg_group': 'VCG2',
                 'no_issue': True,
                 'notes': 'Phase 2 home visit (2 hours). Patient demonstrates proper technique.',
-                'attachment': '',
+                'attachment': 'home_visit_d15_notes.pdf',
+                'attachment_caption': 'Session notes and exercise photos from Day 15 Phase 2 visit.',
+            },
+        ),
+        ScriptedEvent(
+            event_key='adl_prescription_d15', kind='stub',
+            narrative='Update ADL prescription for Phase 2 progression.',
+            fields={
+                'prescribed_exercises': [
+                    {'exercise_name': 'Practice Reaching', 'sets': 2, 'repetitions': 10, 'notes': 'Phase 2 progression'},
+                    {'exercise_name': 'Practice Lifting', 'sets': 2, 'repetitions': 8, 'notes': 'Phase 2 progression'},
+                ],
+                'notes': 'ADL Phase 2 with new exercises.',
             },
         ),
         ScriptedEvent(
@@ -202,15 +267,19 @@ TRACK = [
         ),
         ScriptedEvent(
             event_key='agwatch_timing_d15', kind='stub',
-            narrative='Record timing for all VCG exercises (Phase 2).',
+            narrative='Record timing for all ADL and VCG exercises (Phase 2).',
             fields={
                 'exercises': [
+                    {'exercise_name': 'Practice Brushing Your Teeth', 'type': 'adl', 'start': '06:00', 'end': '06:08', 'notes': 'Phase 1'},
+                    {'exercise_name': 'Practice Combing Your Hair', 'type': 'adl', 'start': '06:10', 'end': '06:25', 'notes': 'Phase 1'},
+                    {'exercise_name': 'Practice Reaching', 'type': 'adl', 'start': '10:30', 'end': '10:40', 'notes': 'Phase 2 new'},
+                    {'exercise_name': 'Practice Lifting', 'type': 'adl', 'start': '10:45', 'end': '11:00', 'notes': 'Phase 2 new'},
                     {'exercise_name': 'Forward arm slide', 'type': 'vcg', 'start': '06:00', 'end': '10:15', 'notes': 'Phase 1'},
                     {'exercise_name': 'Ball roll', 'type': 'vcg', 'start': '10:15', 'end': '08:00', 'notes': 'Phase 1'},
                     {'exercise_name': 'Forward arm slide', 'type': 'vcg', 'start': '10:35', 'end': '10:50', 'notes': 'Phase 2 new'},
                     {'exercise_name': 'Ball roll', 'type': 'vcg', 'start': '10:55', 'end': '11:10', 'notes': 'Phase 2 new'},
                 ],
-                'notes': 'Day 15 timing for all exercises.',
+                'notes': 'Day 15 timing for all ADL and VCG exercises.',
                 'attachment': '',
             },
         ),
@@ -238,7 +307,8 @@ TRACK = [
                 'call_mode': 'audio',
                 'no_issue': True,
                 'notes': 'Patient ready to complete training. No further issues.',
-                'attachment': '',
+                'attachment': 'followup_d21_notes.pdf',
+                'attachment_caption': 'Final follow-up call notes before training completion.',
             },
         ),
     ]),
@@ -271,10 +341,39 @@ TRACK = [
                 'notes': 'A1 assessment scheduled for Day 33.',
             },
         ),
+        ScriptedEvent(
+            event_key='device_return', kind='free',
+            narrative='Engineer visits to collect the AG watch now that active training has ended.',
+            fields={
+                'completion_date': '{today} 11:00',
+                'devices': [
+                    {'type': 'agwatch', 'device_id': 'TRNDEV-AGW-10', 'status': 'working', 'notes': 'Returned, functioning normally.'},
+                ],
+                'notes': 'AG watch collected. Study equipment returned in full.',
+                'attachment': 'device_return_checklist.pdf',
+                'attachment_caption': 'Signed device return checklist with condition notes.',
+            },
+        ),
+        ScriptedEvent(
+            event_key='watch_data_upload', kind='free',
+            narrative='Engineer uploads final AG watch data pulled from the watch just returned.',
+            fields={
+                'watch_id': 'TRNDEV-AGW-10',
+                'limb': 'right',
+                'removed_date': '{today}',
+                'data_start': '{today}',
+                'data_end': '{today}',
+                'skipped': False,
+                'notes': 'Final watch data uploaded successfully at device return.',
+            },
+        ),
     ]),
 
     # ── Days 30-32: Quiet ──
-    *[DayEntry(cohort_day=day, role='ctrl3', events=[], trainer_note='No activities due.') for day in range(30, 33)],
+    *[
+        DayEntry(cohort_day=day, role='ctrl3', events=[], trainer_note='No activities due.')
+        for day in range(30, 33)
+    ],
 
     # ── Day 33: A1 Assessment ──
     DayEntry(cohort_day=33, role='ctrl3', events=[

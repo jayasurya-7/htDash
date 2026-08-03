@@ -16,7 +16,12 @@ TRACK = [
         ScriptedEvent(
             event_key='informed_consent', kind='stub',
             narrative='Therapist obtains signed informed consent from patient.',
-            fields={'completion_date': '{today} 06:00', 'notes': 'Patient consented with witness.'},
+            fields={
+                'completion_date': '{today} 06:00',
+                'notes': 'Patient consented with witness.',
+                'attachment': 'consent_form_signed.pdf',
+                'attachment_caption': 'Signed informed consent form, witnessed.',
+            },
         ),
         ScriptedEvent(
             event_key='exp_device_install', kind='stub',
@@ -30,6 +35,8 @@ TRACK = [
                 'sim_id': dp.SIM_5,
                 'demo_done': True,
                 'notes': 'All devices installed and working.',
+                'attachment': 'device_install_checklist.pdf',
+                'attachment_caption': 'Signed device installation checklist with serial numbers.',
             },
         ),
     ]),
@@ -66,7 +73,8 @@ TRACK = [
                     {'exercise_name': 'Practice Combing Your Hair', 'type': 'adl', 'start': '06:10', 'end': '06:25', 'notes': ''},
                 ],
                 'notes': 'Timing recorded for ADL exercises.',
-                'attachment': '',
+                'attachment': 'agwatch_d01_log.pdf',
+                'attachment_caption': 'Day 1 AG watch timing log export.',
             },
         ),
         ScriptedEvent(
@@ -76,7 +84,10 @@ TRACK = [
                 'ag_watch_right': {'watch_number': 'TRNDEV-AGW-7', 'old_lost': False},
                 'sync_datetime': '{today} 08:00',
                 'worn_datetime': '{today} 08:00',
+                'next_followup_days': 14,
                 'notes': 'Initial watch check on right hand, patient ready to start wearing.',
+                'attachment': '',
+                'attachment_caption': '',
             },
         ),
         ScriptedEvent(
@@ -99,7 +110,8 @@ TRACK = [
                 'session_end': '{today} 08:00',
                 'no_issue': True,
                 'notes': 'Day 2 home visit completed. Patient on schedule.',
-                'attachment': '',
+                'attachment': 'home_visit_d02_notes.pdf',
+                'attachment_caption': 'Session notes and exercise photos from Day 2 visit.',
             },
         ),
         ScriptedEvent(
@@ -125,7 +137,8 @@ TRACK = [
                 'session_end': '{today} 08:00',
                 'no_issue': True,
                 'notes': 'Day 3 home visit completed.',
-                'attachment': '',
+                'attachment': 'home_visit_d03_notes.pdf',
+                'attachment_caption': 'Session notes and exercise photos from Day 3 visit.',
             },
         ),
         ScriptedEvent(
@@ -155,7 +168,8 @@ TRACK = [
                 'action_taken': 'Patient advised to seek immediate medical evaluation. Therapist contacted emergency services. Patient transported to nearest hospital for cardiac workup. Training PAUSED pending medical clearance. IRB notification required.',
                 'training_blocked': True,
                 'notes': 'SEVERE AE: Potential cardiac event. Immediate hospital admission for evaluation. Therapist initiated incident reporting. Patient family notified. IRB-level adverse event requiring formal documentation and medical review.',
-                'attachment': '',
+                'attachment': 'er_admission_report.pdf',
+                'attachment_caption': 'Emergency room admission report and initial cardiac workup notes.',
             },
             lookup_hint='AE-SEVERE-001: Chest discomfort with dyspnea (potential cardiac event)',
         ),
@@ -168,8 +182,8 @@ TRACK = [
             narrative='Therapist conducts clinical follow-up. Patient still hospitalized for cardiac evaluation. Coordinating with hospital medical team.',
             fields={
                 'completion_date': '{today} 06:00',
-                'session_start': '{today} 06:00',
-                'session_end': '{today} 10:45',
+                'visit_start': '{today} 06:00',
+                'visit_end': '{today} 10:45',
                 'ae_discussions': [
                     {
                         'adverse_event_id': 'AE-SEVERE-001',
@@ -179,7 +193,8 @@ TRACK = [
                     }
                 ],
                 'notes': 'Hospital-based clinical visit. AE is SEVERE and ongoing. Continuous monitoring required. Training paused indefinitely pending medical clearance.',
-                'attachment': '',
+                'attachment': 'hospital_admission_notes.pdf',
+                'attachment_caption': 'Hospital admission notes and cardiac workup documentation.',
             },
             lookup_hint='Clinical assessment: Patient hospitalized, cardiac workup ongoing',
         ),
@@ -227,7 +242,8 @@ TRACK = [
                         }
                     ],
                     'notes': f'Day {day} check-in during continued hospitalization/recovery.',
-                    'attachment': '',
+                    'attachment': f'daily_progress_note_d{day:02d}.pdf' if day % 2 == 0 else '',
+                    'attachment_caption': 'Daily hospitalization progress note from nursing staff.' if day % 2 == 0 else '',
                 },
             ),
         ])
@@ -254,16 +270,54 @@ TRACK = [
                     }
                 ],
                 'notes': 'AE fully resolved. Hospital discharge. Medical clearance obtained. However, cumulative pause (Days 6-16 = 10+ days) triggers BROKEN PROTOCOL status. Patient status transitions to broken_protocol.',
-                'attachment': '',
+                'attachment': 'cardiology_clearance_letter.pdf',
+                'attachment_caption': 'Cardiology clearance letter confirming non-cardiac diagnosis and clearance to resume activities.',
             },
         ),
     ]),
 
     # ── Days 17-35: Broken Protocol Status ──
     # (No training events, only assessments available)
+    DayEntry(cohort_day=17, role='exp5', events=[], trainer_note='Broken protocol status. No training events. Assessment-only pathway available.'),
+
+    # ── Day 18: Device Return (engineer collects all devices after broken protocol) ──
+    DayEntry(cohort_day=18, role='exp5', events=[
+        ScriptedEvent(
+            event_key='device_return', kind='free',
+            narrative='Engineer visits to collect all devices since training has been halted (broken protocol).',
+            fields={
+                'completion_date': '{today} 10:00',
+                'devices': [
+                    {'type': 'pluto', 'device_id': dp.PLUTO_5, 'status': 'working', 'notes': 'Returned, unused since Day 5.'},
+                    {'type': 'mars', 'device_id': dp.MARS_5, 'status': 'working', 'notes': 'Returned in good condition.'},
+                    {'type': 'agwatch', 'device_id': 'TRNDEV-AGW-7', 'status': 'working', 'notes': 'Returned, functioning normally.'},
+                    {'type': 'modems', 'device_id': dp.MODEM_5, 'status': 'working', 'notes': 'Returned in good condition.'},
+                    {'type': 'laptops', 'device_id': dp.LAPTOP_5, 'status': 'working', 'notes': 'Returned in good condition.'},
+                    {'type': 'sims', 'device_id': dp.SIM_5, 'status': 'working', 'notes': 'Returned, deactivated.'},
+                ],
+                'notes': 'All devices collected following broken protocol status.',
+                'attachment': 'device_return_checklist.pdf',
+                'attachment_caption': 'Signed device return checklist with condition notes.',
+            },
+        ),
+        ScriptedEvent(
+            event_key='watch_data_upload', kind='free',
+            narrative='Engineer uploads final AG watch data pulled from the watch just returned.',
+            fields={
+                'watch_id': 'TRNDEV-AGW-7',
+                'limb': 'right',
+                'removed_date': '{today}',
+                'data_start': '{today}',
+                'data_end': '{today}',
+                'skipped': False,
+                'notes': 'Final watch data uploaded successfully at device return.',
+            },
+        ),
+    ]),
+
     *[
         DayEntry(cohort_day=day, role='exp5', events=[], trainer_note='Broken protocol status. No training events. Assessment-only pathway available.')
-        for day in range(17, 36)
+        for day in range(19, 36)
     ],
 
     # ── Day 36: A1 Assessment MISSED ──

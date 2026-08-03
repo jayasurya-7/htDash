@@ -1,0 +1,301 @@
+================================================================================
+TRAINING SIMULATOR — INTELLIGENT MESSAGING REFERENCE
+================================================================================
+
+What Users See at Different Stages of Training
+
+================================================================================
+SCENARIO 1: PATIENT COMPLETES ALL EVENTS FOR THE DAY
+================================================================================
+
+When User Clicks on Patient Tab:
+• That patient has finished all their events for today
+• Display shows:
+
+    ✓
+
+    All Events Completed!
+
+    Patient Exp - Right (TRN001) has finished all events for Day 5.
+
+    👉 Switch to another patient using the sidebar
+
+User Action: Click on another patient in the sidebar (e.g., "Ctrl - Right (TRN004)")
+
+Next Display: Show that patient's events (if they have any) OR same message if they're also done
+
+================================================================================
+SCENARIO 2: ONE PATIENT REMAINS WITH EVENTS
+================================================================================
+
+When User Clicks on Patient Without Events:
+• Other patients still have events
+• Display shows:
+
+    ✓
+
+    All Events Completed!
+
+    Patient Exp - Left (TRN003) has finished all events for Day 5.
+
+    👉 Switch to another patient using the sidebar
+
+User Action: Click on sidebar to select patient with remaining events
+
+Next Display: Show that patient's pending instruction cards
+
+================================================================================
+SCENARIO 3: ALL PATIENTS COMPLETE THEIR EVENTS FOR THE DAY
+================================================================================
+
+When Last Patient Completes Their Events:
+• All tabs now show completion message
+• Primary tab displays:
+
+    🎉
+
+    Day 5 Complete!
+
+    All patients have completed their events.
+
+    ────────────────────────────────────────
+
+    📋 Next Events Preview
+
+    • Exp - Left (TRN002) — Day 7 (2 events)
+    • Ctrl - Left (TRN005) — Day 7 (1 event)
+    • Exp - Right (TRN001) — Day 8 (3 events)
+
+    ────────────────────────────────────────
+
+    👉 Click "Advance Day" to progress to the next day
+
+User Action: Click "Advance Day" button in top toolbar
+
+Next Display: Day advances to Day 6 (or next day with content)
+
+================================================================================
+SCENARIO 4: NO EVENTS FOR CURRENT DAY (QUIET DAY)
+================================================================================
+
+When User Opens Day with No Patient Events:
+• All patients have no events
+• Display shows:
+
+    🎉
+
+    Day 5 Complete!
+
+    All patients have completed their events.
+
+    ────────────────────────────────────────
+
+    📋 Next Events Preview
+
+    • Exp - Left (TRN002) — Day 7 (2 events)
+    • Ctrl - Left (TRN005) — Day 7 (1 event)
+    • Exp - Right (TRN001) — Day 8 (3 events)
+
+    ────────────────────────────────────────
+
+    👉 Click "Advance Day" to progress to the next day
+
+(Same as Scenario 3 - shown in all tabs)
+
+================================================================================
+SCENARIO 5: DAY WITH MIXED ACTIVITY
+================================================================================
+
+Day 7 Status (Example):
+┌─────────────────────────────────────┬─────────────────────────────────────┐
+│ Exp - Left (TRN002) Tab             │ Ctrl - Left (TRN005) Tab            │
+├─────────────────────────────────────┼─────────────────────────────────────┤
+│ [Instruction cards showing events]  │ [Instruction cards showing events]  │
+│                                     │                                     │
+│ Event 1: Device Setup               │ Event 1: Follow-up Call             │
+│ Event 2: Activation                 │                                     │
+│                                     │                                     │
+│ (Still working on these)            │ (Patient still has events)          │
+└─────────────────────────────────────┴─────────────────────────────────────┘
+
+User Action: Complete events in Patient A, then switch to Patient B
+
+After Patient A Completes:
+┌─────────────────────────────────────┐
+│ Exp - Left (TRN002) Tab             │
+├─────────────────────────────────────┤
+│                ✓                    │
+│                                     │
+│        All Events Completed!        │
+│                                     │
+│ Patient Exp - Left (TRN002) has     │
+│ finished all events for Day 7.      │
+│                                     │
+│ 👉 Switch to another patient       │
+│    using the sidebar                │
+└─────────────────────────────────────┘
+
+After Patient B Completes (All Done):
+┌─────────────────────────────────────┐
+│ Ctrl - Left (TRN005) Tab            │
+├─────────────────────────────────────┤
+│                🎉                   │
+│                                     │
+│           Day 7 Complete!           │
+│                                     │
+│    All patients have completed      │
+│    their events.                    │
+│                                     │
+│ ────────────────────────────────────│
+│                                     │
+│ 📋 Next Events Preview              │
+│                                     │
+│ • Ctrl - Right (TRN004) — Day 10    │
+│   (2 events)                        │
+│ • Exp - Right (TRN001) — Day 15     │
+│   (5 events)                        │
+│                                     │
+│ ────────────────────────────────────│
+│                                     │
+│ 👉 Click "Advance Day" to          │
+│    progress to the next day         │
+└─────────────────────────────────────┘
+
+================================================================================
+NEXT EVENTS PREVIEW — DETAILED EXAMPLE
+================================================================================
+
+Next Events Found (Day 8-20):
+
+For Current Day: 7
+
+Scan Results:
+• Exp - Left (TRN002):     First event on Day 7 (2 events) — but we're ON Day 7
+• Ctrl - Left (TRN005):    First event on Day 7 (1 event) — but we're ON Day 7
+• Exp - Right (TRN001):    First event on Day 8 (3 events) ✓ Include
+• Ctrl - Right (TRN004):   No events until Day 10 (2 events) ✓ Include
+• Ctrl - Right (TRN003):   No events until Day 15 (5 events) ✓ Include
+
+Display Order (sorted by day, then by name):
+1. Exp - Right (TRN001) — Day 8 (3 events)
+2. Ctrl - Right (TRN004) — Day 10 (2 events)
+3. Ctrl - Right (TRN003) — Day 15 (5 events)
+
+Show Top 3 (all fit):
+📋 Next Events Preview
+
+• Exp - Right (TRN001) — Day 8 (3 events)
+• Ctrl - Right (TRN004) — Day 10 (2 events)
+• Ctrl - Right (TRN003) — Day 15 (5 events)
+
+================================================================================
+COLOR & STYLING REFERENCE
+================================================================================
+
+Message Colors (Light Theme):
+
+✓ Checkmark:           Sky-blue (#0ea5e9)
+🎉 Celebration:        Sky-blue (#0ea5e9)
+Headings:              Dark slate (#1e293b) — "All Events Completed!"
+Body text:             Slate (#334155) — Explanation text
+Guidance text (bold):  Sky-blue (#0ea5e9) — Call-to-action
+Secondary text:        Muted slate (#64748b) — Event preview counts
+Background:            Light (#f8fafc)
+
+Font Sizes:
+
+Emoji:     48px (large, prominent)
+Heading:   14px bold
+Body:      10px regular
+Guidance:  9px bold
+Preview:   9px regular
+
+Spacing:
+
+Vertical:    40px top/bottom padding (patient message)
+             20px top/bottom padding (day message)
+Horizontal:  16px padding from edges
+Sections:    12-16px gaps between sections
+Divider:     1px line (#e2e8f0)
+
+================================================================================
+INTERACTION FLOW CHART
+================================================================================
+
+[Day X Starts]
+    ↓
+[Show Day X events for all patients]
+    ↓
+[User browses tabs and completes events]
+    ↓
+[Patient A completes all events]
+    └→ Show: "✓ All Events Completed!" + "Switch to another patient"
+    ↓
+[User switches to Patient B]
+    ├→ If Patient B has events: Show instruction cards
+    ├→ If Patient B done: Show "✓ All Events Completed!" again
+    ↓
+[User switches to Patient C, D, E and completes]
+    ↓
+[Last patient completes last event]
+    └→ Show: "🎉 Day X Complete!" + "Next Events Preview" + "Click Advance Day"
+    ↓
+[User clicks "Advance Day" button]
+    ↓
+[Day advances to X+1]
+    └→ Show new day's events or completion messages
+    ↓
+[Repeat for Days 2-187]
+
+================================================================================
+COMMON QUESTIONS
+================================================================================
+
+Q: What if a patient has no events for multiple consecutive days?
+A: They will show "✓ All Events Completed!" for each day until they have
+   another event. Preview will show their next event day.
+
+Q: How far ahead does the Next Events Preview look?
+A: Up to 30 days ahead, or until end of study (whichever is first).
+
+Q: What if all remaining patients have no events until Day 50?
+A: Preview will show nothing if no events are scheduled. User clicks
+   "Advance Day" repeatedly to skip ahead.
+
+Q: Can I customize the messages?
+A: Yes! All text is in main_window.py methods:
+   - _show_patient_complete_message()
+   - _show_day_complete_message()
+   Edit text/emojis as needed.
+
+Q: What colors are used?
+A: Sky-blue (#0ea5e9) for accents, dark slate for text, light background.
+   Matches the professional light theme.
+
+================================================================================
+TESTING SCENARIOS
+================================================================================
+
+Test Case 1: Single patient with events
+  → Should show instruction cards, no completion messages
+
+Test Case 2: Patient completes early in day
+  → Should show "✓ All Events Completed!" when switched to tab
+
+Test Case 3: Multiple patients complete staggered
+  → Each shows message when they're done
+  → Day completion message appears when all done
+
+Test Case 4: Day with no events for any patient
+  → All tabs show "🎉 Day X Complete!" immediately
+
+Test Case 5: Quiet day in middle of study
+  → Show Day Complete message
+  → Preview shows next event day correctly
+  → User can click Advance Day to continue
+
+Test Case 6: Near end of study (Day 180+)
+  → Next events preview limited to remaining days
+  → Final days show no upcoming events
+
+================================================================================

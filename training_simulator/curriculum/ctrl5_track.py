@@ -16,20 +16,11 @@ TRACK = [
         ScriptedEvent(
             event_key='informed_consent', kind='stub',
             narrative='Therapist obtains signed informed consent from patient.',
-            fields={'completion_date': '{today} 06:00', 'notes': 'Patient consented with witness.'},
-        ),
-        ScriptedEvent(
-            event_key='exp_device_install', kind='stub',
-            narrative='Therapist installs Pluto, Mars, modem, laptop, and assigns AG watches.',
             fields={
-                'completion_date': '{today} 07:00',
-                'pluto_id': dp.PLUTO_5,
-                'mars_id': dp.MARS_5,
-                'modem_id': dp.MODEM_5,
-                'laptop_id': dp.LAPTOP_5,
-                'sim_id': dp.SIM_5,
-                'demo_done': True,
-                'notes': 'All devices installed and working.',
+                'completion_date': '{today} 06:00',
+                'notes': 'Patient consented with witness.',
+                'attachment': 'consent_form_signed.pdf',
+                'attachment_caption': 'Signed informed consent form, witnessed.',
             },
         ),
     ]),
@@ -43,11 +34,12 @@ TRACK = [
                 'session_start': '{today} 06:00','session_end': '{today} 08:00','vcg_group': 'VCG4-5',
                 'no_issue': True,
                 'notes': 'Activation successful, patient ready.',
-                'attachment': '',
+                'attachment': 'activation_session_photos.pdf',
+                'attachment_caption': 'Photos and notes from activation session demonstrating exercise setup.',
             },
         ),
         ScriptedEvent(
-            event_key='vcg_prescription_d01', kind='stub',
+            event_key='adl_prescription_d01', kind='stub',
             narrative='Therapist prescribes ADL exercises.',
             fields={
                 'prescribed_exercises': [
@@ -58,14 +50,28 @@ TRACK = [
             },
         ),
         ScriptedEvent(
+            event_key='vcg_prescription_d01', kind='stub',
+            narrative='Therapist prescribes VCG exercises.',
+            fields={
+                'vcg_group': 'VCG4-5',
+                'prescribed_exercises': [
+                    {'exercise_name': 'Supination/Pronation', 'sets': 3, 'repetitions': 10, 'notes': ''},
+                    {'exercise_name': 'Wrist flexion/Extension', 'sets': 3, 'repetitions': 8, 'notes': ''},
+                ],
+                'notes': 'VCG Phase 1 prescribed.',
+            },
+        ),
+        ScriptedEvent(
             event_key='agwatch_timing_d01', kind='stub',
-            narrative='Record timing for Day 1 ADL exercises.',
+            narrative='Record timing for Day 1 ADL and VCG exercises.',
             fields={
                 'exercises': [
                     {'exercise_name': 'Practice Brushing Your Teeth', 'type': 'adl', 'start': '06:00', 'end': '06:08', 'notes': ''},
                     {'exercise_name': 'Practice Combing Your Hair', 'type': 'adl', 'start': '06:10', 'end': '06:25', 'notes': ''},
+                    {'exercise_name': 'Supination/Pronation', 'type': 'vcg', 'start': '06:30', 'end': '10:15', 'notes': ''},
+                    {'exercise_name': 'Wrist flexion/Extension', 'type': 'vcg', 'start': '10:15', 'end': '08:00', 'notes': ''},
                 ],
-                'notes': 'Timing recorded for ADL exercises.',
+                'notes': 'Timing recorded for ADL and VCG exercises.',
                 'attachment': '',
             },
         ),
@@ -73,10 +79,13 @@ TRACK = [
             event_key='watch_record', kind='free',
             narrative='Therapist checks and records AG watch status on Day 1. Right affected hand.',
             fields={
-                'ag_watch_left': {'watch_number': 'TRNDEV-AGW-10', 'old_lost': False},
+                'ag_watch_right': {'watch_number': 'TRNDEV-AGW-10', 'old_lost': False},
                 'sync_datetime': '{today} 08:00',
                 'worn_datetime': '{today} 08:00',
+                'next_followup_days': 14,
                 'notes': 'Initial watch check on right hand, patient ready to start wearing.',
+                'attachment': 'watch_check_photo.pdf',
+                'attachment_caption': 'Photo of AG watch fitted to patient on Day 1.',
             },
         ),
         ScriptedEvent(
@@ -104,13 +113,15 @@ TRACK = [
         ),
         ScriptedEvent(
             event_key='agwatch_timing_d02', kind='stub',
-            narrative='Therapist records ADL exercise timing on Day 2.',
+            narrative='Therapist records ADL and VCG exercise timing on Day 2.',
             fields={
                 'exercises': [
                     {'exercise_name': 'Practice Brushing Your Teeth', 'type': 'adl', 'start': '06:00', 'end': '06:08', 'notes': ''},
                     {'exercise_name': 'Practice Combing Your Hair', 'type': 'adl', 'start': '06:10', 'end': '06:25', 'notes': ''},
+                    {'exercise_name': 'Supination/Pronation', 'type': 'vcg', 'start': '06:30', 'end': '14:15', 'notes': ''},
+                    {'exercise_name': 'Wrist flexion/Extension', 'type': 'vcg', 'start': '14:15', 'end': '08:00', 'notes': ''},
                 ],
-                'notes': 'Day 2 ADL timing recorded.',
+                'notes': 'Day 2 ADL and VCG timing recorded.',
                 'attachment': '',
             },
         ),
@@ -125,18 +136,21 @@ TRACK = [
                 'session_end': '{today} 08:00',
                 'no_issue': True,
                 'notes': 'Day 3 home visit completed.',
-                'attachment': '',
+                'attachment': 'home_visit_d03_notes.pdf',
+                'attachment_caption': 'Session notes from Day 3 home visit.',
             },
         ),
         ScriptedEvent(
             event_key='agwatch_timing_d03', kind='stub',
-            narrative='Therapist records ADL exercise timing on Day 3.',
+            narrative='Therapist records ADL and VCG exercise timing on Day 3.',
             fields={
                 'exercises': [
                     {'exercise_name': 'Practice Brushing Your Teeth', 'type': 'adl', 'start': '06:00', 'end': '06:08', 'notes': ''},
                     {'exercise_name': 'Practice Combing Your Hair', 'type': 'adl', 'start': '06:10', 'end': '06:25', 'notes': ''},
+                    {'exercise_name': 'Supination/Pronation', 'type': 'vcg', 'start': '06:30', 'end': '14:15', 'notes': ''},
+                    {'exercise_name': 'Wrist flexion/Extension', 'type': 'vcg', 'start': '14:15', 'end': '08:00', 'notes': ''},
                 ],
-                'notes': 'Day 3 ADL timing recorded.',
+                'notes': 'Day 3 ADL and VCG timing recorded.',
                 'attachment': '',
             },
         ),
@@ -155,7 +169,8 @@ TRACK = [
                 'action_taken': 'Patient advised to seek immediate medical evaluation. Therapist contacted emergency services. Patient transported to nearest hospital for cardiac workup. Training PAUSED pending medical clearance. IRB notification required.',
                 'training_blocked': True,
                 'notes': 'SEVERE AE: Potential cardiac event. Immediate hospital admission for evaluation. Therapist initiated incident reporting. Patient family notified. IRB-level adverse event requiring formal documentation and medical review.',
-                'attachment': '',
+                'attachment': 'er_admission_report.pdf',
+                'attachment_caption': 'Emergency room admission report documenting chest discomfort evaluation.',
             },
             lookup_hint='AE-SEVERE-001: Chest discomfort with dyspnea (potential cardiac event)',
         ),
@@ -168,8 +183,8 @@ TRACK = [
             narrative='Therapist conducts clinical follow-up. Patient still hospitalized for cardiac evaluation. Coordinating with hospital medical team.',
             fields={
                 'completion_date': '{today} 06:00',
-                'session_start': '{today} 06:00',
-                'session_end': '{today} 10:45',
+                'visit_start': '{today} 06:00',
+                'visit_end': '{today} 10:45',
                 'ae_discussions': [
                     {
                         'adverse_event_id': 'AE-SEVERE-001',
@@ -179,7 +194,8 @@ TRACK = [
                     }
                 ],
                 'notes': 'Hospital-based clinical visit. AE is SEVERE and ongoing. Continuous monitoring required. Training paused indefinitely pending medical clearance.',
-                'attachment': '',
+                'attachment': 'hospital_admission_notes.pdf',
+                'attachment_caption': 'Hospital admission notes and cardiac workup summary from Day 6 clinical visit.',
             },
             lookup_hint='Clinical assessment: Patient hospitalized, cardiac workup ongoing',
         ),
@@ -188,7 +204,6 @@ TRACK = [
             narrative='Daily follow-up call from therapist during hospitalization.',
             fields={
                 'completion_date': '{today} 16:00',
-                'call_type': 'therapist',
                 'call_mode': 'audio',
                 'duration_minutes': 10,
                 'patient_initiated': False,
@@ -201,7 +216,8 @@ TRACK = [
                     }
                 ],
                 'notes': 'Daily follow-up during hospitalization. Monitoring patient wellbeing and medical status.',
-                'attachment': '',
+                'attachment': 'cardiology_consult_notes.pdf',
+                'attachment_caption': 'Cardiology consult notes from Day 6 follow-up call.',
             },
         ),
     ]),
@@ -214,7 +230,6 @@ TRACK = [
                 narrative=f'Daily AE follow-up call (Day {day}). Continuation of hospitalization protocol monitoring.',
                 fields={
                     'completion_date': '{today} 06:00',
-                    'call_type': 'therapist',
                     'call_mode': 'audio',
                     'duration_minutes': 8,
                     'patient_initiated': False,
@@ -227,7 +242,8 @@ TRACK = [
                         }
                     ],
                     'notes': f'Day {day} check-in during continued hospitalization/recovery.',
-                    'attachment': '',
+                    'attachment': 'hospital_daily_check.pdf' if day % 3 == 0 else '',
+                    'attachment_caption': 'Daily hospital check-in documentation.' if day % 3 == 0 else '',
                 },
             ),
         ])
@@ -241,7 +257,6 @@ TRACK = [
             narrative='Final AE follow-up: Patient discharged and medically cleared. Diagnosis confirmed: musculoskeletal chest pain from overexertion. No cardiac event.',
             fields={
                 'completion_date': '{today} 14:00',
-                'call_type': 'therapist',
                 'call_mode': 'audio',
                 'duration_minutes': 15,
                 'patient_initiated': False,
@@ -254,16 +269,53 @@ TRACK = [
                     }
                 ],
                 'notes': 'AE fully resolved. Hospital discharge. Medical clearance obtained. However, cumulative pause (Days 6-16 = 10+ days) triggers BROKEN PROTOCOL status. Patient status transitions to broken_protocol.',
-                'attachment': '',
+                'attachment': 'cardiology_clearance_letter.pdf',
+                'attachment_caption': 'Cardiology clearance letter confirming resolution and hospital discharge.',
             },
         ),
     ]),
 
-    # ── Days 17-35: Broken Protocol Status ──
+    # ── Day 17: Broken Protocol Status ──
+    *[
+        DayEntry(cohort_day=day, role='ctrl5', events=[], trainer_note='Broken protocol status. No training events. Assessment-only pathway available.')
+        for day in range(17, 18)
+    ],
+
+    # ── Day 18: Device Return + Final AG Watch Data Upload ──
+    DayEntry(cohort_day=18, role='ctrl5', events=[
+        ScriptedEvent(
+            event_key='device_return', kind='free',
+            narrative='Engineer visits to collect the AG watch since training has been halted (broken protocol).',
+            fields={
+                'completion_date': '{today} 10:00',
+                'devices': [
+                    {'type': 'agwatch', 'device_id': dp.AGW_10, 'status': 'working', 'notes': 'Returned, functioning normally.'},
+                ],
+                'notes': 'AG watch collected following broken protocol status.',
+                'attachment': 'device_return_checklist.pdf',
+                'attachment_caption': 'Signed device return checklist with condition notes.',
+            },
+        ),
+        ScriptedEvent(
+            event_key='watch_data_upload', kind='free',
+            narrative='Engineer uploads final AG watch data pulled from the watch just returned.',
+            fields={
+                'watch_id': dp.AGW_10,
+                'limb': 'right',
+                'removed_date': '{today}',
+                'data_start': '{today}',
+                'data_end': '{today}',
+                'skipped': False,
+                'notes': 'Final watch data uploaded successfully at device return.',
+            },
+        ),
+    ]),
+
+    # ── Days 19-35: Broken Protocol Status ──
     # (No training events, only assessments available)
     *[
         DayEntry(cohort_day=day, role='ctrl5', events=[], trainer_note='Broken protocol status. No training events. Assessment-only pathway available.')
-        for day in range(17, 36)
+        for day in range(19, 36)
     ],
 
     # ── Day 36: A1 Assessment MISSED ──

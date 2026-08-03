@@ -1,6 +1,6 @@
 """
 Verification dialog — interactive view of event verification results.
-Modern dark theme with KPI cards and gradient styling.
+Professional light theme with clean cards and readable typography.
 """
 
 import tkinter as tk
@@ -11,15 +11,15 @@ from training_simulator.verification import (
     CohortVerification, PatientVerification, format_verification_report
 )
 
-# Modern color scheme
-COLOR_BG_DARK = "#1e293b"  # slate-800
-COLOR_BG_DARKER = "#0f172a"  # slate-950
-COLOR_FG_LIGHT = "#e2e8f0"  # slate-200
-COLOR_FG_MUTED = "#94a3b8"  # slate-400
-COLOR_ACCENT_PURPLE = "#a855f7"  # purple-500
-COLOR_ACCENT_BLUE = "#3b82f6"  # blue-500
-COLOR_ACCENT_GREEN = "#10b981"  # emerald-500
-COLOR_ACCENT_ORANGE = "#f97316"  # orange-500
+# Professional light-theme color scheme
+COLOR_BG_DARK = "#f8fafc"  # Light background
+COLOR_BG_DARKER = "#e8eef7"  # Light blue-gray header
+COLOR_FG_LIGHT = "#1e293b"  # Dark slate headings
+COLOR_FG_MUTED = "#64748b"  # Muted slate text
+COLOR_ACCENT_PURPLE = "#0ea5e9"  # Sky-blue primary
+COLOR_ACCENT_BLUE = "#0284c7"  # Darker sky-blue
+COLOR_ACCENT_GREEN = "#16a34a"  # Green success
+COLOR_ACCENT_ORANGE = "#ea580c"  # Orange warning
 
 
 class VerificationDialog:
@@ -61,7 +61,7 @@ class VerificationDialog:
         title_label = tk.Label(
             header_content,
             text="✓ Event Verification Report",
-            font=("Arial", 16, "bold"),
+            font=("Segoe UI", 16, "bold"),
             fg=COLOR_FG_LIGHT,
             bg=COLOR_BG_DARKER
         )
@@ -70,7 +70,7 @@ class VerificationDialog:
         subtitle_label = tk.Label(
             header_content,
             text=f"Cohort Day {self.result.cohort_day} / 187",
-            font=("Arial", 10),
+            font=("Segoe UI", 10),
             fg=COLOR_FG_MUTED,
             bg=COLOR_BG_DARKER
         )
@@ -79,7 +79,7 @@ class VerificationDialog:
         pass_rate_label = tk.Label(
             header_content,
             text=f"Pass Rate: {self.result.avg_pass_rate:.1f}%",
-            font=("Arial", 11, "bold"),
+            font=("Segoe UI", 11, "bold"),
             fg=COLOR_ACCENT_PURPLE,
             bg=COLOR_BG_DARKER
         )
@@ -104,7 +104,7 @@ class VerificationDialog:
         style = ttk.Style()
         style.theme_use('clam')
         style.configure('TNotebook', background=COLOR_BG_DARK, borderwidth=0)
-        style.configure('TNotebook.Tab', padding=[20, 10], font=("Arial", 10))
+        style.configure('TNotebook.Tab', padding=[20, 10], font=("Segoe UI", 10))
         style.map('TNotebook.Tab', background=[("selected", COLOR_ACCENT_PURPLE)])
 
         notebook = ttk.Notebook(self.dialog)
@@ -134,14 +134,18 @@ class VerificationDialog:
             text="Close",
             command=self.dialog.destroy,
             bg=COLOR_ACCENT_PURPLE,
-            fg=COLOR_FG_LIGHT,
-            font=("Arial", 10, "bold"),
+            fg="#ffffff",
+            activebackground="#9333ea",
+            activeforeground="#ffffff",
+            font=("Segoe UI", 10, "bold"),
             padx=20,
             pady=8,
             border=0,
             cursor="hand2"
         )
         close_btn.pack(side=tk.RIGHT)
+        close_btn.bind('<Enter>', lambda _e: close_btn.configure(bg="#9333ea"))
+        close_btn.bind('<Leave>', lambda _e: close_btn.configure(bg=COLOR_ACCENT_PURPLE))
 
     def _create_kpi_card(self, parent: tk.Frame, emoji: str, label: str, value: str, accent_color: str, column: int):
         """Create a modern KPI card."""
@@ -150,15 +154,15 @@ class VerificationDialog:
         parent.grid_columnconfigure(column, weight=1)
 
         # Emoji/Icon
-        emoji_label = tk.Label(card, text=emoji, font=("Arial", 24), bg=accent_color, fg=COLOR_FG_LIGHT)
+        emoji_label = tk.Label(card, text=emoji, font=("Segoe UI", 24), bg=accent_color, fg=COLOR_FG_LIGHT)
         emoji_label.pack()
 
         # Value
-        value_label = tk.Label(card, text=value, font=("Arial", 16, "bold"), bg=accent_color, fg=COLOR_FG_LIGHT)
+        value_label = tk.Label(card, text=value, font=("Segoe UI", 16, "bold"), bg=accent_color, fg=COLOR_FG_LIGHT)
         value_label.pack(pady=(8, 0))
 
         # Label
-        label_text = tk.Label(card, text=label, font=("Arial", 9), bg=accent_color, fg=COLOR_FG_LIGHT)
+        label_text = tk.Label(card, text=label, font=("Segoe UI", 9), bg=accent_color, fg=COLOR_FG_LIGHT)
         label_text.pack(pady=(4, 0))
 
     def _build_summary_tab(self, parent: tk.Frame):

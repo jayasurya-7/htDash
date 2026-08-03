@@ -19,7 +19,12 @@ TRACK = [
         ScriptedEvent(
             event_key='informed_consent', kind='stub',
             narrative='Therapist obtains signed informed consent from patient.',
-            fields={'completion_date': '{today} 06:00', 'notes': 'Patient consented with witness.'},
+            fields={
+                'completion_date': '{today} 06:00',
+                'notes': 'Patient consented with witness.',
+                'attachment': 'consent_form_signed.pdf',
+                'attachment_caption': 'Signed informed consent form, witnessed.',
+            },
         ),
     ]),
 
@@ -38,6 +43,8 @@ TRACK = [
                 'sim_id': dp.SIM_2,
                 'demo_done': True,
                 'notes': 'All devices installed and working.',
+                'attachment': 'device_setup_checklist.pdf',
+                'attachment_caption': 'Signed device installation checklist confirming Pluto, Mars, modem, laptop and SIM setup.',
             },
         ),
     ]),
@@ -74,7 +81,8 @@ TRACK = [
                     {'exercise_name': 'Practice Combing Your Hair', 'type': 'adl', 'start': '06:10', 'end': '06:25', 'notes': ''},
                 ],
                 'notes': 'Timing recorded for ADL exercises.',
-                'attachment': '',
+                'attachment': 'agwatch_timing_d01_log.pdf',
+                'attachment_caption': 'Manual exercise timing log for Day 1.',
             },
         ),
         ScriptedEvent(
@@ -84,7 +92,10 @@ TRACK = [
                 'ag_watch_left': {'watch_number': 'TRNDEV-AGW-3', 'old_lost': False},
                 'sync_datetime': '{today} 08:00',
                 'worn_datetime': '{today} 08:00',
+                'next_followup_days': 14,
                 'notes': 'Initial watch check on right hand, patient ready to start wearing.',
+                'attachment': '',
+                'attachment_caption': '',
             },
         ),
         ScriptedEvent(
@@ -119,7 +130,8 @@ TRACK = [
                     {'exercise_name': 'Practice Combing Your Hair', 'type': 'adl', 'start': '06:10', 'end': '06:25', 'notes': ''},
                 ],
                 'notes': 'Day 2 ADL timing recorded.',
-                'attachment': '',
+                'attachment': 'agwatch_timing_d02_log.pdf',
+                'attachment_caption': 'Manual exercise timing log for Day 2.',
             },
         ),
     ]),
@@ -134,7 +146,8 @@ TRACK = [
                 'session_end': '{today} 08:00',
                 'no_issue': True,
                 'notes': 'Day 3 home visit completed.',
-                'attachment': '',
+                'attachment': 'home_visit_d03_notes.pdf',
+                'attachment_caption': 'Session notes from Day 3 home visit.',
             },
         ),
         ScriptedEvent(
@@ -171,7 +184,8 @@ TRACK = [
                 'call_mode': 'audio',
                 'no_issue': True,
                 'notes': 'Good progress. Patient on track.',
-                'attachment': '',
+                'attachment': 'followup_d07_call_summary.pdf',
+                'attachment_caption': 'Written summary of the Day 7 follow-up call.',
             },
         ),
     ]),
@@ -201,7 +215,8 @@ TRACK = [
                 'call_mode': 'audio',
                 'devices': [{'device': 'pluto', 'outcome': 'visit_required', 'notes': 'Needs recalibration'}],
                 'notes': 'Robot visit required.',
-                'attachment': '',
+                'attachment': 'robot_issue_call_log.pdf',
+                'attachment_caption': 'Engineer call log documenting the reported robot issue.',
             },
             lookup_hint='Engineer will visit Day 9 for Pluto calibration.',
         ),
@@ -211,20 +226,37 @@ TRACK = [
     DayEntry(cohort_day=9, role='exp2', events=[
         ScriptedEvent(
             event_key='robot_issue_visit', kind='free',
-            narrative='Engineer visits to fix Pluto calibration. Successfully recalibrated.',
+            narrative='Engineer visits to diagnose Pluto issue. Unit cannot be recalibrated on-site — determined to need full replacement. Training paused pending replacement delivery.',
             fields={
                 'completion_date': '{today} 06:00',
                 'device_outcomes': [
-                    {'device': 'pluto', 'outcome': 'repaired_on_site', 'notes': 'Recalibrated and tested'}
+                    {'device': 'pluto', 'outcome': 'swapped', 'notes': 'Unit faulty, requires replacement. Replacement ordered.'}
                 ],
-                'notes': 'Pluto working normally again.',
+                'notes': 'Pluto unit faulty beyond on-site repair. Replacement unit ordered; training paused until resolve visit.',
                 'attachment': '',
             },
         ),
-    ]),
+    ], trainer_note='Training pause opens here — Pluto swap needed. Resolved by the Day 10 resolve_robot_issue_visit; check the pause banner clears after filing.'),
 
-    # ── Day 10: Quiet ──
-    DayEntry(cohort_day=10, role='exp2', events=[], trainer_note='No activities due.'),
+    # ── Day 10: Resolve robot issue visit — replacement Pluto delivered ──
+    DayEntry(cohort_day=10, role='exp2', events=[
+        ScriptedEvent(
+            event_key='resolve_robot_issue_visit', kind='free',
+            narrative='Engineer delivers replacement Pluto unit and confirms it is working. Training pause is lifted.',
+            fields={
+                'completion_date': '{today} 10:00',
+                'can_resume_from': '{today} 10:00',
+                'device_replacements': [
+                    {'device': 'pluto', 'old_device_id': dp.PLUTO_2, 'new_device_id': dp.PLUTO_2 + '-R', 'notes': 'Replacement unit tested and functioning normally.'}
+                ],
+                'other_device_outcomes': [],
+                'notes': 'Replacement Pluto confirmed working. Patient cleared to resume training.',
+                'attachment': 'pluto_replacement_confirmation.pdf',
+                'attachment_caption': 'Replacement device serial + functional test confirmation.',
+            },
+            lookup_hint='This resolves the pause opened by the Day 9 Pluto swap — check the pause banner clears after filing.',
+        ),
+    ]),
 
     # ── Day 11: Patient calls with ADL exercise doubts ──
     DayEntry(cohort_day=11, role='exp2', events=[
@@ -239,7 +271,8 @@ TRACK = [
                 'reason': 'Questions about ADL exercise form and device configuration',
                 'no_issue': True,
                 'notes': 'Patient confused about correct hand positioning for Practice Combing exercise. Also asked about Mars device settings. Therapist provided clarification via phone and encouraged continued practice.',
-                'attachment': '',
+                'attachment': 'patient_call_notes.pdf',
+                'attachment_caption': 'Written notes from the patient call.',
             },
         ),
     ]),
@@ -260,7 +293,23 @@ TRACK = [
                 'ag_watch_left': {'watch_number': 'TRNDEV-AGW-4', 'old_lost': False},
                 'sync_datetime': '{today} 06:00',
                 'worn_datetime': '{today} 06:00',
+                'next_followup_days': 14,
                 'notes': 'Right watch battery low, swapped to TRNDEV-AGW-4.',
+                'attachment': '',
+                'attachment_caption': '',
+            },
+        ),
+        ScriptedEvent(
+            event_key='watch_data_upload', kind='free',
+            narrative='Engineer uploads watch data from the old watch that was removed.',
+            fields={
+                'completion_date': '{today} 06:15',
+                'watch_id': 'TRNDEV-AGW-3',
+                'limb': 'left',
+                'removed_date': '{today}',
+                'data_start': '{today}',
+                'data_end': '{today}',
+                'notes': 'Uploading .gt3x data file from old left watch (TRNDEV-AGW-3) after swap to TRNDEV-AGW-4.',
             },
         ),
         ScriptedEvent(
@@ -270,7 +319,8 @@ TRACK = [
                 'session_start': '{today} 06:00','session_end': '{today} 08:00','vcg_group': 'VCG3',
                 'no_issue': True,
                 'notes': 'Day 15 Phase 2 home visit (2 hours). Patient demonstrates new exercises.',
-                'attachment': '',
+                'attachment': 'home_visit_d15_photo.pdf',
+                'attachment_caption': 'Session notes and exercise photos from Day 15 Phase 2 visit.',
             },
         ),
         ScriptedEvent(
@@ -322,9 +372,26 @@ TRACK = [
                 'call_mode': 'audio',
                 'duration_minutes': 18,
                 'reason': 'Pluto device connection issues and ADL exercise progression uncertainty',
-                'no_issue': True,
-                'notes': 'Patient reported Pluto intermittently disconnecting from app. Troubleshot: restarted device and wifi. Issue resolved. Also discussed progression to Phase 2 exercises (Practice Reaching/Lifting) scheduled for Day 15. Patient confident after clarification.',
+                'no_issue': False,
+                'triggered': [{'type': 'robot_issue_call'}],
+                'notes': 'Patient reported Pluto intermittently disconnecting from app. Also discussed progression to Phase 2 exercises (Practice Reaching/Lifting) scheduled for Day 15. Patient confident after clarification. Robot issue logged for the record.',
+                'attachment': 'patient_call_notes.pdf',
+                'attachment_caption': 'Written notes from the patient call.',
+            },
+        ),
+        ScriptedEvent(
+            event_key='robot_issue_call', kind='free',
+            narrative='Therapist logs the Pluto connectivity issue reported during the patient call. Resolved over the phone — no engineer visit needed.',
+            fields={
+                'completion_date': '{today} 07:15',
+                'issue_occur_date': '{today} 06:45',
+                'call_mode': 'audio',
+                'devices': [
+                    {'device': 'pluto', 'outcome': 'resolved', 'notes': 'Intermittent app disconnection. Fixed by restarting the device and wifi router.'}
+                ],
+                'notes': 'Issue resolved over the call — restarted device and wifi. No visit required.',
                 'attachment': '',
+                'attachment_caption': '',
             },
         ),
     ]),
@@ -367,7 +434,8 @@ TRACK = [
                 'reason': 'ADL exercise intensity verification and Mars device calibration questions',
                 'no_issue': True,
                 'notes': 'Patient asked if Phase 2 exercise sets (2 sets x 8-10 reps) should be increased before Day 29 completion. Therapist advised to maintain current protocol. Also clarified Mars robot calibration settings. Patient satisfied and ready for final week.',
-                'attachment': '',
+                'attachment': 'patient_call_notes.pdf',
+                'attachment_caption': 'Written notes from the patient call.',
             },
         ),
     ]),
@@ -403,9 +471,40 @@ TRACK = [
                 'notes': 'A1 assessment scheduled for Day 33.',
             },
         ),
+        ScriptedEvent(
+            event_key='device_return', kind='free',
+            narrative='Engineer visits to collect all devices now that active training has ended.',
+            fields={
+                'completion_date': '{today} 11:00',
+                'devices': [
+                    {'type': 'pluto', 'device_id': dp.PLUTO_2 + '-R', 'status': 'working', 'notes': 'Returned in good condition.'},
+                    {'type': 'mars', 'device_id': dp.MARS_2, 'status': 'working', 'notes': 'Returned in good condition.'},
+                    {'type': 'agwatch', 'device_id': 'TRNDEV-AGW-4', 'status': 'working', 'notes': 'Returned, functioning normally.'},
+                    {'type': 'modems', 'device_id': dp.MODEM_2, 'status': 'working', 'notes': 'Returned in good condition.'},
+                    {'type': 'laptops', 'device_id': dp.LAPTOP_2, 'status': 'working', 'notes': 'Returned in good condition.'},
+                    {'type': 'sims', 'device_id': dp.SIM_2, 'status': 'working', 'notes': 'Returned, deactivated.'},
+                ],
+                'notes': 'All devices collected and inventoried. Study equipment returned in full.',
+                'attachment': 'device_return_checklist.pdf',
+                'attachment_caption': 'Signed device return checklist with condition notes.',
+            },
+        ),
+        ScriptedEvent(
+            event_key='watch_data_upload', kind='free',
+            narrative='Engineer uploads final AG watch data pulled from the watch just returned.',
+            fields={
+                'watch_id': 'TRNDEV-AGW-4',
+                'limb': 'left',
+                'removed_date': '{today}',
+                'data_start': '{today}',
+                'data_end': '{today}',
+                'skipped': False,
+                'notes': 'Final watch data uploaded successfully at study device return.',
+            },
+        ),
     ]),
 
-    # â”€â”€ Days 30-31: Quiet â”€â”€
+    # -- Days 30-31: Quiet --
     *[
         DayEntry(cohort_day=day, role='exp2', events=[], trainer_note='No activities due.')
         for day in range(30, 32)

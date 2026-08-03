@@ -11,6 +11,273 @@ HOMER Therapy Dashboard (htDash) is a Flask-based clinical dashboard for managin
 
 ---
 
+## Table of Contents
+
+1. **Quick Start** — Running the app locally
+2. **Environment Setup** — Python, Node.js, and dependencies
+3. **Common Commands** — Development tasks and utilities
+4. **Architecture Overview** — High-level component structure
+5. **Project Overview** — Features and stack
+6. **Training Simulator** — Therapist training tool
+7. **Role-Based Access Control** — 5-role permission system
+8. **Documentation & Key Files** — Where to find information
+9. **Development Conventions** — Code style and constraints
+10. **Enhancements & Features** — Detailed implementation notes
+
+---
+
+## Quick Start
+
+### Prerequisites
+- Python 3.13 or higher
+- Node.js 18+ (for Puppeteer PDF generation)
+- Git (for version control)
+
+### Run the App Locally
+
+**1. Install Python dependencies:**
+```bash
+pip install -e .
+```
+Or with uv (preferred):
+```bash
+uv sync
+```
+
+**2. Install Node.js dependencies (for PDF rendering):**
+```bash
+npm install
+```
+
+**3. Start the Flask development server:**
+```bash
+python main.py
+```
+The app will be available at `http://localhost:5000`
+
+**4. Login with test credentials:**
+- Therapist (Ranipet): `RP-HS-1002` / `password` (change on first login)
+- Admin (Ranipet): `RP-HS-ADMIN` / `password` (change on first login)
+- Supervisor: `LAB-HS-DATA` / `password` (change on first login)
+
+See **Credential Management** section below for adding new users or resetting passwords.
+
+### Run the Training Simulator
+
+The simulator creates 10 test patients and walks through a full 187-day protocol:
+
+```bash
+python training_simulator/simulator_app.py
+```
+
+A Tkinter GUI window opens. Click "Run" to advance 1 day per click, then "Verify" to check against expected protocol events.
+
+---
+
+## Environment Setup
+
+### Python Environment
+
+**Required:** Python 3.13+
+
+**Virtual environment (recommended):**
+```bash
+python -m venv venv
+source venv/bin/activate  # Linux/Mac
+# or
+venv\Scripts\activate  # Windows
+```
+
+**Install project dependencies:**
+```bash
+pip install -e .
+# or with uv:
+uv sync
+```
+
+### Node.js Environment
+
+**Required:** Node.js 18+ (for Puppeteer headless browser PDF generation)
+
+**Check versions:**
+```bash
+node --version
+npm --version
+```
+
+**Install Puppeteer:**
+```bash
+npm install
+```
+
+### Environment Variables (Optional)
+
+The app reads from `config.py` and supports AWS S3:
+
+```python
+Config.USE_S3 = False        # True for S3, False for local storage
+Config.DEBUG = True          # Debug mode (auto-reload)
+Config.TIMEZONE = 'Asia/Kolkata'  # Server timezone (IST)
+```
+
+### Data Storage
+
+**Local (development):**
+```
+data/
+├── credentials.json          # Bcrypt-hashed user passwords (gitignored)
+├── ranipet/
+│   ├── patients/
+│   └── devices/
+├── manipal/
+└── ludhiana/
+```
+
+**S3 (production):**
+```
+s3://bucket/LAB/_dashboard/
+├── Credentials/credentials.json
+├── ranipet/patients/ ...
+└── devices/ ...
+```
+
+---
+
+## Common Commands
+
+### Reset Test Data
+
+Reset all 4 Ranipet test patients to enrolled state with new enrollment dates:
+
+```bash
+python scripts/reset_test_patient.py 23/03 24/03 22/03 21/03
+```
+- First date: HOCMCV002 (exp, right)
+- Second date: HOCMCV003 (exp, left)
+- Third date: HOCMCV004 (ctrl, right)
+- Fourth date: HOCMCV005 (ctrl, left)
+
+### Shift Patient Timeline
+
+Advance or rewind a patient's entire protocol (all dates, events):
+
+```bash
+python scripts/shift_activation.py HOCMCV002 +3   # Move 3 days forward
+python scripts/shift_activation.py HOCMCV002 -2   # Move 2 days back
+```
+
+### Credential Management
+
+**Initialize credentials (one-time setup):**
+```bash
+python scripts/init_credentials.py
+```
+Migrates all users from `config.py` to bcrypt-hashed `data/credentials.json`.
+
+**Reset a user's password:**
+```bash
+# Generate random temp password (printed to console)
+python scripts/reset_password.py RP-HS-1002
+
+# Set a specific password
+python scripts/reset_password.py RP-HS-1002 NewPassword123
+```
+
+### Device Data Migration
+
+Migrated device data structure from flat to per-type folders (idempotent):
+
+```bash
+python scripts/migrate_device_data.py
+```
+
+### Run Training Simulator
+
+```bash
+python training_simulator/simulator_app.py
+```
+
+Tkinter GUI that:
+- Creates 10 simulated patients
+- Advances timeline day-by-day
+- Verifies trainee filing against expected events
+- Generates pass/fail reports
+
+---
+
+## Architecture Overview
+
+### High-Level Component Stack
+
+```
+┌─────────────────────────────────────────────────────┐
+│                    Web Browser                       │
+│  (Vanilla JS + Tailwind CSS + Chart.js)             │
+└──────────────────────┬──────────────────────────────┘
+                       │
+                  HTTP Requests
+                       │
+┌──────────────────────▼──────────────────────────────┐
+│              Flask Application (main.py)            │
+│  ┌─────────────────────────────────────────────┐  │
+│  │  18 Blueprint Routes (routes/*.py)          │  │
+│  │  • auth — Login, logout, sessions            │  │
+│  │  • dashboard — Summary stats & events API   │  │
+│  │  • user_management — Patients & events API  │  │
+│  │  • devices — Inventory, assignment, SIM     │  │
+│  │  • notes — Patient free-text notes          │  │
+│  │  • assessment — A0/A1/A2 PDF uploads        │  │
+│  │  • expense_tracker — Expense ledger         │  │
+│  │  • documents — Shared document library      │  │
+│  │  • charts, exercises, timing — Analytics   │  │
+│  └─────────────────────────────────────────────┘  │
+└──────────────────────┬──────────────────────────────┘
+                       │
+        ┌──────────────┼──────────────┐
+        │              │              │
+     Jinja2       Utils Layer     Config
+    Templates     (data access,   (study
+    (base.html,   encryption,     protocol,
+     etc.)        protocols)      hospitals)
+        │              │              │
+        └──────────────┼──────────────┘
+                       │
+         ┌─────────────┴────────────────┐
+         │                              │
+    JSON File Storage           AWS S3 Storage
+    (data/ folder)             (production)
+    • credentials.json         • Device configs
+    • patient records          • Call records
+    • protocol events          • Credentials
+    • device inventory
+```
+
+### Request Flow (Example: File a Home Visit)
+
+1. **Frontend** (patient_detail.js) — Therapist fills modal and clicks Save
+2. **POST /api/complete-event/home_visit_d02** — Event completion endpoint
+3. **Backend** (routes/user_management.py):
+   - Validates role access (therapist only)
+   - Checks date bounds (config/date_rules.json)
+   - Verifies dependencies met (depends_on)
+   - Saves event to protocol_events.json (file or S3)
+   - Returns `{ok: true, ...}` JSON response
+4. **Frontend** — Closes modal, refreshes event list, shows success toast
+5. **User sees** — Event appears in Timeline and Overview panels
+
+### Key Abstraction Layers
+
+| Layer | Responsibility | Files |
+|-------|---|---|
+| **Presentation** | HTML templates, Tailwind CSS, Chart.js rendering | `templates/`, `static/css/` |
+| **Interaction** | Vanilla JS modals, form handling, API calls | `static/js/app/*.js` |
+| **API** | Flask routes, request validation, business logic | `routes/*.py` |
+| **Data Access** | JSON file I/O, S3 sync, hospital folder lookup | `utils/data_access.py` |
+| **Config** | Study protocol, hospital map, timezone settings | `config/`, `config.py` |
+| **Utilities** | Encryption, event creation, device logic | `utils/` |
+
+---
+
 ## Project Overview
 
 **htDash** manages stroke patients across three hospital sites (Manipal, Ranipet, Ludhiana). Core features:
@@ -198,6 +465,102 @@ The original `main` branch is a single-page app (`dashboard.html`, 39KB). Being 
 | `scripts/init_credentials.py`   | One-time seed script: migrate all 13 users from config.py to bcrypt-hashed JSON        |
 | `scripts/reset_password.py`     | Admin CLI: reset a user's password (generates temp password or accepts new one)         |
 | `data/credentials.json`         | Bcrypt-hashed credentials (gitignored; stored locally in dev, S3 in production)         |
+
+---
+
+## Debugging & Troubleshooting
+
+### Common Issues
+
+**"ModuleNotFoundError: No module named 'flask'"**
+- Missing dependencies. Run `pip install -e .` or `uv sync`
+
+**"No such file or directory: data/ranipet/patients/HOCMCV002.json"**
+- Test data not initialized. Run `python scripts/reset_test_patient.py 23/03 24/03 22/03 21/03`
+
+**"Patient record cannot be found"**
+- Verify hospital site folder exists in `data/<hospital>/patients/`
+- Check filename matches HOMER ID exactly (case-sensitive)
+
+**"Puppeteer not found" (when saving prescription PDF)**
+- Node.js dependencies not installed. Run `npm install`
+- Ensure `node` and `npm` are in PATH: `node --version`, `npm --version`
+
+**"Event date outside valid range"**
+- Date validation failed. Check `config/date_rules.json` for event's bounds
+- Min = `enrollDate` or later, Max = today (unless event-specific override)
+
+**"Session expired, please login again"**
+- Flask session timed out. Login credentials lost. Re-authenticate with username/password
+
+**"403 Forbidden" on patient detail page**
+- Role doesn't have permission. Check your user's privilege level (therapist vs. admin vs. engineer)
+- Assessment therapists cannot access patient detail—use `/assessment` dashboard only
+
+### Debugging Workflow
+
+**1. Check Flask debug logs:**
+```bash
+python main.py  # Debug mode prints to console
+```
+Look for:
+- `[ERROR]` lines indicating route failures
+- `[INFO]` lines showing request flow
+- Traceback for Python exceptions
+
+**2. Enable browser DevTools:**
+- Open browser (Chrome/Firefox/Safari)
+- Press **F12** for Developer Tools
+- **Console tab** — JavaScript errors/warnings
+- **Network tab** — HTTP requests, response status codes
+- **Application tab** — Session storage, localStorage
+
+**3. Check data files directly:**
+```bash
+# View patient record
+cat data/ranipet/patients/HOCMCV002.json | grep -A5 "trainingPausedDate"
+
+# View protocol events for a patient
+cat data/ranipet/patients/HOCMCV002/protocol_events.json | jq '.incomplete | keys'
+
+# View device inventory
+cat data/ranipet/devices/pluto/inventory.json | jq '.[] | select(.device_id == "PLUTO001")'
+```
+
+**4. Test API endpoints directly (curl):**
+```bash
+# Get patient record
+curl http://localhost:5000/api/patients/HOCMCV002 \
+  -H "Cookie: session=<session_id>"
+
+# Get patient events
+curl http://localhost:5000/api/patients/HOCMCV002/events \
+  -H "Cookie: session=<session_id>"
+
+# Test login
+curl -X POST http://localhost:5000/validate_login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"RP-HS-1002","password":"password"}'
+```
+
+**5. Database inspection (when using local storage):**
+```bash
+# List all patients at a site
+ls data/ranipet/patients/
+
+# Count events for a patient
+wc -l data/ranipet/patients/HOCMCV002/protocol_events.json
+
+# Find recently modified files
+find data/ranipet -mtime -1  # Modified in last 24 hours
+```
+
+### Performance Tips
+
+- **Slow page loads?** Check browser Network tab for slow API responses. Backend JSON files > 100KB can slow down.
+- **Modal takes too long to open?** Data validation & date-bounds resolution can be slow for 1000+ events. Consider pagination.
+- **PDF generation slow?** Puppeteer rendering is 1-2 seconds per page. Consider async job queue for production.
+- **S3 delays?** If using AWS S3, network latency adds up across many API calls. Consider local caching.
 
 ---
 

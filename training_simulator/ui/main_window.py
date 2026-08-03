@@ -11,9 +11,15 @@ from training_simulator.cohort_config import CohortConfig, generate_patient_defs
 from training_simulator.curriculum import entries_for_day, max_day
 from training_simulator import instructions
 from training_simulator.verification import verify_cohort
-from training_simulator.ui.widgets import CohortStatusBar, RoleTab
+from training_simulator.ui.widgets import (
+    CohortStatusBar, RoleTab,
+    BG_DARK, BG_DARKER, BG_CARD, BORDER, FG_LIGHT, FG_BODY, FG_MUTED, ACCENT, ACCENT_HOVER,
+    FONT_UI, FONT_MONO,
+)
 from training_simulator.ui.setup_dialog import SetupDialog
 from training_simulator.ui.verification_dialog import VerificationDialog
+
+TOTAL_DAYS = 187
 
 
 class MainWindow(tk.Tk):
@@ -21,33 +27,39 @@ class MainWindow(tk.Tk):
 
     def __init__(self):
         super().__init__()
-        self.title('htDash Training Simulator v2')
-        self.geometry('1400x850')
-
-        # Apply modern dark theme
-        self.configure(bg='#1e293b')  # slate-800
+        self.title('htDash Training Simulator')
+        self.geometry('1440x880')
+        self.minsize(1100, 700)
+        self.configure(bg=BG_DARK)  # Light background for modern, professional look
 
         self.cohort_state = None
         self.selected_role = tk.StringVar()
 
         # Dynamic roles and role names (populated after cohort is created)
         self.roles: List[str] = []
-        self.role_names: Dict[str, str] = {}
+        self.role_names: Dict[str, str] = {}       # role -> "Exp - Right (TRN001)"
+        self.role_groups: Dict[str, str] = {}       # role -> 'experimental' | 'control'
+        self.role_to_homer_id: Dict[str, str] = {}
+        self.patient_defs: List[dict] = []
+        self._patient_buttons: Dict[str, tk.Widget] = {}
 
         self._build_ui()
         self._initialize_cohort()  # Show setup dialog and create cohort
 
     def _build_ui(self):
         """Build the UI layout (framework only - patient tabs populated after cohort setup)."""
-        # Configure ttk style for dark theme
         style = ttk.Style()
         style.theme_use('clam')
-        style.configure('TFrame', background='#1e293b')
-        style.configure('TLabel', background='#1e293b', foreground='#e2e8f0')
-        style.configure('TButton', background='#334155', foreground='#e2e8f0')
-        style.configure('TNotebook', background='#1e293b', borderwidth=0)
-        style.configure('TNotebook.Tab', padding=[15, 8], font=('Arial', 10))
-        style.map('TNotebook.Tab', background=[('selected', '#a855f7')])
+        style.configure('TFrame', background=BG_DARK)
+        style.configure('TLabel', background=BG_DARK, foreground=FG_BODY, font=(FONT_UI, 10))
+        style.configure('TButton', background=BG_CARD, foreground=FG_BODY, font=(FONT_UI, 9))
+        style.configure('TNotebook', background=BG_DARK, borderwidth=0)
+        style.configure('TNotebook.Tab', padding=[16, 9], font=(FONT_UI, 10), background=BG_CARD, foreground=FG_MUTED)
+        style.map(
+            'TNotebook.Tab',
+            background=[('selected', ACCENT)],
+            foreground=[('selected', '#ffffff')],
+        )
 
         # Status bar (top)
         self.status_bar = CohortStatusBar(
@@ -60,147 +72,153 @@ class MainWindow(tk.Tk):
         self.status_bar.pack(fill=tk.X, side=tk.TOP)
 
         # Main container (left sidebar + content area)
-        self.main_container = tk.Frame(self, bg='#1e293b')
+        self.main_container = tk.Frame(self, bg=BG_DARK)
         self.main_container.pack(fill=tk.BOTH, expand=True)
 
         # Left sidebar (will be populated dynamically)
-        self.sidebar = tk.Frame(self.main_container, bg='#0f172a', width=200)
-        self.sidebar.pack(side=tk.LEFT, fill=tk.Y, padx=5, pady=10)
+        self.sidebar = tk.Frame(self.main_container, bg=BG_DARKER, width=230)
+        self.sidebar.pack(side=tk.LEFT, fill=tk.Y, padx=(8, 4), pady=8)
         self.sidebar.pack_propagate(False)
 
         # Content area (right side) — role tabs
         self.notebook = ttk.Notebook(self.main_container)
-        self.notebook.pack(fill=tk.BOTH, expand=True, padx=5, pady=10)
+        self.notebook.pack(fill=tk.BOTH, expand=True, padx=(4, 8), pady=8)
+        self.notebook.bind('<<NotebookTabChanged>>', self._on_notebook_tab_changed)
 
         # Placeholder (will be populated after cohort created)
         self.tabs = {}
 
+    # ── Sidebar ──
+
     def _populate_sidebar(self):
-        """Populate sidebar with patient buttons (called after cohort is created)."""
-        # Clear sidebar first
+        """Populate sidebar with grouped patient buttons + day navigation."""
         for widget in self.sidebar.winfo_children():
             widget.destroy()
+        self._patient_buttons = {}
 
-        # Patients label
-        patients_label = tk.Label(
-            self.sidebar,
-            text='👥 Patients',
-            font=('Arial', 11, 'bold'),
-            fg='#a855f7',
-            bg='#0f172a'
-        )
-        patients_label.pack(pady=(10, 15), padx=10)
+        tk.Label(
+            self.sidebar, text='\U0001f465 PATIENTS', font=(FONT_UI, 10, 'bold'),
+            fg=ACCENT, bg=BG_DARKER, anchor=tk.W,
+        ).pack(fill=tk.X, pady=(14, 10), padx=14)
 
-        # Patient buttons
-        for role in self.roles:
-            btn = tk.Button(
-                self.sidebar,
-                text=self.role_names[role],
-                command=lambda r=role: self._select_role(r),
-                font=('Arial', 9),
-                bg='#334155',
-                fg='#e2e8f0',
-                activebackground='#a855f7',
-                activeforeground='#ffffff',
-                border=0,
-                padx=10,
-                pady=8,
-                cursor='hand2'
-            )
-            btn.pack(fill=tk.X, pady=4, padx=8)
+        exp_roles = [r for r in self.roles if self.role_groups.get(r) == 'experimental']
+        ctrl_roles = [r for r in self.roles if self.role_groups.get(r) == 'control']
 
-        # Day navigation (sidebar)
-        separator = tk.Frame(self.sidebar, bg='#334155', height=1)
-        separator.pack(fill=tk.X, pady=15, padx=10)
+        if exp_roles:
+            self._build_patient_group(self.sidebar, 'EXPERIMENTAL', exp_roles, '#38bdf8')
+        if ctrl_roles:
+            self._build_patient_group(self.sidebar, 'CONTROL', ctrl_roles, '#fb923c')
 
-        # Day navigation label
-        nav_label = tk.Label(
-            self.sidebar,
-            text='📅 Day Navigation',
-            font=('Arial', 10, 'bold'),
-            fg='#a855f7',
-            bg='#0f172a'
-        )
-        nav_label.pack(pady=(0, 10), padx=10)
+        # ── Day navigation ──
+        tk.Frame(self.sidebar, bg=BORDER, height=1).pack(fill=tk.X, pady=(10, 14), padx=14)
 
-        # Navigation frame
-        nav_frame = tk.Frame(self.sidebar, bg='#0f172a')
-        nav_frame.pack(fill=tk.X, padx=8)
+        tk.Label(
+            self.sidebar, text='\U0001f4c5 DAY NAVIGATION', font=(FONT_UI, 10, 'bold'),
+            fg=ACCENT, bg=BG_DARKER, anchor=tk.W,
+        ).pack(fill=tk.X, pady=(0, 10), padx=14)
 
-        # Previous day button
-        prev_btn = tk.Button(
-            nav_frame,
-            text='◀',
-            width=3,
-            command=self._prev_day,
-            font=('Arial', 10, 'bold'),
-            bg='#334155',
-            fg='#e2e8f0',
-            activebackground='#a855f7',
-            border=0,
-            cursor='hand2'
-        )
-        prev_btn.pack(side=tk.LEFT, padx=2)
+        nav_frame = tk.Frame(self.sidebar, bg=BG_DARKER)
+        nav_frame.pack(fill=tk.X, padx=14)
 
-        # Day label
+        prev_btn = self._nav_button(nav_frame, '◀', self._prev_day)
+        prev_btn.pack(side=tk.LEFT)
+
         self.day_var = tk.StringVar(value='Day 1')
-        day_label = tk.Label(
-            nav_frame,
-            textvariable=self.day_var,
-            font=('Arial', 9, 'bold'),
-            fg='#e2e8f0',
-            bg='#0f172a'
-        )
-        day_label.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        tk.Label(
+            nav_frame, textvariable=self.day_var, font=(FONT_UI, 10, 'bold'),
+            fg=FG_LIGHT, bg=BG_DARKER,
+        ).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=6)
 
-        # Next day button
-        next_btn = tk.Button(
-            nav_frame,
-            text='▶',
-            width=3,
-            command=self._next_day,
-            font=('Arial', 10, 'bold'),
-            bg='#334155',
-            fg='#e2e8f0',
-            activebackground='#a855f7',
-            border=0,
-            cursor='hand2'
-        )
-        next_btn.pack(side=tk.RIGHT, padx=2)
+        next_btn = self._nav_button(nav_frame, '▶', self._next_day)
+        next_btn.pack(side=tk.RIGHT)
 
-        # Day spinbox
         self.day_spin = tk.Spinbox(
-            self.sidebar,
-            from_=1,
-            to=187,
-            width=10,
-            font=('Courier', 9),
-            command=self._on_day_spin,
-            bg='#334155',
-            fg='#e2e8f0',
-            buttonbackground='#a855f7',
-            bd=0
+            self.sidebar, from_=1, to=TOTAL_DAYS, width=10, font=(FONT_MONO, 9),
+            command=self._on_day_spin, bg=BG_CARD, fg=FG_LIGHT,
+            buttonbackground=ACCENT, insertbackground=FG_LIGHT, relief=tk.FLAT, justify=tk.CENTER,
         )
-        self.day_spin.pack(fill=tk.X, pady=8, padx=8)
+        self.day_spin.pack(fill=tk.X, pady=10, padx=14)
         self.day_spin.delete(0, tk.END)
         self.day_spin.insert(0, '1')
+        self.day_spin.bind('<Return>', lambda _e: self._on_day_spin())
+        self.day_spin.bind('<FocusOut>', lambda _e: self._on_day_spin())
+
+    def _build_patient_group(self, parent, label: str, roles: List[str], dot_color: str):
+        tk.Label(
+            parent, text=label, font=(FONT_UI, 8, 'bold'),
+            fg=FG_MUTED, bg=BG_DARKER, anchor=tk.W,
+        ).pack(fill=tk.X, padx=14, pady=(4, 4))
+
+        for role in roles:
+            btn = tk.Button(
+                parent,
+                text=f'  {self.role_names[role]}',
+                command=lambda r=role: self._select_role(r),
+                font=(FONT_UI, 9), bg=BG_CARD, fg=FG_BODY,
+                activebackground=ACCENT, activeforeground='#ffffff',
+                anchor=tk.W, border=0, padx=10, pady=8, cursor='hand2',
+            )
+            btn.pack(fill=tk.X, pady=2, padx=10)
+            btn.bind('<Enter>', lambda _e, b=btn, r=role: self._on_patient_btn_enter(b, r))
+            btn.bind('<Leave>', lambda _e, b=btn, r=role: self._on_patient_btn_leave(b, r))
+            self._patient_buttons[role] = btn
+
+    def _on_patient_btn_enter(self, btn: tk.Widget, role: str):
+        if self.selected_role.get() != role:
+            btn.configure(bg='#3f4f6b')
+
+    def _on_patient_btn_leave(self, btn: tk.Widget, role: str):
+        if self.selected_role.get() != role:
+            btn.configure(bg=BG_CARD)
+
+    def _highlight_selected_patient(self):
+        """Give the active patient's sidebar button a persistent accent highlight."""
+        active = self.selected_role.get()
+        for role, btn in self._patient_buttons.items():
+            if role == active:
+                btn.configure(bg=ACCENT, fg='#ffffff')
+            else:
+                btn.configure(bg=BG_CARD, fg=FG_BODY)
+
+    def _nav_button(self, parent, text: str, command) -> tk.Button:
+        btn = tk.Button(
+            parent, text=text, width=3, command=command, font=(FONT_UI, 10, 'bold'),
+            bg=BG_CARD, fg=FG_BODY, activebackground=ACCENT, activeforeground='#ffffff',
+            border=0, cursor='hand2',
+        )
+        btn.bind('<Enter>', lambda _e: btn.configure(bg=ACCENT_HOVER))
+        btn.bind('<Leave>', lambda _e: btn.configure(bg=BG_CARD))
+        return btn
+
+    # ── Notebook ──
 
     def _populate_notebook(self):
         """Populate notebook with patient tabs (called after cohort is created)."""
-        # Clear notebook first
         for tab in self.notebook.tabs():
             self.notebook.forget(tab)
 
         self.tabs = {}
         for role in self.roles:
-            frame = ttk.Frame(self.notebook)
+            frame = tk.Frame(self.notebook, bg=BG_DARK)
             self.notebook.add(frame, text=self.role_names[role])
             self.tabs[role] = frame
 
-        # Select first tab
         if self.roles:
             self.notebook.select(0)
             self.selected_role.set(self.roles[0])
+            self._highlight_selected_patient()
+
+    def _on_notebook_tab_changed(self, _event=None):
+        """Keep the sidebar highlight in sync when the user clicks a notebook tab directly."""
+        try:
+            idx = self.notebook.index(self.notebook.select())
+        except tk.TclError:
+            return
+        if 0 <= idx < len(self.roles):
+            self.selected_role.set(self.roles[idx])
+            self._highlight_selected_patient()
+
+    # ── Cohort lifecycle ──
 
     def _initialize_cohort(self):
         """Show setup dialog and create cohort on startup."""
@@ -208,11 +226,9 @@ class MainWindow(tk.Tk):
         config = setup_dlg.show()
 
         if config is None:
-            # User cancelled
             self.destroy()
             return
 
-        # Create cohort with selected config
         try:
             self.cohort_state = cohort.create_cohort(config)
             self._setup_cohort_ui(config)
@@ -223,13 +239,13 @@ class MainWindow(tk.Tk):
 
     def _setup_cohort_ui(self, config: CohortConfig):
         """Setup UI elements based on cohort configuration."""
-        from training_simulator.cohort_config import generate_patient_defs
-
         patient_defs = generate_patient_defs(config)
+        self.patient_defs = patient_defs
 
-        # Build roles and role_names lists
         self.roles = []
         self.role_names = {}
+        self.role_groups = {}
+        self.role_to_homer_id = {}
         for defn in patient_defs:
             role = defn['role']
             group = 'Exp' if defn['group'] == 'experimental' else 'Ctrl'
@@ -238,26 +254,28 @@ class MainWindow(tk.Tk):
 
             self.roles.append(role)
             self.role_names[role] = f'{group} - {side} ({homer_id})'
+            self.role_groups[role] = defn['group']
+            self.role_to_homer_id[role] = homer_id
 
-        # Populate UI
         self._populate_sidebar()
         self._populate_notebook()
-        self.day_spin.configure(from_=1, to=187)
+        self.day_spin.configure(from_=1, to=TOTAL_DAYS)
         self.day_spin.delete(0, tk.END)
         self.day_spin.insert(0, '1')
 
         self.status_bar.set_status(
-            f'Cohort active: Day {self.cohort_state.cohort_day} of 187 ({len(self.roles)} patients)',
+            f'Cohort active — Day {self.cohort_state.cohort_day} of {TOTAL_DAYS} · {len(self.roles)} patients',
             cohort_active=True
         )
+        self.status_bar.set_progress(self.cohort_state.cohort_day, TOTAL_DAYS)
 
         messagebox.showinfo(
-            'Success',
+            'Cohort Created',
             f'Cohort created successfully.\n\n'
             f'Patients: {len(self.roles)}\n'
             f'  Experimental: {config.num_experimental}\n'
             f'  Control: {config.num_control}\n\n'
-            f'Device pool: TRNDEV-* (up to 8 patients supported)'
+            f'Device pool: TRNDEV-* (up to 8 patients per group)'
         )
 
     def _select_role(self, role: str):
@@ -265,7 +283,8 @@ class MainWindow(tk.Tk):
         self.selected_role.set(role)
         if role in self.roles:
             self.notebook.select(self.roles.index(role))
-            self._update_display()
+        self._highlight_selected_patient()
+        self._update_display()
 
     def _on_new_cohort(self):
         """Create a new cohort (show setup dialog)."""
@@ -276,7 +295,6 @@ class MainWindow(tk.Tk):
             return
 
         try:
-            # Tear down existing cohort first
             if self.cohort_state:
                 cohort.teardown_cohort(verbose=False)
 
@@ -314,50 +332,20 @@ class MainWindow(tk.Tk):
             return
 
         try:
-            # Get patient definitions
-            from training_simulator.cohort_config import CohortConfig
-            # We need to reconstruct the config from the current roles
-            # Count exp vs ctrl by looking at patient defs
-            patient_defs = []
-            for role in self.roles:
-                # Find the patient def for this role
-                for key, value in self.role_names.items():
-                    if key == role:
-                        # Extract homer_id from role_names (format: "Exp/Ctrl - Side (TRN###)")
-                        import re
-                        match = re.search(r'\(TRN\d+\)', self.role_names[role])
-                        if match:
-                            homer_id = match.group(0).strip('()')
-                            # Determine group and side
-                            is_exp = 'Exp' in self.role_names[role]
-                            group = 'experimental' if is_exp else 'control'
-                            side = 'Right' if 'Right' in self.role_names[role] else 'Left'
-                            patient_defs.append({
-                                'role': role,
-                                'homer_id': homer_id,
-                                'group': group,
-                                'side': side,
-                            })
-                        break
-
-            # Run verification
-            result = verify_cohort(self.cohort_state.cohort_day, patient_defs)
-
-            # Show verification dialog
+            result = verify_cohort(self.cohort_state.cohort_day, self.patient_defs)
             dialog = VerificationDialog(self, result)
             dialog.show()
-
         except Exception as e:
             messagebox.showerror('Verification Error', f'Failed to verify events:\n{e}')
 
     def _on_advance_day(self):
-        """Advance to the next day."""
+        """Advance to the next day with force reload of dashboard."""
         if not self.cohort_state:
             messagebox.showwarning('No Cohort', 'Create a cohort first.')
             return
 
-        if self.cohort_state.cohort_day >= 187:
-            messagebox.showinfo('End of Training', 'Training simulator complete at Day 187.')
+        if self.cohort_state.cohort_day >= TOTAL_DAYS:
+            messagebox.showinfo('End of Training', f'Training simulator complete at Day {TOTAL_DAYS}.')
             return
 
         try:
@@ -365,12 +353,35 @@ class MainWindow(tk.Tk):
             self.day_spin.delete(0, tk.END)
             self.day_spin.insert(0, str(self.cohort_state.cohort_day))
             self.status_bar.set_status(
-                f'Cohort active: Day {self.cohort_state.cohort_day} of 187 (TRN001-004)',
+                f'Cohort active — Day {self.cohort_state.cohort_day} of {TOTAL_DAYS} · {len(self.roles)} patients',
                 cohort_active=True
             )
-            self._update_display()
+            self.status_bar.set_progress(self.cohort_state.cohort_day, TOTAL_DAYS)
+
+            # Force reload: Clear all tabs and rebuild from scratch
+            self._force_reload_dashboard()
         except Exception as e:
             messagebox.showerror('Error', f'Failed to advance day:\n{e}')
+
+    def _force_reload_dashboard(self):
+        """Force reload the entire dashboard - clear all content and refresh."""
+        try:
+            # Clear content from all existing tabs (don't rebuild tabs)
+            for role, frame in self.tabs.items():
+                for child in frame.winfo_children():
+                    child.destroy()
+
+            # Force the update
+            self.update_idletasks()
+
+            # Update display with fresh data for current day
+            self._update_display()
+
+            # Force final UI update to flush all changes
+            self.update_idletasks()
+
+        except Exception as e:
+            messagebox.showerror('Reload Error', f'Failed to reload dashboard:\n{e}')
 
     def _prev_day(self):
         """Go to previous day (read-only, no state change)."""
@@ -378,13 +389,15 @@ class MainWindow(tk.Tk):
         if current > 1:
             self.day_spin.delete(0, tk.END)
             self.day_spin.insert(0, str(current - 1))
+            self._on_day_spin()
 
     def _next_day(self):
         """Go to next day (read-only, no state change)."""
         current = int(self.day_spin.get())
-        if current < 187:
+        if current < TOTAL_DAYS:
             self.day_spin.delete(0, tk.END)
             self.day_spin.insert(0, str(current + 1))
+            self._on_day_spin()
 
     def _on_day_spin(self):
         """Handle day spinbox change."""
@@ -393,33 +406,35 @@ class MainWindow(tk.Tk):
     def _update_display(self):
         """Update all role tabs with instructions for the current day."""
         if not self.cohort_state:
-            # No cohort — show placeholder
             for role, frame in self.tabs.items():
-                # Clear frame
                 for child in frame.winfo_children():
                     child.destroy()
-                ttk.Label(frame, text='No cohort loaded.\nClick "New Cohort" to start.',
-                          font=('TkDefaultFont', 11), foreground='#888888').pack(pady=40)
+                self._empty_state(frame, 'No cohort loaded.\nClick "New Cohort" to start.')
             return
 
-        # Get current day from spinbox
         current_day = int(self.day_spin.get())
         self.day_var.set(f'Day {current_day}')
 
-        # Update each role tab
+        # Check if all patients have completed events for this day
+        all_patients_done = all(
+            not entries_for_day(role, current_day) for role in self.roles
+        )
+
         for role, frame in self.tabs.items():
-            # Clear frame
             for child in frame.winfo_children():
                 child.destroy()
 
-            # Get instructions for this role/day
             entries = entries_for_day(role, current_day)
             if not entries:
-                ttk.Label(frame, text=f'No events on Day {current_day}.',
-                          font=('TkDefaultFont', 11), foreground='#888888').pack(pady=40)
+                # Patient has no events for this day
+                if all_patients_done:
+                    # All patients done — show advance day guidance
+                    self._show_day_complete_message(frame, current_day)
+                else:
+                    # Other patients still have events — suggest switching
+                    self._show_patient_complete_message(frame, role, current_day)
                 continue
 
-            # Render instructions
             rendered_instructions = []
             for entry in entries:
                 for event in entry.events:
@@ -428,18 +443,122 @@ class MainWindow(tk.Tk):
 
             if not rendered_instructions:
                 trainer_note = entries[0].trainer_note if entries else 'No events scheduled.'
-                ttk.Label(frame, text=trainer_note,
-                          font=('TkDefaultFont', 11), foreground='#888888').pack(pady=40)
+                self._empty_state(frame, trainer_note)
             else:
-                # Create role tab with instructions and patient ID for real-time monitoring
                 patient_id = self._get_patient_id(role)
-                role_tab = RoleTab(frame, role, rendered_instructions, patient_id=patient_id)
+                role_tab = RoleTab(
+                    frame, role, rendered_instructions,
+                    patient_id=patient_id, display_name=self.role_names.get(role, role),
+                )
                 role_tab.pack(fill=tk.BOTH, expand=True)
 
+    def _show_patient_complete_message(self, frame: tk.Frame, role: str, current_day: int):
+        """Show message when a single patient has completed their events."""
+        container = tk.Frame(frame, bg=BG_DARK)
+        container.pack(fill=tk.BOTH, expand=True, padx=16, pady=40)
+
+        # Completion checkmark
+        tk.Label(
+            container, text='✓', font=(FONT_UI, 48), fg=ACCENT, bg=BG_DARK,
+        ).pack()
+
+        # Main message
+        tk.Label(
+            container, text='All Events Completed!', font=(FONT_UI, 14, 'bold'),
+            fg=FG_LIGHT, bg=BG_DARK,
+        ).pack(pady=(12, 6))
+
+        # Guidance
+        tk.Label(
+            container, text=f'Patient {self.role_names.get(role, role)} has finished all events for Day {current_day}.',
+            font=(FONT_UI, 10), fg=FG_BODY, bg=BG_DARK, justify=tk.CENTER,
+        ).pack(pady=(0, 12))
+
+        tk.Label(
+            container, text='👉 Switch to another patient using the sidebar',
+            font=(FONT_UI, 9, 'bold'), fg=ACCENT, bg=BG_DARK, justify=tk.CENTER,
+        ).pack()
+
+    def _show_day_complete_message(self, frame: tk.Frame, current_day: int):
+        """Show message when all patients have completed their events for the day."""
+        container = tk.Frame(frame, bg=BG_DARK)
+        container.pack(fill=tk.BOTH, expand=True, padx=16, pady=20)
+
+        # Completion celebration
+        tk.Label(
+            container, text='🎉', font=(FONT_UI, 48), fg=ACCENT, bg=BG_DARK,
+        ).pack()
+
+        # Main message
+        tk.Label(
+            container, text=f'Day {current_day} Complete!', font=(FONT_UI, 14, 'bold'),
+            fg=FG_LIGHT, bg=BG_DARK,
+        ).pack(pady=(12, 8))
+
+        tk.Label(
+            container, text='All patients have completed their events.',
+            font=(FONT_UI, 10), fg=FG_BODY, bg=BG_DARK, justify=tk.CENTER,
+        ).pack(pady=(0, 16))
+
+        # Divider
+        tk.Frame(container, bg=BORDER, height=1).pack(fill=tk.X, pady=(0, 16))
+
+        # Next events preview
+        if current_day < TOTAL_DAYS:
+            tk.Label(
+                container, text='📋 Next Events Preview', font=(FONT_UI, 10, 'bold'),
+                fg=ACCENT, bg=BG_DARK,
+            ).pack(anchor=tk.W, pady=(0, 10))
+
+            next_events = self._get_next_events(current_day + 1)
+            if next_events:
+                for patient_name, day, event_count in next_events[:3]:  # Show top 3
+                    tk.Label(
+                        container, text=f'• {patient_name} — Day {day} ({event_count} event{"s" if event_count != 1 else ""})',
+                        font=(FONT_UI, 9), fg=FG_BODY, bg=BG_DARK, justify=tk.LEFT, anchor=tk.W,
+                    ).pack(anchor=tk.W, pady=2)
+            else:
+                tk.Label(
+                    container, text='No upcoming events', font=(FONT_UI, 9), fg=FG_MUTED, bg=BG_DARK,
+                ).pack(anchor=tk.W)
+
+            tk.Label(
+                container, text='', font=(FONT_UI, 1), bg=BG_DARK,
+            ).pack(pady=12)
+
+        # Action button guidance
+        tk.Label(
+            container, text='👉 Click "Advance Day" to progress to the next day',
+            font=(FONT_UI, 9, 'bold'), fg=ACCENT, bg=BG_DARK, justify=tk.CENTER,
+        ).pack()
+
+    def _get_next_events(self, start_day: int) -> list:
+        """Find next upcoming events for all patients starting from start_day.
+        Returns list of (patient_name, day, event_count) tuples."""
+        next_events = []
+
+        for role in self.roles:
+            for day in range(start_day, min(start_day + 30, TOTAL_DAYS + 1)):  # Look ahead 30 days max
+                entries = entries_for_day(role, day)
+                if entries:
+                    event_count = sum(len(entry.events) for entry in entries)
+                    display_name = self.role_names.get(role, role)
+                    next_events.append((display_name, day, event_count))
+                    break  # Only first event day per patient
+
+        # Sort by day, then by patient name
+        next_events.sort(key=lambda x: (x[1], x[0]))
+        return next_events
+
+    @staticmethod
+    def _empty_state(frame: tk.Frame, message: str):
+        tk.Label(
+            frame, text=message, font=(FONT_UI, 11), fg=FG_MUTED, bg=BG_DARK, justify=tk.CENTER,
+        ).pack(pady=60)
+
     def _get_patient_id(self, role: str) -> str:
-        """Get the patient ID for a given role."""
-        id_map = {'exp1': 'TRN001', 'exp2': 'TRN002', 'ctrl1': 'TRN003', 'ctrl2': 'TRN004'}
-        return id_map.get(role, 'TRN001')
+        """Get the patient ID for a given role (dynamic — assigned at cohort creation)."""
+        return self.role_to_homer_id.get(role, 'TRN001')
 
 
 def run():

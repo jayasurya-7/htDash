@@ -1,13 +1,43 @@
 """
 Real-time event monitoring for training simulator.
-Watches htDash protocol_events.json and validates data in real-time.
+Watches htDash protocol_events.json and reports completion status per scripted event.
+
+Completion detection is deliberately existence-based, not value-based: an earlier
+version tried comparing filed field values against the curriculum's expected values
+and produced false failures for trainees who filed everything correctly but in a
+slightly different (still valid) format. We only ask "did the specific occurrence
+this card represents get filed?" — not "does it match byte-for-byte?".
+
+That "did THIS occurrence get filed" question is trickier than it looks once an
+event type can repeat. Two structural facts drive the design below:
+
+1. Most protocol events are one-time "stub" events (kind='stub'): pre-seeded once
+   in `incomplete[]` by htDash, moved to `complete[]` when filed, and never repeat
+   for a given patient. For these, "any complete[] entry with this protocol_event_id"
+   is an unambiguous, correct completion check.
+
+2. Free events (kind='free') can repeat — patient_call, adverse_event_followup,
+   robot_issue_call, and (uniquely) watch_record all recur across the 187-day
+   protocol. "Any entry of this type exists" is NOT enough to tell whether *this
+   specific day's* occurrence has been filed — a watch_record from Day 1 would
+   wrongly satisfy the check for the Day 15 occurrence forever after. The fix is
+   a baseline count: when a day's card starts being watched (register_event), we
+   snapshot how many matching entries already exist. The occurrence is complete
+   only once the live count rises *above* that baseline — i.e. a genuinely new
+   entry appeared since we started watching this occurrence.
+
+   Free events also mostly live in `events_data['free'][event_key]` (a list, or
+   a singleton dict/None for discontinuation/device_return/pre_discontinuation)
+   rather than the top-level `complete[]` array — with one documented exception:
+   watch_record completions land in top-level `complete[]` even though its kind
+   is 'free' (see CLAUDE.md's Watch record chain section).
 """
 
 import json
 import time
 import threading
 from pathlib import Path
-from typing import Dict, List, Tuple, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from training_simulator.bootstrap import Config
 from utils.data_access import get_patients_path, read_patient_meta
@@ -16,15 +46,22 @@ from training_simulator.curriculum import entries_for_day
 
 class EventStatus:
     """Status of an event being monitored."""
-    PENDING = "pending"      # Not yet filed
-    FILED_INCOMPLETE = "incomplete"  # Partially filed
-    FILED_CORRECT = "correct"       # Correctly filed
-    FILED_INCORRECT = "incorrect"   # Filed with errors
-    COMPLETED = "completed"         # Fully completed
+    PENDING = "pending"              # Not yet filed
+    FILED_INCOMPLETE = "incomplete"  # Stub touched but not yet saved (rarely observed — htDash
+                                      # modals only write on final submit, not per-keystroke)
+    FILED_CORRECT = "correct"        # Reserved for future value-level validation
+    FILED_INCORRECT = "incorrect"    # Reserved for future value-level validation
+    COMPLETED = "completed"          # This occurrence has been filed
+
+
+# Free-bucket keys that are a singleton (dict once filed, None before) rather than
+# a list. Every other kind='free' event key (other than 'watch_record', handled as
+# a special case) is a list bucket.
+_SINGLETON_FREE_KEYS = {'discontinuation', 'device_return', 'pre_discontinuation'}
 
 
 class RealtimeMonitor:
-    """Monitor htDash events in real-time and validate against curriculum."""
+    """Monitor htDash events in real-time and report per-occurrence completion status."""
 
     def __init__(self, patient_homer_id: str, role: str, hospital: str = 'ranipet'):
         """
@@ -43,22 +80,32 @@ class RealtimeMonitor:
         self.events_file = self.patients_path / patient_homer_id / 'protocol_events.json'
 
         self.running = False
-        self.last_event_counts = {}
-        self.event_status: Dict[str, str] = {}  # event_key -> status
+        self.event_status: Dict[str, str] = {}       # event_key -> status
         self.event_errors: Dict[str, List[str]] = {}  # event_key -> [errors]
-        self.scripted_events: Dict[str, Any] = {}  # event_key -> ScriptedEvent (for validation)
+        self.scripted_events: Dict[str, Any] = {}     # event_key -> ScriptedEvent-like proxy
+        self.event_kind: Dict[str, str] = {}          # event_key -> 'stub' | 'free'
+        self.baseline_counts: Dict[str, int] = {}     # event_key -> matching-entry count at registration time
 
         # Callbacks
         self.on_status_change = None  # Callback when event status changes
 
     def register_event(self, scripted_event) -> None:
         """
-        Register a scripted event so we can validate against it.
+        Register a scripted event so we know to watch it, and snapshot a baseline
+        completion count so repeating event types (patient_call, watch_record, ...)
+        are judged against *this* occurrence, not an earlier one of the same type.
 
         Args:
-            scripted_event: ScriptedEvent object with expected field values
+            scripted_event: object with .event_key, .kind ('stub'/'free'), .fields
         """
-        self.scripted_events[scripted_event.event_key] = scripted_event
+        event_key = scripted_event.event_key
+        kind = getattr(scripted_event, 'kind', 'stub')
+
+        self.scripted_events[event_key] = scripted_event
+        self.event_kind[event_key] = kind
+
+        events_data = self._read_events_data() or {}
+        self.baseline_counts[event_key] = self._count_matching(event_key, kind, events_data)
 
     def start_monitoring(self):
         """Start background monitoring thread."""
@@ -83,207 +130,114 @@ class RealtimeMonitor:
 
             time.sleep(1)  # Check every second
 
-    def _check_events(self):
-        """Check protocol_events.json for changes and validate."""
+    def _read_events_data(self) -> Optional[dict]:
+        """Read protocol_events.json, or None if it doesn't exist / fails to parse."""
         if not self.events_file.exists():
-            return
-
+            return None
         try:
-            with open(self.events_file, 'r') as f:
-                events_data = json.load(f)
+            with open(self.events_file, 'r', encoding='utf-8') as f:
+                return json.load(f)
         except Exception as e:
             print(f"Error reading events file: {e}")
+            return None
+
+    def _check_events(self):
+        """Check protocol_events.json for changes and report status transitions.
+
+        Iterates the event keys this monitor was told to watch (via register_event)
+        rather than trying to "discover" filed ids from the file — a card that's
+        still genuinely pending would never appear in complete[]/incomplete[]/free{}
+        anywhere, so discovery-based iteration silently skips it forever.
+        """
+        events_data = self._read_events_data()
+        if events_data is None:
             return
 
-        # Collect all protocol event IDs from the file (both complete and incomplete)
-        all_filed_ids = set()
-        for entry in events_data.get('complete', []):
-            if entry.get('protocol_event_id'):
-                all_filed_ids.add(entry['protocol_event_id'])
-
-        for entry in events_data.get('incomplete', []):
-            if entry.get('protocol_event_id'):
-                all_filed_ids.add(entry['protocol_event_id'])
-
-        # Print debug info (optional)
-        print(f"[Monitor {self.patient_id}] Filed events: {all_filed_ids}")
-
-        # Check each event that we've seen before or just appeared
-        all_event_keys = set(self.event_status.keys()) | all_filed_ids
-
-        for event_key in all_event_keys:
-            status = self._check_event_status(event_key, events_data, None)
+        for event_key in self.scripted_events.keys():
+            status = self._check_event_status(event_key, events_data)
             old_status = self.event_status.get(event_key)
 
             if status != old_status:
                 self.event_status[event_key] = status
                 print(f"[Monitor {self.patient_id}] {event_key}: {old_status} → {status}")
-                # Print validation errors if any
-                if status == 'incorrect' and self.event_errors.get(event_key):
-                    errors = self.event_errors[event_key]
-                    for error in errors:
-                        print(f"  ❌ {error}")
                 if self.on_status_change:
                     self.on_status_change(event_key, status)
 
-    def _check_event_status(self, event_key: str, events_data: dict, scripted_event) -> str:
-        """
-        Check if an event is filed.
+    def _count_matching(self, event_key: str, kind: str, events_data: dict) -> int:
+        """Count how many entries of this event type currently exist, wherever they live."""
+        if event_key == 'watch_record':
+            # Special case (documented in CLAUDE.md): watch_record completions land
+            # in top-level complete[], not free['watch_record'], despite kind='free'.
+            return sum(
+                1 for e in events_data.get('complete', [])
+                if e.get('protocol_event_id') == 'watch_record'
+            )
 
-        Simple check: just verify if event exists in complete or incomplete.
-        Status: pending (not filed) → incomplete (partially filed) → completed (fully filed)
+        if kind != 'free':
+            # Stub events are pre-seeded once and filed at most once, ever.
+            return sum(
+                1 for e in events_data.get('complete', [])
+                if e.get('protocol_event_id') == event_key
+            )
+
+        bucket = events_data.get('free', {}).get(event_key)
+        if bucket is None:
+            return 0
+        if isinstance(bucket, list):
+            return len(bucket)
+        # Singleton free bucket (discontinuation / device_return / pre_discontinuation):
+        # a dict once filed, None before — "filed" counts as 1.
+        return 1 if bucket else 0
+
+    def _check_event_status(self, event_key: str, events_data: dict) -> str:
         """
-        # Look in complete array - event is fully filed
-        for entry in events_data.get('complete', []):
-            if entry.get('protocol_event_id') == event_key:
+        Determine whether *this specific scripted occurrence* has been filed.
+
+        Stub events: existence of any complete[] entry is unambiguous (one lifetime
+        occurrence per patient).
+
+        Free events (including watch_record): only a count increase past the
+        baseline captured at registration counts — an older entry from a previous
+        occurrence of the same event type must not retroactively mark this one done.
+        """
+        kind = self.event_kind.get(event_key, 'stub')
+        current = self._count_matching(event_key, kind, events_data)
+
+        if kind == 'free' or event_key == 'watch_record':
+            baseline = self.baseline_counts.get(event_key, 0)
+            if current > baseline:
                 self.event_errors.pop(event_key, None)
                 return EventStatus.COMPLETED
+            return EventStatus.PENDING
 
-        # Look in incomplete array - event is partially filed
+        if current >= 1:
+            self.event_errors.pop(event_key, None)
+            return EventStatus.COMPLETED
+
         for entry in events_data.get('incomplete', []):
             if entry.get('protocol_event_id') == event_key:
-                # Check if partially filled (has some data beyond just id/date)
-                if self._is_partially_filled(entry, scripted_event):
+                if self._is_partially_filled(entry):
                     return EventStatus.FILED_INCOMPLETE
-                else:
-                    return EventStatus.PENDING
+                return EventStatus.PENDING
 
-        # Not filed yet
         return EventStatus.PENDING
 
-    def _is_partially_filled(self, entry: dict, scripted_event=None) -> bool:
-        """Check if event has some fields filled."""
-        # Count non-null, non-empty fields (excluding metadata fields)
-        metadata_fields = {'id', 'protocol_event_id', 'scheduled_date', 'flagged', 'notes', 'triggered_by', 'filed_by', 'filed_at', 'completion_date', 'missed', 'missed_at'}
+    def _is_partially_filled(self, entry: dict) -> bool:
+        """Check if a still-incomplete stub entry has some fields filled.
+
+        In practice htDash's modals only write to protocol_events.json on final
+        submit, so this rarely fires — kept for the (harmless) case an entry was
+        ever partially staged server-side.
+        """
+        metadata_fields = {
+            'id', 'protocol_event_id', 'scheduled_date', 'flagged', 'notes',
+            'triggered_by', 'filed_by', 'filed_at', 'completion_date', 'missed', 'missed_at',
+        }
         filled_fields = sum(
             1 for k, v in entry.items()
             if k not in metadata_fields and v is not None and v != "" and v != []
         )
         return filled_fields > 0
-
-    def _validate_event_data(self, entry: dict, scripted_event) -> List[str]:
-        """
-        Validate that filed event data matches expected values.
-
-        Returns list of error messages, empty if valid.
-        """
-        errors = []
-
-        # Basic validation - check required fields exist
-        required_fields = {
-            'id': 'Event ID',
-            'protocol_event_id': 'Event type',
-            'completion_date': 'Completion date',
-        }
-
-        for field, label in required_fields.items():
-            if not entry.get(field):
-                errors.append(f"Missing {label}")
-
-        # Check filed_by exists (audit trail)
-        if not entry.get('filed_by'):
-            errors.append("Missing filed_by (audit trail)")
-
-        # Validate specific fields based on event type
-        errors.extend(self._validate_event_fields(entry, scripted_event.event_key))
-
-        return errors
-
-    def _validate_event_fields(self, entry: dict, event_key: str) -> List[str]:
-        """Validate specific fields based on event type."""
-        errors = []
-
-        # Activation needs session times, notes, and if attachment then caption
-        if event_key == 'activation':
-            if not entry.get('session_start'):
-                errors.append("Missing session_start")
-            if not entry.get('session_end'):
-                errors.append("Missing session_end")
-            if entry.get('session_start') and entry.get('session_end'):
-                if entry['session_start'] >= entry['session_end']:
-                    errors.append("Session end must be after start")
-            # Notes must be written (non-empty)
-            if not entry.get('notes') or str(entry.get('notes')).strip() == '':
-                errors.append("Notes must be written")
-            # If attachment exists, attachment_caption must also be provided
-            if entry.get('attachment'):
-                if not entry.get('attachment_caption') or str(entry.get('attachment_caption')).strip() == '':
-                    errors.append("Attachment notes (caption) required when file is attached")
-
-        # Home visits need session times
-        if 'home_visit' in event_key:
-            if not entry.get('session_start'):
-                errors.append("Missing session_start")
-            if not entry.get('session_end'):
-                errors.append("Missing session_end")
-            if entry.get('session_start') and entry.get('session_end'):
-                if entry['session_start'] >= entry['session_end']:
-                    errors.append("Session end must be after start")
-
-        # Calls need duration
-        if 'call' in event_key:
-            if 'duration_minutes' not in entry or entry.get('duration_minutes') is None:
-                errors.append("Missing call duration")
-            if not entry.get('call_mode'):
-                errors.append("Missing call mode (audio/video/text)")
-
-        # Adverse events need description
-        if 'adverse_event' in event_key:
-            if not entry.get('description'):
-                errors.append("Missing AE description")
-            if not entry.get('action_taken'):
-                errors.append("Missing action taken")
-
-        return errors
-
-    def _compare_values(self, filed_entry: dict, scripted_event, partial: bool = False) -> List[str]:
-        """
-        Compare filed event values against scripted event expected values.
-
-        Returns list of errors if values don't match expected values.
-        """
-        errors = []
-        expected_fields = scripted_event.fields if hasattr(scripted_event, 'fields') else {}
-
-        # Fields to skip (metadata, not part of the curriculum)
-        skip_fields = {'id', 'protocol_event_id', 'scheduled_date', 'flagged', 'filed_by', 'filed_at', 'completion_date', 'missed', 'missed_at', 'triggered_by', 'triggered'}
-
-        for field_key, expected_value in expected_fields.items():
-            if field_key in skip_fields:
-                continue
-
-            actual_value = filed_entry.get(field_key)
-
-            # Skip if field not yet filled (partial mode)
-            if actual_value is None or actual_value == '' or actual_value == []:
-                if not partial:
-                    errors.append(f"Missing {field_key}: should be {expected_value}")
-                continue
-
-            # Normalize values for comparison
-            expected_str = str(expected_value).strip() if expected_value else ''
-            actual_str = str(actual_value).strip() if actual_value else ''
-
-            # For boolean/yes-no fields
-            if isinstance(expected_value, bool):
-                expected_bool = expected_value
-                actual_bool = actual_value if isinstance(actual_value, bool) else str(actual_value).lower() in ('yes', 'true', 'y', '1')
-                if expected_bool != actual_bool:
-                    exp_text = "Yes" if expected_bool else "No"
-                    act_text = "Yes" if actual_bool else "No"
-                    errors.append(f"{field_key}: expected '{exp_text}', got '{act_text}'")
-
-            # For datetime fields (partial match - check date part)
-            elif 'datetime' in field_key.lower() or 'date' in field_key.lower():
-                # Allow flexible datetime matching (just check date part or time part)
-                if expected_str[:10] not in actual_str and expected_str not in actual_str:
-                    errors.append(f"{field_key}: expected '{expected_str}', got '{actual_str}'")
-
-            # For exact string/number match
-            elif expected_str != actual_str:
-                errors.append(f"{field_key}: expected '{expected_str}', got '{actual_str}'")
-
-        return errors
 
     def get_status(self, event_key: str) -> Tuple[str, List[str]]:
         """Get current status and errors for an event."""
