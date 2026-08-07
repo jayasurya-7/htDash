@@ -264,13 +264,17 @@ function showAssignGroupModal(homerID, enrollDate) {
   const pad = n => String(n).padStart(2, '0');
 
   // Set min to enrollDate (A0 assessment cannot be before enrollment)
+  // Parse date-only strings as local dates, not UTC (avoids timezone shifts)
   if (enrollDate) {
-    const ed = new Date(enrollDate);
-    a0Input.min = `${ed.getFullYear()}-${pad(ed.getMonth()+1)}-${pad(ed.getDate())}T00:00`;
+    const match = enrollDate.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (match) {
+      const ed = new Date(+match[1], +match[2] - 1, +match[3], 0, 0, 0);
+      a0Input.min = `${ed.getFullYear()}-${pad(ed.getMonth()+1)}-${pad(ed.getDate())}T00:00`;
+    }
   }
 
-  // Set max to current local datetime (YYYY-MM-DDTHH:MM) to block future selection
-  a0Input.max = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`;
+  // Set max to end of today (23:59) to allow selecting any time today, but block future dates
+  a0Input.max = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}T23:59`;
   document.getElementById('assign-group-error').classList.add('hidden');
   ['experimental', 'control'].forEach(g => {
     const btn = document.getElementById(`group-${g}-btn`);

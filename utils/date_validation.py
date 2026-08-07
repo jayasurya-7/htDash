@@ -198,17 +198,19 @@ def resolve_default_bounds(patient: dict) -> Tuple[Optional[date], date]:
 
 def validate_event_date(patient: dict, value: str,
                         event_id: Optional[str] = None,
-                        events_data: Optional[dict] = None) -> Optional[str]:
+                        events_data: Optional[dict] = None,
+                        field_name: Optional[str] = None) -> Optional[str]:
     """Validate a clinical-event date against either the per-event rule (if
     one exists for `event_id`) or the default rule. Returns an error string
     when out of bounds, else None. Empty values return None — the route owns
-    its required-field check."""
+    its required-field check. For events with per-field rules (e.g. watch_record
+    sync_datetime / worn_datetime), pass `field_name` to apply field-specific bounds."""
     if not value:
         return None
     dt = _parse_dt(value)
     if dt is None:
         return 'Date is not in a recognised format.'
-    min_dt, max_dt = resolve_bounds(patient, event_id, events_data)
+    min_dt, max_dt = resolve_bounds(patient, event_id, events_data, field_name=field_name)
     if min_dt and dt < min_dt:
         return f'Date cannot be before {_fmt_display(min_dt)}.'
     if max_dt and dt > max_dt:

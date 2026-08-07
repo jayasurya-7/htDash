@@ -114,4 +114,4 @@ if __name__ == '__main__':
         for device in ['pluto', 'mars', 'actigraphs', 'modems', 'sims']:
             os.makedirs(os.path.join(Config.DATA_ROOT, hospital, 'devices', device), exist_ok=True)
     
-    app.run(host="0.0.0.0", port=8080, debug=Config.DEBUG)
+    app.run(host="0.0.0.0", port=5002, debug=Config.DEBUG)

@@ -210,15 +210,17 @@ def _bad_call_mode(value):
     return None
 
 
-def _bad_date(patient, value, event_id=None, events_data=None):
+def _bad_date(patient, value, event_id=None, events_data=None, field_name=None):
     """Date Rule Framework gate. Returns a (jsonify(error), 400) response tuple
     when `value` violates the applicable rule (per-event when `event_id` is in
     `config/date_rules.json` events, else the default rule), else None. Routes
     use the walrus pattern:  `if r := _bad_date(patient, event_date): return r`.
     For events with per-event overrides (e.g. exp_device_install, activation),
     pass `event_id` and `events_data` so the resolver can dereference
-    `event:<id>` tokens against currently-completed entries."""
-    err = validate_event_date(patient, value, event_id=event_id, events_data=events_data)
+    `event:<id>` tokens against currently-completed entries. For events with
+    per-field rules (e.g. watch_record sync_datetime / worn_datetime), also pass
+    `field_name` to apply field-specific bounds."""
+    err = validate_event_date(patient, value, event_id=event_id, events_data=events_data, field_name=field_name)
     return (jsonify({'error': err}), 400) if err else None
 
 
@@ -5562,12 +5564,12 @@ def api_complete_watch_record(homer_id):
         except ValueError:
             return jsonify({'error': f'{label} date format must be YYYY-MM-DDTHH:MM'}), 400
 
-    if r := _bad_date(patient, sync_datetime): return r
-    if r := _bad_date(patient, worn_datetime): return r
-
     events_data = read_protocol_events(folder, homer_id)
     if not events_data:
         return jsonify({'error': 'Protocol events not found'}), 404
+
+    if r := _bad_date(patient, sync_datetime, event_id='watch_record', events_data=events_data, field_name='sync_datetime'): return r
+    if r := _bad_date(patient, worn_datetime, event_id='watch_record', events_data=events_data, field_name='worn_datetime'): return r
 
     incomplete = events_data.get('incomplete', [])
     entry = next(
