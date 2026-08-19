@@ -281,6 +281,21 @@ class VerificationDialog:
                 missing = p.missing_events()
                 for evt in missing:
                     lines.append(f"  • {evt.event_key:30} (Day {evt.cohort_day:3})")
+                    if evt.hint:
+                        # Wrap hint text for readability
+                        hint_lines = []
+                        words = evt.hint.split()
+                        current_line = ""
+                        for word in words:
+                            if len(current_line) + len(word) + 1 > 70:
+                                hint_lines.append(current_line)
+                                current_line = word
+                            else:
+                                current_line = (current_line + " " + word).strip()
+                        if current_line:
+                            hint_lines.append(current_line)
+                        for hint_line in hint_lines:
+                            lines.append(f"    → {hint_line}")
 
         report = "\n".join(lines)
         text_widget.insert(tk.END, report)

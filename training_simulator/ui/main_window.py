@@ -18,6 +18,7 @@ from training_simulator.ui.widgets import (
 )
 from training_simulator.ui.setup_dialog import SetupDialog
 from training_simulator.ui.verification_dialog import VerificationDialog
+from training_simulator.ui.cohort_view import CohortViewTab
 
 TOTAL_DAYS = 187
 
@@ -193,18 +194,26 @@ class MainWindow(tk.Tk):
     # ── Notebook ──
 
     def _populate_notebook(self):
-        """Populate notebook with patient tabs (called after cohort is created)."""
+        """Populate notebook with cohort view + patient tabs (called after cohort is created)."""
         for tab in self.notebook.tabs():
             self.notebook.forget(tab)
 
         self.tabs = {}
+
+        # Add cohort view as first tab (index 0)
+        cohort_frame = tk.Frame(self.notebook, bg=BG_DARK)
+        self.notebook.add(cohort_frame, text='📋 Today\'s Tasks')
+        self.tabs['_cohort'] = cohort_frame
+        self._cohort_frame = cohort_frame  # Save reference for updates
+
+        # Add individual patient tabs
         for role in self.roles:
             frame = tk.Frame(self.notebook, bg=BG_DARK)
             self.notebook.add(frame, text=self.role_names[role])
             self.tabs[role] = frame
 
         if self.roles:
-            self.notebook.select(0)
+            self.notebook.select(0)  # Start on cohort view
             self.selected_role.set(self.roles[0])
             self._highlight_selected_patient()
 
@@ -221,20 +230,40 @@ class MainWindow(tk.Tk):
     # ── Cohort lifecycle ──
 
     def _initialize_cohort(self):
-        """Show setup dialog and create cohort on startup."""
+        """Show setup dialog and create or resume cohort on startup."""
         setup_dlg = SetupDialog(self)
-        config = setup_dlg.show()
+        result = setup_dlg.show()
 
-        if config is None:
+        if result is None:
             self.destroy()
             return
 
         try:
-            self.cohort_state = cohort.create_cohort(config)
-            self._setup_cohort_ui(config)
+            # Handle resume vs. create new
+            if result == "RESUME":
+                # Resume existing cohort
+                self.cohort_state = setup_dlg.resumed_state
+                # Reconstruct config from saved state
+                config = CohortConfig(
+                    num_experimental=self.cohort_state.num_experimental,
+                    num_control=self.cohort_state.num_control,
+                )
+                self._setup_cohort_ui(config)
+                messagebox.showinfo(
+                    'Cohort Resumed',
+                    f'Welcome back!\n\n'
+                    f'Resuming Day {self.cohort_state.cohort_day} of 187\n'
+                    f'Patients: {len(self.cohort_state.patient_list or [])}'
+                )
+            else:
+                # Create new cohort
+                config = result
+                self.cohort_state = cohort.create_cohort(config)
+                self._setup_cohort_ui(config)
+
             self._update_display()
         except Exception as e:
-            messagebox.showerror('Error', f'Failed to create cohort:\n{e}')
+            messagebox.showerror('Error', f'Failed to initialize cohort:\n{e}')
             self.destroy()
 
     def _setup_cohort_ui(self, config: CohortConfig):
@@ -261,7 +290,13 @@ class MainWindow(tk.Tk):
         self._populate_notebook()
         self.day_spin.configure(from_=1, to=TOTAL_DAYS)
         self.day_spin.delete(0, tk.END)
-        self.day_spin.insert(0, '1')
+        self.day_spin.insert(0, str(self.cohort_state.cohort_day))
+
+        # Save cohort metadata to state for resume functionality
+        self.cohort_state.num_experimental = config.num_experimental
+        self.cohort_state.num_control = config.num_control
+        self.cohort_state.patient_list = patient_defs
+        state_store.save(self.cohort_state)
 
         self.status_bar.set_status(
             f'Cohort active — Day {self.cohort_state.cohort_day} of {TOTAL_DAYS} · {len(self.roles)} patients',
@@ -275,16 +310,22 @@ class MainWindow(tk.Tk):
             f'Patients: {len(self.roles)}\n'
             f'  Experimental: {config.num_experimental}\n'
             f'  Control: {config.num_control}\n\n'
-            f'Device pool: TRNDEV-* (up to 8 patients per group)'
+            f'Device pool: TRNDEV-* (up to 8 patients per group)\n\n'
+            f'Progress is automatically saved. Close anytime and resume later!'
         )
 
     def _select_role(self, role: str):
         """Switch to a different role's tab."""
         self.selected_role.set(role)
         if role in self.roles:
-            self.notebook.select(self.roles.index(role))
+            # Skip cohort view (index 0), so add 1 to role index
+            self.notebook.select(self.roles.index(role) + 1)
         self._highlight_selected_patient()
         self._update_display()
+
+    def _on_cohort_patient_selected(self, role: str):
+        """Callback when user clicks a patient in the cohort view."""
+        self._select_role(role)
 
     def _on_new_cohort(self):
         """Create a new cohort (show setup dialog)."""
@@ -404,7 +445,7 @@ class MainWindow(tk.Tk):
         self._update_display()
 
     def _update_display(self):
-        """Update all role tabs with instructions for the current day."""
+        """Update all role tabs + cohort view with instructions for current day + lookahead (±2 days)."""
         if not self.cohort_state:
             for role, frame in self.tabs.items():
                 for child in frame.winfo_children():
@@ -420,13 +461,49 @@ class MainWindow(tk.Tk):
             not entries_for_day(role, current_day) for role in self.roles
         )
 
+        # ──── Update Cohort View (Today's Tasks) ────
+        cohort_frame = self.tabs.get('_cohort')
+        if cohort_frame:
+            for child in cohort_frame.winfo_children():
+                child.destroy()
+
+            # Gather all patients' instructions for today only (not lookahead)
+            patients_data = {}
+            for role in self.roles:
+                # Today's events only (current_day, no lookahead)
+                entries = entries_for_day(role, current_day)
+                rendered_instructions = []
+                for entry in entries:
+                    for event in entry.events:
+                        instr = instructions.render(event, self._get_patient_id(role), today=date.today())
+                        rendered_instructions.append(instr)
+
+                patients_data[role] = {
+                    'homer_id': self._get_patient_id(role),
+                    'group': self.role_groups.get(role),
+                    'instructions': rendered_instructions,
+                }
+
+            cohort_view = CohortViewTab(
+                cohort_frame, patients_data,
+                on_patient_selected=self._on_cohort_patient_selected
+            )
+            cohort_view.pack(fill=tk.BOTH, expand=True)
+
+        # ──── Update Individual Patient Tabs ────
         for role, frame in self.tabs.items():
+            if role == '_cohort':  # Skip cohort frame
+                continue
+
             for child in frame.winfo_children():
                 child.destroy()
 
-            entries = entries_for_day(role, current_day)
-            if not entries:
-                # Patient has no events for this day
+            # Gather instructions for today ± 2 days (lookahead range)
+            # This prevents showing all 187 days at once, which is overwhelming
+            rendered_instructions = self._get_instructions_for_range(role, current_day, lookahead_days=2)
+
+            if not rendered_instructions:
+                # Patient has no events in this range
                 if all_patients_done:
                     # All patients done — show advance day guidance
                     self._show_day_complete_message(frame, current_day)
@@ -435,22 +512,30 @@ class MainWindow(tk.Tk):
                     self._show_patient_complete_message(frame, role, current_day)
                 continue
 
-            rendered_instructions = []
+            patient_id = self._get_patient_id(role)
+            role_tab = RoleTab(
+                frame, role, rendered_instructions,
+                patient_id=patient_id, display_name=self.role_names.get(role, role),
+            )
+            role_tab.pack(fill=tk.BOTH, expand=True)
+
+    def _get_instructions_for_range(self, role: str, center_day: int, lookahead_days: int = 2):
+        """Gather instructions for a day range (center_day - lookahead to center_day + lookahead)."""
+        rendered_instructions = []
+        day_min = max(1, center_day - lookahead_days)
+        day_max = min(TOTAL_DAYS, center_day + lookahead_days)
+
+        for day in range(day_min, day_max + 1):
+            entries = entries_for_day(role, day)
             for entry in entries:
                 for event in entry.events:
                     instr = instructions.render(event, self._get_patient_id(role), today=date.today())
+                    # Add day context to narrative if rendering from non-current day
+                    if day != center_day:
+                        instr.narrative = f'[Day {day}] {instr.narrative}'
                     rendered_instructions.append(instr)
 
-            if not rendered_instructions:
-                trainer_note = entries[0].trainer_note if entries else 'No events scheduled.'
-                self._empty_state(frame, trainer_note)
-            else:
-                patient_id = self._get_patient_id(role)
-                role_tab = RoleTab(
-                    frame, role, rendered_instructions,
-                    patient_id=patient_id, display_name=self.role_names.get(role, role),
-                )
-                role_tab.pack(fill=tk.BOTH, expand=True)
+        return rendered_instructions
 
     def _show_patient_complete_message(self, frame: tk.Frame, role: str, current_day: int):
         """Show message when a single patient has completed their events."""

@@ -8,6 +8,7 @@ from tkinter import ttk, messagebox
 from typing import Optional
 
 from training_simulator.cohort_config import CohortConfig, PRESETS
+from training_simulator import state as state_store
 
 # Professional light-theme palette (kept in sync with widgets.py / verification_dialog.py)
 BG_DARK = '#f8fafc'      # Light background — dialog background
@@ -36,6 +37,7 @@ class SetupDialog:
         self.parent = parent
         self.config: Optional[CohortConfig] = None
         self.result = None  # Will hold the selected config or None if cancelled
+        self.resumed_state = None  # Will hold the resumed state if resuming
         self._preset_cards = []
 
         # Create modal window
@@ -65,20 +67,62 @@ class SetupDialog:
 
     def _build_ui(self):
         """Build the dialog UI."""
+        # Check if there's an existing cohort to resume
+        existing_state = state_store.load()
+
         # ── Header strip ──
         header = tk.Frame(self.dialog, bg=BG_DARKER)
         header.pack(fill=tk.X)
-        tk.Label(
-            header, text='🧪 Configure Cohort Size',
-            font=(FONT_FAMILY, 15, 'bold'), fg=FG_LIGHT, bg=BG_DARKER,
-        ).pack(anchor=tk.W, padx=20, pady=(16, 2))
-        tk.Label(
-            header, text='Choose how many simulated patients to create for this training run.',
-            font=(FONT_FAMILY, 9), fg=FG_MUTED, bg=BG_DARKER,
-        ).pack(anchor=tk.W, padx=20, pady=(0, 16))
+
+        # If cohort exists, show resume option
+        if existing_state:
+            tk.Label(
+                header, text='🧪 Resume or Create Cohort',
+                font=(FONT_FAMILY, 15, 'bold'), fg=FG_LIGHT, bg=BG_DARKER,
+            ).pack(anchor=tk.W, padx=20, pady=(16, 2))
+            tk.Label(
+                header, text='A training cohort is in progress. You can resume it or start fresh.',
+                font=(FONT_FAMILY, 9), fg=FG_MUTED, bg=BG_DARKER,
+            ).pack(anchor=tk.W, padx=20, pady=(0, 16))
+        else:
+            tk.Label(
+                header, text='🧪 Configure Cohort Size',
+                font=(FONT_FAMILY, 15, 'bold'), fg=FG_LIGHT, bg=BG_DARKER,
+            ).pack(anchor=tk.W, padx=20, pady=(16, 2))
+            tk.Label(
+                header, text='Choose how many simulated patients to create for this training run.',
+                font=(FONT_FAMILY, 9), fg=FG_MUTED, bg=BG_DARKER,
+            ).pack(anchor=tk.W, padx=20, pady=(0, 16))
 
         body = tk.Frame(self.dialog, bg=BG_DARK)
         body.pack(fill=tk.BOTH, expand=True, padx=20, pady=16)
+
+        # ── Resume button (if cohort exists) ──
+        if existing_state:
+            resume_card = tk.Frame(body, bg='#d1fae5', highlightthickness=1, highlightbackground='#10b981')
+            resume_card.pack(fill=tk.X, pady=(0, 16))
+            resume_inner = tk.Frame(resume_card, bg='#d1fae5')
+            resume_inner.pack(fill=tk.X, padx=14, pady=12)
+
+            info_text = f"Day {existing_state.cohort_day}/187 · {existing_state.num_experimental} exp + {existing_state.num_control} ctrl patients"
+            tk.Label(
+                resume_inner, text='✓ Saved Progress Found',
+                font=(FONT_FAMILY, 11, 'bold'), fg='#065f46', bg='#d1fae5', anchor=tk.W,
+            ).pack(anchor=tk.W)
+            tk.Label(
+                resume_inner, text=info_text,
+                font=(FONT_FAMILY, 9), fg='#047857', bg='#d1fae5', anchor=tk.W,
+            ).pack(anchor=tk.W, pady=(4, 0))
+
+            button_frame_resume = tk.Frame(body, bg=BG_DARK)
+            button_frame_resume.pack(fill=tk.X, pady=(0, 14))
+            self._make_button(
+                button_frame_resume, '▶ Resume Training', lambda: self._on_resume(existing_state),
+                bg='#10b981', hover_bg='#059669', fg='#ffffff', side=tk.LEFT,
+            )
+
+            # Divider
+            tk.Frame(body, bg=BORDER, height=1).pack(fill=tk.X, pady=(0, 14))
 
         # ── Quick presets ──
         tk.Label(
@@ -230,7 +274,14 @@ class SetupDialog:
         self.result = None
         self.dialog.destroy()
 
-    def show(self) -> Optional[CohortConfig]:
+    def _on_resume(self, state):
+        """User clicked Resume Cohort."""
+        # Set result to a special marker indicating resume
+        self.result = "RESUME"
+        self.resumed_state = state
+        self.dialog.destroy()
+
+    def show(self):
         """
         Show the dialog and wait for user input.
 

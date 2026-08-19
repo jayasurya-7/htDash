@@ -17,7 +17,29 @@
     ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
     .nav-item.active { background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); color: white; box-shadow: 0 4px 14px rgba(59, 130, 246, 0.4); }
     .sidebar { transition: transform 0.3s ease-in-out; }
+    .refresh-indicator { position: fixed; bottom-4; right-4; font-size: 12px; color: #64748b; z-index: 30; }
   </style>
+
+  <!-- Auto-refresh dashboard every 30 seconds when in training mode -->
+  <script>
+    (function() {
+      // Check if we should enable auto-refresh
+      const enableAutoRefresh = sessionStorage.getItem('enableAutoRefresh') === 'true';
+      if (enableAutoRefresh) {
+        const refreshInterval = 30000; // 30 seconds
+        setInterval(() => {
+          fetch(window.location.href)
+            .then(response => response.text())
+            .then(() => {
+              // Silently refresh the page
+              window.location.reload();
+            })
+            .catch(error => console.log('Auto-refresh check:', error));
+        }, refreshInterval);
+      }
+    })();
+  </script>
+
   {% block head_extra %}{% endblock %}
 </head>
 <body class="bg-slate-50">

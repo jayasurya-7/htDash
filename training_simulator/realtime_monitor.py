@@ -166,12 +166,18 @@ class RealtimeMonitor:
     def _count_matching(self, event_key: str, kind: str, events_data: dict) -> int:
         """Count how many entries of this event type currently exist, wherever they live."""
         if event_key == 'watch_record':
-            # Special case (documented in CLAUDE.md): watch_record completions land
-            # in top-level complete[], not free['watch_record'], despite kind='free'.
-            return sum(
+            # Special case (documented in CLAUDE.md): watch_record completions can land
+            # in top-level complete[] OR in free['watch_record'][] (both are valid).
+            # Count from both locations to handle all filing patterns.
+            count = sum(
                 1 for e in events_data.get('complete', [])
                 if e.get('protocol_event_id') == 'watch_record'
             )
+            # Also count from free.watch_record[] if present
+            free_bucket = events_data.get('free', {}).get('watch_record')
+            if isinstance(free_bucket, list):
+                count += len(free_bucket)
+            return count
 
         if kind != 'free':
             # Stub events are pre-seeded once and filed at most once, ever.

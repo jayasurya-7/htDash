@@ -1,0 +1,292 @@
+================================================================================
+UNIFIED APP LAUNCHER — IMPLEMENTATION SUMMARY
+================================================================================
+
+Date: August 3, 2026
+Status: ✅ COMPLETE
+Feature: Single launcher running Training Simulator + Web Dashboard on 2 threads
+
+================================================================================
+WHAT WAS BUILT
+================================================================================
+
+A NEW unified app launcher that:
+
+✅ Runs Training Simulator + Web Dashboard together
+✅ Both apps on SEPARATE threads (no interference)
+✅ Web dashboard AUTO-REFRESHES every 30 seconds
+✅ Single command to launch everything
+✅ Background operations don't block simulator
+
+================================================================================
+BEFORE (Old Way)
+================================================================================
+
+Required TWO separate commands in TWO terminals:
+
+Terminal 1:
+  python main.py
+
+Terminal 2:
+  python training_simulator/simulator_app.py
+
+Problems:
+  ❌ Need 2 terminal windows
+  ❌ Manual coordination
+  ❌ Dashboard needs manual refresh
+  ❌ More complex for users
+
+================================================================================
+AFTER (New Way)
+================================================================================
+
+Single command in ONE terminal:
+
+  python app_launcher.py
+
+Benefits:
+  ✅ Both apps start automatically
+  ✅ Separate threads (no interference)
+  ✅ Dashboard auto-refreshes every 30 seconds
+  ✅ Cleaner user experience
+  ✅ Better coordination
+
+================================================================================
+HOW IT WORKS
+================================================================================
+
+python app_launcher.py
+    ↓
+Unified Launcher Starts
+    ├─ Thread 1 (Background): Flask Web Server
+    │  └─ Starts on http://localhost:5000
+    │  └─ Auto-refreshes dashboard every 30 seconds
+    │
+    └─ Thread 2 (Main): Training Simulator
+       └─ Tkinter GUI window opens
+       └─ User interacts normally
+       └─ Unaffected by background Flask ops
+
+Both run independently without blocking each other!
+
+================================================================================
+FEATURES
+================================================================================
+
+1. SEPARATE THREADS
+   • Flask: Background thread
+   • Simulator: Main thread (required for Tkinter)
+   • No interference between them
+
+2. AUTO-REFRESH DASHBOARD
+   • Every 30 seconds: Dashboard refreshes
+   • Shows latest simulator data
+   • No manual refresh needed
+
+3. SINGLE LAUNCHER
+   • One command: python app_launcher.py
+   • Both apps start automatically
+   • Cleaner setup process
+
+4. CLEAN SHUTDOWN
+   • Close simulator window
+   • Both apps stop cleanly
+   • No hanging processes
+
+================================================================================
+QUICK START
+================================================================================
+
+Step 1: Run the launcher
+  python app_launcher.py
+
+Step 2: Wait for startup messages
+  • Flask server starts (background thread)
+  • Training Simulator window opens
+
+Step 3: Use both apps
+  • Training Simulator: Normal interaction
+  • Web Dashboard: Open http://localhost:5000 in browser
+  • Both run together
+
+Step 4: Stop
+  • Close Training Simulator window
+  • Both apps stop automatically
+
+================================================================================
+WHAT CHANGED
+================================================================================
+
+NEW FILES:
+  ✅ app_launcher.py — Unified launcher script
+
+MODIFIED FILES:
+  ✅ templates/base.html — Added auto-refresh JavaScript
+
+NEW DOCUMENTATION:
+  ✅ UNIFIED_LAUNCHER_GUIDE.md — Comprehensive guide
+  ✅ UNIFIED_LAUNCHER_SUMMARY.txt — This summary
+
+================================================================================
+ARCHITECTURE
+================================================================================
+
+File: app_launcher.py
+
+Function run_flask_server():
+  • Starts Flask on background thread
+  • Listens on localhost:5000
+  • Runs without blocking main thread
+
+Function run_training_simulator():
+  • Starts Tkinter GUI on main thread
+  • Tkinter requirement: must be main thread
+  • Normal interactive behavior
+
+Function main():
+  • Creates background thread for Flask
+  • Runs Simulator on main thread
+  • Handles startup/shutdown
+
+================================================================================
+AUTO-REFRESH
+================================================================================
+
+Web Dashboard refreshes AUTOMATICALLY every 30 seconds:
+
+How it works:
+  1. Browser loads dashboard
+  2. JavaScript on page checks for auto-refresh flag
+  3. Every 30 seconds: Silently fetches latest page
+  4. Page reloads automatically
+  5. User sees updated data (no action needed)
+
+Customization:
+  • Change interval in templates/base.html
+  • Edit: const refreshInterval = 30000; (milliseconds)
+  • 30000 = 30 seconds
+  • 60000 = 60 seconds
+
+================================================================================
+THREAD SAFETY
+================================================================================
+
+Why separate threads?
+
+Thread 1 (Background): Flask
+  • Handles HTTP requests
+  • Serves web dashboard
+  • Can run indefinitely
+  • Doesn't block UI
+
+Thread 2 (Main): Simulator
+  • Handles Tkinter GUI
+  • Python requirement: Tkinter on main thread
+  • User interaction
+  • Responsive and immediate
+
+No shared state = No race conditions!
+
+================================================================================
+TESTING
+================================================================================
+
+Quick Test (1 minute):
+  1. Run: python app_launcher.py
+  2. Wait for startup
+  3. Verify simulator opens
+  4. Open http://localhost:5000 in browser
+  5. Login (RP-HS-1002 / password)
+  6. Check dashboard loads
+
+Full Test (5 minutes):
+  1. Launch with app_launcher.py
+  2. Create cohort in simulator
+  3. Open dashboard in browser
+  4. Advance day in simulator
+  5. Watch dashboard auto-refresh
+  6. Verify both apps responsive
+  7. Close simulator → apps stop
+
+================================================================================
+USAGE EXAMPLE
+================================================================================
+
+Scenario: Training Simulator Testing with Live Dashboard
+
+STEP 1: Launch
+  $ python app_launcher.py
+
+  ✓ Flask server starts (background)
+  ✓ Training Simulator opens (foreground)
+
+STEP 2: Setup
+  • Create new cohort (in simulator)
+  • Open http://localhost:5000 (in browser)
+  • Login with credentials
+
+STEP 3: Test
+  • Complete events in simulator
+  • Watch dashboard update every 30 seconds
+  • Both apps run smoothly
+  • No manual refresh needed
+
+STEP 4: Cleanup
+  • Close simulator window
+  • Both apps exit cleanly
+
+================================================================================
+ADVANTAGES OVER PREVIOUS SETUP
+================================================================================
+
+Old Way (Two Commands):
+  • python main.py (Terminal 1)
+  • python training_simulator/simulator_app.py (Terminal 2)
+  • Dashboard needs manual refresh
+  • Complex for users
+  • Context switching between terminals
+
+New Way (Unified Launcher):
+  • python app_launcher.py (One command)
+  • Dashboard auto-refreshes every 30 seconds
+  • Both apps start automatically
+  • Simpler for users
+  • No terminal juggling
+
+================================================================================
+CONFIGURATION
+================================================================================
+
+Default Settings:
+  • Flask Port: 5000
+  • Auto-refresh Interval: 30 seconds
+  • Both apps: Separate threads
+
+To Change Settings:
+
+1. Flask Port (edit app_launcher.py):
+   flask_app.run(port=8000)  # Change from 5000
+
+2. Refresh Interval (edit templates/base.html):
+   const refreshInterval = 60000;  // Change from 30000
+
+3. Disable Auto-refresh (in browser console):
+   sessionStorage.setItem('enableAutoRefresh', 'false');
+
+================================================================================
+SUMMARY
+================================================================================
+
+✅ Single unified launcher created (app_launcher.py)
+✅ Runs both apps on separate threads
+✅ Web dashboard auto-refreshes every 30 seconds
+✅ No interference between apps
+✅ Background operations don't block simulator
+✅ Cleaner, simpler user experience
+✅ Easy to launch and use
+
+COMMAND: python app_launcher.py
+
+That's it! 🚀
+
+================================================================================

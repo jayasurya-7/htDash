@@ -5,7 +5,7 @@ Tracks which simulated day we're on and when the cohort was created.
 """
 
 import json
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -20,8 +20,11 @@ STATE_FILE = STATE_DIR / 'cohort_state.json'
 @dataclass
 class CohortState:
     """Persistent cohort state — one instance per active training session."""
-    cohort_day: int          # 1-based day number (never decreases)
-    created_at: str          # ISO timestamp when cohort was created
+    cohort_day: int
+    created_at: str
+    num_experimental: int = 5
+    num_control: int = 5
+    patient_list: list = field(default_factory=list)
 
 
 def load() -> Optional[CohortState]:
@@ -54,11 +57,20 @@ def delete() -> None:
         STATE_FILE.unlink()
 
 
-def create_fresh() -> CohortState:
-    """Create and save a fresh cohort state (Day 1)."""
+def create_fresh(num_experimental: int = 5, num_control: int = 5, patient_list: list = None) -> CohortState:
+    """Create and save a fresh cohort state (Day 1).
+
+    Args:
+        num_experimental: Number of experimental patients
+        num_control: Number of control patients
+        patient_list: List of patient dicts {homer_id, group, side, role}
+    """
     state = CohortState(
         cohort_day=1,
         created_at=datetime.now().isoformat(),
+        num_experimental=num_experimental,
+        num_control=num_control,
+        patient_list=patient_list or [],
     )
     save(state)
     return state

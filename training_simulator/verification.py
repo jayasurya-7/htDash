@@ -16,6 +16,36 @@ from training_simulator.curriculum import entries_for_day
 from utils.data_access import get_patients_path, read_patient_meta
 
 
+# Verification hints — explanations for common missing events
+VERIFICATION_HINTS: Dict[str, str] = {
+    'informed_consent': 'Consent must be filed first. Check: consent date + PDF form uploaded.',
+    'exp_device_install': 'Device setup is required for experimental patients. Check: all device IDs assigned.',
+    'activation': 'Training starts here. Check: session times + VCG group assignment.',
+    'home_visit_d02': 'Critical checkpoint—Day 2 visit must be filed. If missed due to pause, training enters broken protocol.',
+    'home_visit_d03': 'Critical checkpoint—Day 3 visit must be filed. If missed due to pause, training enters broken protocol.',
+    'followup_call_d07': 'Day 7 check-in. Check: call date + mode (audio/video/text) + notes.',
+    'followup_call_d21': 'Day 21 final check-in before D29. Check: call date + duration + any AE discussed.',
+    'training_completion_d29': 'Marks training end. After this: device return + assessments unlock. Check: completion date is exactly Day 29.',
+    'adverse_event': 'Report injury/concern. Check: description + action taken + "Training Blocked" flag if applicable.',
+    'adverse_event_followup': 'Follow-up call about AE. Check: call date + mode + who initiated (patient vs. therapist).',
+    'adverse_event_followup_visit': 'Clinical visit for AE resolution. Check: "Can Resume From" date to clear pause.',
+    'adverse_event_clinical_visit': 'Optional clinical assessment during AE. Check: visit start/end times.',
+    'robot_issue_call': 'Report Pluto/Mars malfunction (engineer-only). Check: device name + "Visit Required" toggle.',
+    'robot_issue_visit': 'Engineer physical visit. Check: device outcome (Repaired/Swapped/Neither).',
+    'resolve_robot_issue_visit': 'New device delivery (engineer-only). Check: replacement device assigned.',
+    'other_device_issue_call': 'Report modem/laptop/SIM problem (engineer-only, experimental only).',
+    'other_device_issue_visit': 'Engineer fixes modem/laptop/SIM. Check: device outcome.',
+    'watch_record': 'Update watch assignment. Check: which limb (right/left) has which watch. Chains repeat every ~5 days.',
+    'watch_data_upload': 'Engineer uploads raw watch data. Can be skipped with reason if device unavailable.',
+    'discontinuation': 'Stops training. After this: record is read-only. Check: reason + date.',
+    'device_return': 'Collect all devices at training end. Check: per-device status (Returned/Lost/Faulty).',
+    'a1_assessment': 'First assessment (Day 30–37 ideal window). Check: assessment date + reason if outside window + notes.',
+    'a2_assessment': 'Final assessment (Day 180–187 ideal window). Check: assessment date.',
+    'schedule_a1_call': 'A1 is locked until appointment scheduled. File this first, then A1 becomes unlocked.',
+    'schedule_a2_call': 'A2 is locked until appointment scheduled. File this first, then A2 becomes unlocked.',
+}
+
+
 @dataclass
 class EventStatus:
     """Status of a single event."""
@@ -26,6 +56,7 @@ class EventStatus:
     actual: bool    # Exists in protocol_events.json
     completed: bool # Is marked as complete
     notes: str = ""
+    hint: str = ""  # Helpful message for why event might be missing/incomplete
 
     @property
     def status(self) -> str:
@@ -273,6 +304,7 @@ def verify_cohort(cohort_day: int, patient_defs: List[dict]) -> CohortVerificati
                                 expected=True,
                                 actual=is_filed,
                                 completed=is_completed,
+                                hint=VERIFICATION_HINTS.get(event_key, ''),
                             )
                             patient_result.events.append(status)
                             processed_stubs.add(event_key)
@@ -292,6 +324,7 @@ def verify_cohort(cohort_day: int, patient_defs: List[dict]) -> CohortVerificati
                             expected=True,
                             actual=is_filed,
                             completed=is_filed,
+                            hint=VERIFICATION_HINTS.get(event_key, ''),
                         )
                         patient_result.events.append(status)
 

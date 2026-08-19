@@ -294,59 +294,101 @@ Tkinter GUI that:
 
 ---
 
-## Training Simulator ✅ (July 2026)
+## Training Simulator ✅ (August 2026 — Updated)
 
-**New standalone tool** for training therapists and engineers on htDash without real patient data.
+**Desktop training tool** for practicing htDash without touching real patient data. Trainees work through 187-day patient scenarios to learn workflow, dependencies, and state transitions.
 
-**Location**: `training_simulator/` folder (sibling to `routes/`, `utils/`, `scripts/`)
-
-**Features**:
-- Creates 10 simulated patients (5 experimental, 5 control) in `data/ranipet/`
-- Advances through 187-day protocol timeline by shifting `activationDate` backward
-- Injects realistic scenarios (adverse events, robot issues, device problems, patient calls) with "answer key" field values
-- Verifies that trainee correctly filed events in htDash against expected results
-- Produces per-patient and cohort-wide pass/fail reports
+**Why this works:** htDash's power comes from its time-advancing logic (events unlock on specific days, dependencies chain, pauses block workflow). Videos and manuals can't teach this. The simulator compresses a 6-month journey into a few hours so trainees see the full lifecycle in one session.
 
 **Running the Simulator**:
 ```bash
-python training_simulator/simulator_app.py
+python -m training_simulator
+```
+This launches a Tkinter desktop app. Choose cohort size (1-10 patients per group), then work through daily instructions in the real htDash dashboard. The trainer app watches you file events and verifies completion.
+
+**Package Structure**:
+```
+training_simulator/
+├── __main__.py                    # Entry point
+├── ui/
+│   ├── main_window.py            # Main Tkinter window (patient sidebar, instruction tabs, buttons)
+│   ├── setup_dialog.py           # Cohort configuration wizard
+│   ├── verification_dialog.py    # Pass/fail report after Verify button
+│   ├── widgets.py                # Reusable UI components (CohortStatusBar, RoleTab)
+│   └── COLOR_PALETTE.md          # Design system reference
+├── curriculum/
+│   ├── exp1_track.py ... exp5_track.py   # 5 experimental patient scripts (187 days each)
+│   ├── ctrl1_track.py ... ctrl5_track.py # 5 control patient scripts
+│   └── schema.py                 # ScriptedEvent dataclass
+├── cohort.py                     # Create/tear down TRN-prefixed fake patients
+├── cohort_config.py              # Cohort setup logic
+├── device_pool.py                # Pool of TRNDEV-* fake devices (isolated from real inventory)
+├── day_engine.py                 # Advance time by shifting activationDate backward
+├── instructions.py               # Render ScriptedEvent → human-readable instructions
+├── realtime_monitor.py           # Watch protocol_events.json and tick off completed cards
+├── verification.py               # Diff curriculum vs. actual filings; generate report
+└── state/
+    └── cohort_state.json         # Current cohort day (ephemeral; reset on teardown)
 ```
 
-**Architecture**:
-- No changes to htDash code — only imports existing utilities (`utils/data_access.py`, `utils/protocol_events.py`, `config/study_protocol.json`)
-- Pure filesystem I/O (reads/writes the same `data/` tree htDash uses)
-- Tkinter GUI (stdlib, zero new dependencies)
-- Persistent state ledger (`training_simulator/state/simulation_state.json`)
+**Core Interaction**:
+1. **Trainer** opens app → sets up cohort (e.g., 3 experimental, 2 control) → fake TRN001–TRN005 patients created in `data/ranipet/`
+2. **App shows "Day 1 — Today's Tasks"** across all patients (collapsed by default)
+3. **Trainer opens real htDash in browser** → logs in → sees the TRN patients on Dashboard
+4. **Trainer sees instruction cards** like: "File informed consent. Date: [today]. Use PDF: [filename]."
+5. **Trainee clicks into TRN001** on htDash Dashboard → files informed_consent → fills fields → Submits
+6. **Simulator detects new entry** in protocol_events.json → **marks card "✓ Complete"**
+7. **Trainer clicks Advance Day** → all patients' times shift forward 1 day → new events become due
+8. **Loop for 187 days** (usually done in 2–4 hours, with breaks)
+9. **Click Verify** → Report shows: "✓ 47 events correct, ✗ 2 events missing (training_completion_d29, device_return). Do these today?"
+10. **Patient record becomes read-only** after discontinuation/all_completed status reached
 
-**Core Modules**:
-| Module | Purpose |
-|--------|---------|
-| `state_store.py` | Persistent ledger of cohort & expected events |
-| `patient_seed.py` | Creates 10 fresh simulator patients |
-| `protocol_engine.py` | Date advancement (shifts `activationDate`, recomputes windows) |
-| `scenarios.py` | Randomized scenario injection (AE, robot issues, calls) |
-| `verification.py` | Diffs expected events vs. actual `protocol_events.json` filings |
-| `simulator_app.py` | Tkinter GUI: cohort setup, run/verify/report buttons |
-| `test_simulator.py` | Smoke tests (all passing) |
+**Key Files**:
+| File | What it does |
+|------|---|
+| `cohort.py` | Creates/tears down fake TRN-prefixed patients + TRNDEV-* device pool (never touches real inventory) |
+| `day_engine.py` | Shifts activationDate backward by 1 day for each patient when trainer clicks Advance. Real `derive_status()` sees time pass. |
+| `curriculum/exp1-5_track.py`, `ctrl1-5_track.py` | Hand-authored 187-day scripts. Each `DayEntry` lists `ScriptedEvent`s (fields, values, narrative) for that day. |
+| `instructions.py` | Converts `ScriptedEvent` → `RenderedInstruction` (plain English checklist trainee can follow in real htDash). |
+| `realtime_monitor.py` | Watches `protocol_events.json` live and ticks instruction cards as filed (existence-based, accounts for repeating free events). |
+| `verification.py` | Compares curriculum `ScriptedEvent`s vs. actual filed events. Generates human-readable report of pass/fail + hints. |
+| `ui/main_window.py` | Tkinter app: sidebar (patient list + day nav), content area (instruction tabs), status bar (New/Advance/Verify/Teardown buttons). |
 
-**Key Algorithm**:
-Each "Run" press advances the simulation by 1 day:
-1. For each activated, not-training-ended patient, shift `activationDate` backward by 1 calendar day
-2. Re-read `protocol_events.json` and recompute `scheduled_date` for all `incomplete` entries using the new `activationDate` + window offsets from `study_protocol.json`
-3. Preserve time-of-day and leave `complete`/`cancelled` entries untouched (immutable)
-4. Call `populate_activation_dates()` to fill any still-null stubs
+**Coverage by Patient** (see `training_simulator/COVERAGE_MATRIX.md` for full details):
+- **TRN001 (Exp)** & **TRN002 (Ctrl)**: Golden path — no issues, baseline 187-day flow
+- **TRN003 (Exp)**: Adverse event arc (injury → pause → clinical resolution → resume)
+- **TRN004 (Exp)**: Robot issue (call → visit → device replacement)
+- **TRN005 (Exp)**: Other device issue (modem/laptop swap, no pause)
+- **TRN006**: D02/D03 broken protocol via pause follow-up path 3
+- **TRN007**: Discontinuation mid-training
+- **TRN008**: Watch lost + data upload skip-with-reason
+- **TRN009**: Assessment out-of-window + A2-before-A1 auto-miss + cancellation/reschedule
+- **TRN010**: Secondary adverse event (patient-initiated call variant)
 
-This mirrors `scripts/shift_activation.py`'s backward-shift mechanism and ensures real `derive_status()` works with the actual system clock.
-
-**Testing**: All modules pass smoke tests (state store, protocol engine, scenarios, verification).
+**Implementation Status**:
+- ✅ Fully functional with working Tkinter UI
+- ✅ Cohort create/teardown with TRN-prefixed isolation
+- ✅ Day-advance time simulation + real `derive_status()` integration
+- ✅ 10 hand-authored curricula covering all major branches
+- ✅ Instruction rendering + realtime event matching
+- ✅ Verification report with pass/fail counts
+- ⚠️ **Never tested with real trainer/trainee yet** — logic is solid but UX/pacing unknown until first real session
+- ⚠️ Verification report currently bare ("pass/fail" without hints) — next phase adds "why" explanations
 
 **Next Steps**:
-- Complete GUI Verify & Report buttons (logic implemented, UI integration needed)
-- Add scenario injection to instructions panel
-- Test with real trainer/trainee workflow
-- Optional: multi-hospital support, instructor dashboard, auto-filing via htDash API
+1. Run pilot session with real trainer + trainee (uncover UX friction)
+2. Enhance verification messages with branch-specific hints ("Training pause detected but clearance event still pending")
+3. Add unified "Today's Tasks" view across all patients (currently one patient per tab)
+4. Limit instruction lookahead to today ± 2 days (currently shows all 187 days, overwhelming)
+5. Optional: multi-hospital support, auto-filing via htDash API for common paths
 
-See `training_simulator/README.md` and `training_simulator/IMPLEMENTATION_SUMMARY.md` for full details.
+**Troubleshooting**:
+- **Cohort won't create**: Check `data/ranipet/` folder exists and is writable
+- **Events not ticking off**: Confirm you logged in as the TRN patient (not real user); check browser console for JS errors
+- **Verification shows missing events**: Use the report's hints to identify which fields were missed; re-file with correct values
+- **Time advanced but old dates still show**: Click Verify to force refresh; dashboard may cache old patient state
+
+**See also**: `training_simulator/COVERAGE_MATRIX.md` for patient scenario details, `training_simulator/MESSAGING_FLOW_DIAGRAM.txt` for UI messaging examples.
 
 ---
 

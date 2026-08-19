@@ -1,4 +1,36 @@
 {
-  "cohort_day": 2,
-  "created_at": "2026-08-03T11:34:35.171356"
+  "cohort_day": 1,
+  "created_at": "2026-08-18T11:00:37.229294",
+  "num_experimental": 2,
+  "num_control": 2,
+  "patient_list": [
+    {
+      "role": "exp1",
+      "homer_id": "TRN001",
+      "hospital_id": "RP-TRN001",
+      "group": "experimental",
+      "side": "Right"
+    },
+    {
+      "role": "exp2",
+      "homer_id": "TRN002",
+      "hospital_id": "RP-TRN002",
+      "group": "experimental",
+      "side": "Left"
+    },
+    {
+      "role": "ctrl1",
+      "homer_id": "TRN003",
+      "hospital_id": "RP-TRN003",
+      "group": "control",
+      "side": "Right"
+    },
+    {
+      "role": "ctrl2",
+      "homer_id": "TRN004",
+      "hospital_id": "RP-TRN004",
+      "group": "control",
+      "side": "Left"
+    }
+  ]
 }

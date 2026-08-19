@@ -29,9 +29,11 @@ class RenderedInstruction:
     narrative: str             # what happened (plain English)
     fields: list[RenderedField]  # field checklist
     lookup_hint: Optional[str] = None   # narrative hint for auto-created stubs
+    learn_note: Optional[str] = None    # branch-point explanation (why this event matters; shown in amber)
     kind: str = 'stub'          # 'stub' (single, pre-seeded) or 'free' (repeatable, trainee-created) —
                                  # carried through from ScriptedEvent so the real-time monitor can tell
                                  # a one-time protocol stub apart from a chain/repeating free event.
+    status: str = 'pending'     # 'pending' or 'completed' — for filtering UI display
 
 
 # Field label constants — extracted from templates/patient_detail.html
@@ -259,6 +261,38 @@ A_ASSESSMENT_LABELS = {
 }
 
 
+# Branch-point learning notes — displayed when events have special logic
+# Only populated for events where trainees commonly get confused
+LEARN_NOTES: dict[str, str] = {
+    'informed_consent': 'ℹ️ Why: Consent must be filed first — it unlocks device setup.',
+    'exp_device_install': 'ℹ️ Why: Experimental devices (Pluto, Mars, etc.) assigned here. Unlocks activation.',
+    'activation': 'ℹ️ Why: Activation starts the 187-day training clock. All future event dates computed from this date.',
+    'agwatch_timing_d01': 'ℹ️ Why: This is locked until a watch record is filed on Day 1. File the watch record first.',
+    'home_visit_d02': 'ℹ️ Why: Home visit on Day 2 is critical—if missed due to pause, training enters broken protocol.',
+    'home_visit_d03': 'ℹ️ Why: Home visit on Day 3 is critical—if missed due to pause, training enters broken protocol.',
+    'followup_call_d07': 'ℹ️ Why: Day 7 follow-up call is a protocol checkpoint. May trigger adverse event follow-up if issues occurred.',
+    'followup_call_d21': 'ℹ️ Why: Day 21 follow-up call wraps up training phase. Day 29 completion becomes due after this.',
+    'training_completion_d29': 'ℹ️ Why: This marks training complete. Files this date, unlocking device return, assessments, and watch data uploads.',
+    'adverse_event': 'ℹ️ Why: If "Training Blocked" is checked, training enters pause. Follow-up chains auto-create.',
+    'adverse_event_followup': 'ℹ️ Why: AE follow-up call. Use "Patient Initiated" if the patient called; "Therapist Initiated" if you scheduled it.',
+    'adverse_event_followup_visit': 'ℹ️ Why: AE clinical visit. If "Can Resume From" is filled, training pause clears and previous events resume.',
+    'adverse_event_clinical_visit': 'ℹ️ Why: AE clinical visit (optional clinical assessment). Similar resume mechanics as follow-up visit.',
+    'robot_issue_call': 'ℹ️ Why: Engineer-only event. If "Visit Required" is checked, a visit stub auto-creates. Does NOT pause training.',
+    'robot_issue_visit': 'ℹ️ Why: Engineer physical visit to fix robot. Device swaps here close old assignment, open new one.',
+    'resolve_robot_issue_visit': 'ℹ️ Why: New device delivery + old device handoff. This is the final step in the issue chain.',
+    'other_device_issue_call': 'ℹ️ Why: Engineer call about modem/laptop/SIM. Non-pausing variant of robot issue (experimental only).',
+    'other_device_issue_visit': 'ℹ️ Why: Engineer visit for modem/laptop/SIM repair. No "resolve" step needed; issue resolved by visit outcome.',
+    'watch_record': 'ℹ️ Why: Watch record is filed repeatedly throughout training. Chains auto-create. Part of the AE/RI follow-up chains.',
+    'watch_data_upload': 'ℹ️ Why: Engineer uploads raw ActiGraph data from removed watch. Can be skipped with reason if device unavailable.',
+    'discontinuation': 'ℹ️ Why: After discontinuation, patient record becomes read-only. AE chains can still be completed.',
+    'device_return': 'ℹ️ Why: Engineer collects all devices at end of training. Record which devices are returned, lost, or faulty.',
+    'a1_assessment': 'ℹ️ Why: A1 assessment due after Day 29. If date is outside ideal window, reason is required. Unlocks A2 (appointment must be scheduled first).',
+    'a2_assessment': 'ℹ️ Why: A2 assessment due 6+ months after activation. Filing this marks training completely done.',
+    'schedule_a1_call': 'ℹ️ Why: Schedule A1 appointment with patient. A1 assessment is locked until appointment is scheduled.',
+    'schedule_a2_call': 'ℹ️ Why: Reschedule A2 appointment if needed. A2 assessment is locked until appointment is scheduled.',
+}
+
+
 def _format_value(value: Any, field_key: str = '') -> str:
     """
     Format a Python value into human-readable text for display.
@@ -404,6 +438,7 @@ def _fmt_simple_completion(event: ScriptedEvent, homer_id: str, today: date, lab
         narrative=event.narrative,
         fields=rendered_fields,
         lookup_hint=event.lookup_hint,
+        learn_note=LEARN_NOTES.get(event.event_key),  # Look up branch-point explanation if available
         kind=event.kind,
     )
 

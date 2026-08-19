@@ -31,7 +31,7 @@ STATUS_STYLE = {
     'incomplete': ('◐', 'In Progress',  '#f59e0b', '#fef3c7'),   # amber
     'correct':    ('◐', 'In Progress',  '#0284c7', '#e0f2fe'),   # sky-blue
     'incorrect':  ('✗', 'Needs Fixes',  '#dc2626', '#fee2e2'),   # red
-    'completed':  ('✓', 'Complete',     '#16a34a', '#dcfce7'),   # green
+    'completed':  ('✓', 'Completed',    '#16a34a', '#dcfce7'),   # green
 }
 
 
@@ -151,6 +151,16 @@ class InstructionCard(tk.Frame):
                 fill=tk.X, side=tk.TOP
             )
 
+        # Learn note (branch-point explanation, prominent amber color)
+        if instruction.learn_note:
+            tk.Frame(self.body, bg=BORDER, height=1).pack(fill=tk.X, pady=(8, 8))
+            note = tk.Label(
+                self.body, text=instruction.learn_note, font=(FONT_UI, 9),
+                fg='#b45309', bg='#fef3c7', wraplength=520, justify=tk.LEFT,
+                padx=10, pady=6,
+            )
+            note.pack(fill=tk.X, anchor=tk.W)
+
         # Lookup hint (if present)
         if instruction.lookup_hint:
             tk.Frame(self.body, bg=BORDER, height=1).pack(fill=tk.X, pady=(8, 8))
@@ -222,7 +232,10 @@ class InstructionCard(tk.Frame):
 
 
 class RoleTab(tk.Frame):
-    """A tab showing all instructions for a single role on the current day."""
+    """A tab showing all instructions for a single role on the current day.
+
+    Filter: shows pending events by default; toggle to show completed (greyed out).
+    """
 
     def __init__(self, parent, role: str, instructions: list[RenderedInstruction],
                  patient_id: str = None, display_name: str = None, **kwargs):
@@ -231,6 +244,12 @@ class RoleTab(tk.Frame):
         self.patient_id = patient_id
         self.monitor = None
         self.cards = {}  # Map event_key -> InstructionCard
+        self.all_instructions = instructions
+        self.show_completed = False  # Start with pending only
+        self.completed_events = set()  # Track which events have been completed by monitor
+        self.scrollable_frame = None
+        self.canvas = None
+        self.empty_frame = None
 
         # Title bar
         title_frame = tk.Frame(self, bg=BG_DARK)
@@ -247,12 +266,22 @@ class RoleTab(tk.Frame):
         )
         title_label.pack(side=tk.LEFT)
 
-        count_badge = tk.Label(
+        self.count_badge = tk.Label(
             title_frame, text=f'{len(instructions)} event(s) today',
             font=(FONT_UI, 9, 'bold'), fg=FG_LIGHT if instructions else FG_MUTED,
             bg=ACCENT if instructions else BG_CARD, padx=10, pady=3,
         )
-        count_badge.pack(side=tk.LEFT, padx=(12, 0))
+        self.count_badge.pack(side=tk.LEFT, padx=(12, 0))
+
+        # Toggle button for completed events
+        self.toggle_var = tk.BooleanVar(value=False)
+        toggle_btn = tk.Checkbutton(
+            title_frame, text='Show Completed', variable=self.toggle_var,
+            command=self._toggle_completed,
+            font=(FONT_UI, 8), fg=FG_MUTED, bg=BG_DARK, activebackground=BG_DARK,
+            activeforeground=ACCENT, selectcolor=BG_DARK, highlightthickness=0,
+        )
+        toggle_btn.pack(side=tk.LEFT, padx=(16, 0))
 
         if patient_id:
             tk.Label(
@@ -261,48 +290,118 @@ class RoleTab(tk.Frame):
             ).pack(side=tk.RIGHT)
 
         # Cards container with thin scrollbar
-        canvas = tk.Canvas(self, bg=BG_DARK, highlightthickness=0)
-        scrollbar = ttk.Scrollbar(self, orient=tk.VERTICAL, command=canvas.yview)
-        scrollable_frame = tk.Frame(canvas, bg=BG_DARK)
+        self.canvas = tk.Canvas(self, bg=BG_DARK, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(self, orient=tk.VERTICAL, command=self.canvas.yview)
+        self.scrollable_frame = tk.Frame(self.canvas, bg=BG_DARK)
 
-        scrollable_frame.bind(
+        self.scrollable_frame.bind(
             '<Configure>',
-            lambda e: canvas.configure(scrollregion=canvas.bbox('all'))
+            lambda e: self.canvas.configure(scrollregion=self.canvas.bbox('all'))
         )
 
-        canvas.create_window((0, 0), window=scrollable_frame, anchor=tk.NW)
-        canvas.configure(yscrollcommand=scrollbar.set)
+        self.canvas.create_window((0, 0), window=self.scrollable_frame, anchor=tk.NW)
+        self.canvas.configure(yscrollcommand=scrollbar.set)
 
         def _on_mousewheel(event):
             delta = -1 * (event.delta // 120)
-            canvas.yview_scroll(delta, 'units')
+            self.canvas.yview_scroll(delta, 'units')
 
-        canvas.bind('<MouseWheel>', _on_mousewheel)
-        scrollable_frame.bind('<MouseWheel>', _on_mousewheel)
+        self.canvas.bind('<MouseWheel>', _on_mousewheel)
+        self.scrollable_frame.bind('<MouseWheel>', _on_mousewheel)
 
-        # Add instruction cards
-        if not instructions:
-            empty = tk.Frame(scrollable_frame, bg=BG_DARK)
-            empty.pack(fill=tk.X, pady=60)
-            tk.Label(
-                empty, text='\U0001f634', font=(FONT_UI, 28), fg=FG_MUTED, bg=BG_DARK,
-            ).pack()
-            tk.Label(
-                empty, text='No events scheduled for this day.', font=(FONT_UI, 11),
-                fg=FG_MUTED, bg=BG_DARK,
-            ).pack(pady=(6, 0))
-        else:
-            for instr in instructions:
-                card = InstructionCard(scrollable_frame, instr)
-                card.pack(fill=tk.X, pady=6, padx=6)
-                self.cards[instr.event_key] = card
+        # Initial population
+        self._populate_instructions()
 
-        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y, padx=(0, 6))
 
         # Start monitoring if patient_id provided
         if patient_id:
             self.start_monitoring()
+
+    def _toggle_completed(self):
+        """Toggle between showing pending only vs. all events."""
+        self.show_completed = self.toggle_var.get()
+        self._populate_instructions()
+
+    def _populate_instructions(self):
+        """Clear and repopulate instruction cards based on filter."""
+        # Clear existing cards
+        for w in self.scrollable_frame.winfo_children():
+            w.destroy()
+        self.cards.clear()
+
+        # Update instruction status based on completed_events tracked by monitor
+        for instr in self.all_instructions:
+            if instr.event_key in self.completed_events:
+                instr.status = 'completed'
+            else:
+                instr.status = 'pending'
+
+        # Filter instructions: show pending by default, include completed if toggled
+        if self.show_completed:
+            to_show = self.all_instructions
+        else:
+            to_show = [i for i in self.all_instructions if i.status == 'pending']
+
+        # Count pending and completed
+        pending_instructions = [i for i in self.all_instructions if i.status == 'pending']
+        completed_instructions = [i for i in self.all_instructions if i.status == 'completed']
+
+        # Update badge count
+        if self.show_completed and len(completed_instructions) > 0:
+            self.count_badge.config(
+                text=f'{len(pending_instructions)} pending · {len(completed_instructions)} completed',
+                fg=FG_BODY,
+            )
+        else:
+            badge_text = f'{len(pending_instructions)} event(s)' if len(pending_instructions) != 1 else '1 event'
+            self.count_badge.config(
+                text=badge_text,
+                fg=FG_LIGHT if len(pending_instructions) > 0 else FG_MUTED,
+                bg=ACCENT if len(pending_instructions) > 0 else BG_CARD,
+            )
+
+        # Add instruction cards
+        if not to_show:
+            empty = tk.Frame(self.scrollable_frame, bg=BG_DARK)
+            empty.pack(fill=tk.X, pady=60)
+            tk.Label(
+                empty, text='\U0001f634', font=(FONT_UI, 28), fg=FG_MUTED, bg=BG_DARK,
+            ).pack()
+            if self.show_completed and len(completed_instructions) == 0:
+                msg = 'No completed events yet.'
+            else:
+                msg = 'No pending events. Great progress!' if len(completed_instructions) > 0 else 'No events scheduled for this day.'
+            tk.Label(
+                empty, text=msg, font=(FONT_UI, 11),
+                fg=FG_MUTED, bg=BG_DARK,
+            ).pack(pady=(6, 0))
+            self.empty_frame = empty
+        else:
+            self.empty_frame = None
+            for instr in to_show:
+                card = InstructionCard(self.scrollable_frame, instr)
+                card.pack(fill=tk.X, pady=6, padx=6)
+
+                # Grey out completed events
+                if instr.status == 'completed':
+                    self._dim_card(card)
+
+                self.cards[instr.event_key] = card
+
+    def _dim_card(self, card: InstructionCard):
+        """Visually dim a completed card (lower opacity effect via color)."""
+        # Reduce opacity by using a lighter tint for completed cards
+        card.inner.config(bg='#f5f7fa')  # Lighter background
+        card.accent_bar.config(bg='#cbd5e1')  # Muted accent
+        # Update text colors in header to be muted
+        for widget in card.inner.winfo_children():
+            if isinstance(widget, tk.Frame):
+                for child in widget.winfo_children():
+                    if isinstance(child, tk.Label):
+                        if child == card.status_icon or child == card.status_badge:
+                            child.config(fg='#9ca3af')  # Grey text
 
     def start_monitoring(self):
         """Start real-time event monitoring."""
@@ -345,6 +444,14 @@ class RoleTab(tk.Frame):
     def _on_event_status_change(self, event_key: str, status: str):
         """Callback when event status changes."""
         print(f"[Callback {self.patient_id}] Event {event_key}: {status}")
+
+        # Track completed events for filter toggle
+        if status == 'completed':
+            self.completed_events.add(event_key)
+        else:
+            self.completed_events.discard(event_key)
+
+        # Update card if it exists
         if event_key in self.cards:
             print(f"[Callback] Found card for {event_key}")
             card = self.cards[event_key]
