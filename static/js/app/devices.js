@@ -222,8 +222,8 @@ function _showButtonVisibility() {
     if (_canManage) document.getElementById(id)?.classList.remove('hidden');
   });
 
-  // Clinic toggle — admin or engineer (pluto/mars only)
-  ['clinic-pluto-btn','clinic-mars-btn'].forEach(id => {
+  // Clinic toggle — admin or engineer (pluto/mars/laptops)
+  ['clinic-pluto-btn','clinic-mars-btn','clinic-laptops-btn'].forEach(id => {
     if (_canManage) document.getElementById(id)?.classList.remove('hidden');
   });
 
@@ -666,9 +666,11 @@ function _renderModems(devices) {
           const retired  = !!d.removal_date;
           const statusBadge = hasIssue
             ? '<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-red-100 text-red-700"><i class="fas fa-exclamation-circle"></i>Issue</span>'
-            : d.assigned_to
-              ? '<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-700"><i class="fas fa-user-check"></i>Assigned</span>'
-              : '<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-700"><i class="fas fa-check-circle"></i>Available</span>';
+            : d.clinic_only
+              ? '<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-slate-100 text-slate-500"><i class="fas fa-hospital"></i>Clinic Only</span>'
+              : d.assigned_to
+                ? '<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-700"><i class="fas fa-user-check"></i>Assigned</span>'
+                : '<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-700"><i class="fas fa-check-circle"></i>Available</span>';
           return `
             <tr class="${retired ? 'opacity-40' : 'hover:bg-slate-50 transition-colors'}">
               <td class="px-6 py-3.5 font-mono font-medium text-slate-800">${_esc(d.id)}</td>
@@ -819,9 +821,11 @@ function _renderLaptops(devices) {
           const retired  = !!d.removal_date;
           const statusBadge = hasIssue
             ? '<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-red-100 text-red-700"><i class="fas fa-exclamation-circle"></i>Issue</span>'
-            : d.assigned_to
-              ? '<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-700"><i class="fas fa-user-check"></i>Assigned</span>'
-              : '<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-700"><i class="fas fa-check-circle"></i>Available</span>';
+            : d.clinic_only
+              ? '<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-slate-100 text-slate-500"><i class="fas fa-hospital"></i>Clinic Only</span>'
+              : d.assigned_to
+                ? '<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-700"><i class="fas fa-user-check"></i>Assigned</span>'
+                : '<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-700"><i class="fas fa-check-circle"></i>Available</span>';
           return `
             <tr class="${retired ? 'opacity-40' : 'hover:bg-slate-50 transition-colors'}">
               <td class="px-6 py-3.5 font-mono font-medium text-slate-800">${_esc(d.id)}</td>
@@ -893,7 +897,7 @@ let _clinicType = null;
 
 function openClinicModal(type) {
   _clinicType = type;
-  const labels = { pluto: 'Pluto', mars: 'Mars' };
+  const labels = { pluto: 'Pluto', mars: 'Mars', laptops: 'Laptops' };
   document.getElementById('clinic-modal-title').textContent = `Toggle Clinic — ${labels[type] || type}`;
   _setError('clinic-modal-error', '');
   document.getElementById('clinic-current-status').textContent = '';

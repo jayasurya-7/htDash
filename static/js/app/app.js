@@ -31,21 +31,41 @@
     });
 
     async function checkAuth() {
-      if (USE_LOCAL_STORAGE) {
-        const stored = localStorage.getItem('user');
-        if (stored) {
-          currentUser = JSON.parse(stored);
-          updateUserInfo();
+      try {
+        // Always verify with server first — never trust stale localStorage
+        const response = await fetch('/api/me');
+        if (!response.ok) {
+          // Session is invalid — clear all local data and redirect to login
+          if (USE_LOCAL_STORAGE) localStorage.removeItem('user');
+          sessionStorage.clear();
+          window.location.href = '/login';
           return;
         }
-      }
-      try {
-        const response = await fetch('/api/me');
-        if (!response.ok) { window.location.href = '/login'; return; }
         currentUser = await response.json();
-        if (USE_LOCAL_STORAGE) localStorage.setItem('user', JSON.stringify(currentUser));
+
+        // Verify localStorage matches server session (if using localStorage)
+        if (USE_LOCAL_STORAGE) {
+          const stored = localStorage.getItem('user');
+          if (stored) {
+            try {
+              const storedUser = JSON.parse(stored);
+              // If loginId doesn't match, clear stale data
+              if (storedUser.loginId !== currentUser.loginId) {
+                console.warn('Session mismatch: clearing stale user data');
+                localStorage.removeItem('user');
+                sessionStorage.clear();
+              }
+            } catch (e) {
+              localStorage.removeItem('user');
+            }
+          }
+          localStorage.setItem('user', JSON.stringify(currentUser));
+        }
         updateUserInfo();
       } catch(e) {
+        console.error('Auth check failed:', e);
+        if (USE_LOCAL_STORAGE) localStorage.removeItem('user');
+        sessionStorage.clear();
         window.location.href = '/login';
       }
     }
@@ -143,9 +163,14 @@
     }
 
     function logout() {
+      // Clear all browser storage
       if (USE_LOCAL_STORAGE) localStorage.removeItem('user');
+      sessionStorage.clear();  // Clear session storage too
+
+      // Log out from server (clear Flask session)
       fetch('/logout', { method: 'POST' }).finally(() => {
-        window.location.href = '/login';
+        // Redirect to login with cache-busting parameter to force fresh page load
+        window.location.href = '/login?t=' + Date.now();
       });
     }
 

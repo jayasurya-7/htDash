@@ -9577,7 +9577,7 @@ def api_adl_prescription(homer_id):
         if not ex.get('exercise_id'):
             return jsonify({'error': 'Each exercise must have an exercise_id.'}), 400
         if not ex.get('blocks') or not ex.get('repetitions'):
-            return jsonify({'error': 'Each exercise must have blocks and repetitions.'}), 400
+            return jsonify({'error': 'Each exercise must have sets and repetitions.'}), 400
 
     loginid    = flask_session.get('loginid', 'unknown')
     session_id = flask_session.get('session_id', -1)
@@ -9629,7 +9629,7 @@ def api_vcg_prescription(homer_id):
         if not ex.get('exercise_id'):
             return jsonify({'error': 'Each exercise must have an exercise_id.'}), 400
         if not ex.get('blocks') or not ex.get('repetitions'):
-            return jsonify({'error': 'Each exercise must have blocks and repetitions.'}), 400
+            return jsonify({'error': 'Each exercise must have sets and repetitions.'}), 400
 
     patient = read_patient_meta(folder, homer_id)
     vcg_group = (patient or {}).get('vcgGroup', '')

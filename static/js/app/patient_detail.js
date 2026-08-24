@@ -1288,8 +1288,11 @@ async function rescheduleAssessmentAppointment(which) {
   if (!reason) { setError(errId, 'Reason for rescheduling is required.'); return; }
 
   const currentApptEl = document.getElementById(`${which}-current-appt-display`);
+  // Format new date consistently with current appointment date (e.g., "25 August 2026")
+  const newDateFormatted = new Date(newDate + 'T00:00:00').toLocaleDateString('en-GB',
+    { day: 'numeric', month: 'long', year: 'numeric' });
   const confirmed = window.confirm(
-    `Reschedule ${which.toUpperCase()} assessment from ${currentApptEl.textContent} to ${newDate}?`
+    `Reschedule ${which.toUpperCase()} assessment from ${currentApptEl.textContent} to ${newDateFormatted}?`
   );
   if (!confirmed) return;
 
@@ -5675,7 +5678,7 @@ function renderPrescSelected(prefix) {
           <span class="flex-1 text-sm font-medium text-slate-800">
             <span class="text-slate-400 mr-1">${i + 1}.</span>${s.exercise.name}
           </span>
-          <span class="text-xs text-slate-500 whitespace-nowrap">${s.blocks} blocks × ${s.reps} reps</span>
+          <span class="text-xs text-slate-500 whitespace-nowrap">${s.blocks} sets × ${s.reps} reps</span>
           <button type="button" onclick="editExercise('${prefix}',${i})"
                   class="text-slate-400 hover:text-blue-600 text-xs font-medium px-2 py-1 rounded border border-slate-200 hover:border-blue-300">
             Edit
@@ -5820,7 +5823,7 @@ async function submitAdlPrescription() {
   if (!_adlSelected.length) { setError('adl-prescription-error', 'Please select at least one exercise.'); return; }
   if (_adlSelected.some(s => s.state === 'editing')) { setError('adl-prescription-error', 'Please save all exercise cards before submitting.'); return; }
   for (const s of _adlSelected) {
-    if (!s.blocks || !s.reps) { setError('adl-prescription-error', 'Please enter blocks and repetitions for all exercises.'); return; }
+    if (!s.blocks || !s.reps) { setError('adl-prescription-error', 'Please enter sets and repetitions for all exercises.'); return; }
   }
 
   const ev = eventsCache.find(e => e.id === _adlPrescEventId);
@@ -5908,7 +5911,7 @@ async function submitVcgPrescription() {
   if (!_vcgSelected.length) { setError('vcg-prescription-error', 'Please select at least one exercise.'); return; }
   if (_vcgSelected.some(s => s.state === 'editing')) { setError('vcg-prescription-error', 'Please save all exercise cards before submitting.'); return; }
   for (const s of _vcgSelected) {
-    if (!s.blocks || !s.reps) { setError('vcg-prescription-error', 'Please enter blocks and repetitions for all exercises.'); return; }
+    if (!s.blocks || !s.reps) { setError('vcg-prescription-error', 'Please enter sets and repetitions for all exercises.'); return; }
   }
 
   const ev = eventsCache.find(e => e.id === _vcgPrescEventId);
@@ -8731,6 +8734,17 @@ function _startClock() {
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
+  // Verify session hasn't changed — if current user doesn't match what was loaded,
+  // reload page to ensure fresh data and prevent showing stale patient data
+  if (currentUser && typeof currentUser === 'object' && currentUser.loginId) {
+    const pageLoginId = document.body.dataset.loginId || '';
+    if (pageLoginId && pageLoginId !== currentUser.loginId) {
+      console.warn('Session user changed — reloading page for fresh data');
+      window.location.reload();
+      return;
+    }
+  }
+
   // Store submit button labels for loading state
   [
     'a1-submit', 'a2-submit', 'discontinue-submit',

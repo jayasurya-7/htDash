@@ -821,6 +821,7 @@ def api_device_inventory():
             'serial':       d.get('serial', ''),
             'sim_id':       sim_id,
             'sim_info':     sim_info,
+            'clinic_only':  d.get('clinic_only', False),
             'has_issue':    d.get('has_issue', False),
             'removal_date': d.get('removal_date'),
             'assigned_to':  _assignment_info(d['id'], modem_asgn),
@@ -834,6 +835,7 @@ def api_device_inventory():
         result['laptops'].append({
             'id':           d['id'],
             'serial':       d.get('serial', ''),
+            'clinic_only':  d.get('clinic_only', False),
             'has_issue':    d.get('has_issue', False),
             'removal_date': d.get('removal_date'),
             'assigned_to':  _assignment_info(d['id'], laptop_asgn),
@@ -974,7 +976,7 @@ def api_add_device():
 
 @bp.route('/api/toggle-clinic', methods=['POST'])
 def api_toggle_clinic():
-    """Toggle clinic_only flag on a pluto/mars device. Admin only.
+    """Toggle clinic_only flag on a device (pluto/mars/laptops). Admin only.
     Server computes new value (flips current). Enforces one-per-type rule:
     setting a device to clinic_only=True clears any other device of the same type.
     Device must be Available (not assigned, not faulty) to be set as clinic.
@@ -992,8 +994,8 @@ def api_toggle_clinic():
     dtype     = (data.get('device_type') or '').strip().lower()
     device_id = (data.get('device_id') or '').strip()
 
-    if dtype not in ('pluto', 'mars') or not device_id:
-        return jsonify({'error': 'device_type must be pluto or mars, device_id is required'}), 400
+    if dtype not in ('pluto', 'mars', 'laptops') or not device_id:
+        return jsonify({'error': 'device_type must be pluto, mars, or laptops; device_id is required'}), 400
 
     devices = read_device_inventory(folder, dtype)
     target  = next((d for d in devices if d['id'] == device_id), None)
@@ -1005,8 +1007,8 @@ def api_toggle_clinic():
     session_id = flask_session.get('session_id', 0) or 0
 
     if new_clinic:
-        # Validate device is in Available state: not faulty, not assigned
-        if target.get('faulty'):
+        # Validate device is in Available state: not faulty, not has_issue, not assigned
+        if target.get('faulty') or target.get('has_issue'):
             return jsonify({'error': 'Cannot set clinic: device has an issue'}), 409
         assignments = read_device_assignments(folder, dtype)
         if any(a.get('device_id') == device_id and a.get('returned_date') is None for a in assignments):
