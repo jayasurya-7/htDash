@@ -733,38 +733,17 @@ def api_device_inventory():
                 return info
         return None
 
-    # ── 28-day auto-reset for all assigned device types ──────────────────────
-    # Count from the patient's activationDate, not the assignment date.
-    # Pluto/mars: skip if faulty. Agwatch: skip if has_issue (lost watches have
-    # no active assignment anyway). Modems/laptops: unchanged behaviour.
-    # Cache the assignments per dtype after auto-reset, to avoid double-read race
-    # between the auto-reset pass and the inventory response construction.
-    now_str = datetime.now().strftime('%Y-%m-%dT%H:%M')
+    # Cache the assignments per dtype for inventory response construction.
+    # NOTE: Device auto-return logic removed — devices should only be marked
+    # as returned through the explicit device_return modal (api_complete_device_return).
+    # The previous auto-reset at 28 days was causing devices to disappear automatically
+    # whenever the /devices/api/inventory endpoint was called (e.g., when user
+    # navigated to Devices page), which prevented the device_return modal from
+    # functioning correctly.
     cached_assignments = {}
     for dtype in ('modems', 'laptops', 'pluto', 'mars', 'agwatch'):
         asgns = read_device_assignments(folder, dtype)
         cached_assignments[dtype] = asgns  # cache the read
-        inv   = {d['id']: d for d in read_device_inventory(folder, dtype)}
-        changed = False
-        for a in asgns:
-            if a.get('returned_date') is None:
-                try:
-                    dev = inv.get(a.get('device_id', ''), {})
-                    # Don't auto-return devices with active issues
-                    if dev.get('faulty') or dev.get('has_issue'):
-                        continue
-                    homer_id = a.get('homer_id') or a.get('patient_id', '')
-                    activation = (patient_map.get(homer_id) or {}).get('activationDate')
-                    if not activation:
-                        continue   # patient not yet activated — don't reset
-                    dt = datetime.fromisoformat(activation)
-                    if (datetime.now() - dt).days >= 28:
-                        a['returned_date'] = now_str
-                        changed = True
-                except Exception:
-                    pass
-        if changed:
-            write_device_assignments(folder, dtype, asgns)
 
     result = {}
 

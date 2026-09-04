@@ -1835,6 +1835,8 @@ def api_complete_device_return(homer_id):
     notes           = (data.get('notes') or '').strip() or None
     device_entries  = data.get('devices') or []
 
+    if not device_entries:
+        return jsonify({'error': 'At least one device must be specified for return.'}), 400
     if not completion_date:
         return jsonify({'error': 'Event date is required.'}), 400
     if r := _bad_date(patient, completion_date): return r
@@ -1898,8 +1900,8 @@ def api_complete_device_return(homer_id):
                 if dtype == 'modems' and dev_id in inv_map:
                     inv_map[dev_id]['sim_id'] = None
                     changed_inv = True
-            a['returned_date'] = now_hhmm
-            changed_asgn = True
+                a['returned_date'] = now_hhmm
+                changed_asgn = True
         if changed_asgn:
             write_device_assignments(folder, dtype, assignments)
         if changed_inv:
@@ -5532,8 +5534,8 @@ def api_complete_watch_record(homer_id):
 
     if not event_id:
         return jsonify({'error': 'event_id is required'}), 400
-    if not isinstance(next_followup_days, int) or next_followup_days < 1:
-        return jsonify({'error': 'next_followup_days must be a positive integer'}), 400
+    if not isinstance(next_followup_days, int) or next_followup_days < 0:
+        return jsonify({'error': 'next_followup_days must be a non-negative integer'}), 400
 
     # Determine which patient field to update based on affected side
     if affected_side == 'Right':
@@ -5547,9 +5549,10 @@ def api_complete_watch_record(homer_id):
 
     # Validation
     is_current = not old_lost and ag_watch_new == old_watch_id
-    if not is_current and not sync_datetime:
-        return jsonify({'error': 'Sync date & time is required when watch is changed'}), 400
-    if not is_current and not worn_datetime:
+    is_no_watch = ag_watch_new is None
+    if not is_current and not is_no_watch and not sync_datetime:
+        return jsonify({'error': 'Initialized date & time is required when watch is changed'}), 400
+    if not is_current and not is_no_watch and not worn_datetime:
         return jsonify({'error': 'Worn date & time is required when watch is changed'}), 400
 
     if old_watch_id and ag_watch_new is None and not notes:
@@ -6335,11 +6338,17 @@ def api_complete_agwatch_timing(homer_id):
 
 @bp.route('/api/patients/<homer_id>/upload-attachment', methods=['POST'])
 def api_upload_attachment(homer_id):
-    """Upload a PDF attachment for a completed protocol event."""
+    """Upload a PDF attachment for a completed protocol event.
+
+    Access per center:
+    - Admin (MP/RP/LD-HS-ADMIN): all events in their center only
+    - Therapist (MP/RP/LD-HS-1xxx): all events in their center only
+    - Engineer (MP/RP/LD-HS-ENG): device-related events in their center only
+    """
     if not flask_session.get('login_place'):
         return jsonify({'error': 'Not authenticated'}), 401
     privilege = flask_session.get('privilege', '')
-    if privilege not in ('admin', 'therapist'):
+    if privilege not in ('admin', 'therapist', 'engineer'):
         return jsonify({'error': 'Forbidden'}), 403
 
     folder = find_patient_folder(flask_session['login_place'], homer_id)
@@ -6430,12 +6439,19 @@ def api_upload_attachment(homer_id):
 
 @bp.route('/api/patients/<homer_id>/download-attachment/<event_id>', methods=['GET'])
 def api_download_attachment(homer_id, event_id):
-    """Download the PDF attachment for a completed protocol event."""
+    """Download the PDF attachment for a completed protocol event.
+
+    Access per center:
+    - Admin (MP/RP/LD-HS-ADMIN): all attachments in their center only
+    - Therapist (MP/RP/LD-HS-1xxx): all attachments in their center only
+    - Engineer (MP/RP/LD-HS-ENG): all attachments in their center only
+    - Supervisor (LAB-HS-DATA): all attachments from all 3 centers
+    """
     from flask import send_file
     if not flask_session.get('login_place'):
         return jsonify({'error': 'Not authenticated'}), 401
     privilege = flask_session.get('privilege', '')
-    if privilege not in ('admin', 'therapist'):
+    if privilege not in ('admin', 'therapist', 'engineer', 'supervisor'):
         return jsonify({'error': 'Forbidden'}), 403
 
     folder = find_patient_folder(flask_session['login_place'], homer_id)

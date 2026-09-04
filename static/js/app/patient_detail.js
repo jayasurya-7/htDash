@@ -1574,7 +1574,7 @@ const _FIELD_LABELS = {
   prescription_file:   'Prescription File',
   duration_minutes:    'Duration',
   worn_datetime:       'Worn Date/Time',
-  sync_datetime:       'Sync Date/Time',
+  sync_datetime:       'Initialized Date/Time',
   next_followup_days:  'Next Follow-up (days)',
   description:         'Description',
   action_taken:        'Action Taken',
@@ -2691,7 +2691,7 @@ function _watchRecordCard(wr, uploads) {
   const rightRow = _watchAssignmentRow('right', wr);
   const leftRow  = _watchAssignmentRow('left', wr);
 
-  const syncStr  = wr.sync_datetime  ? `<div class="text-xs text-slate-500"><span class="text-slate-400">Sync:</span> ${_fmtDateTime(wr.sync_datetime)}</div>`  : '';
+  const syncStr  = wr.sync_datetime  ? `<div class="text-xs text-slate-500"><span class="text-slate-400">Initialized:</span> ${_fmtDateTime(wr.sync_datetime)}</div>`  : '';
   const wornStr  = wr.worn_datetime  ? `<div class="text-xs text-slate-500"><span class="text-slate-400">Worn:</span> ${_fmtDateTime(wr.worn_datetime)}</div>`   : '';
   const nextStr  = wr.next_followup_days != null
     ? `<div class="text-xs text-slate-500"><span class="text-slate-400">Next check:</span> ${wr.next_followup_days} days</div>` : '';
@@ -6145,7 +6145,7 @@ async function _renderDeviceGraphs(container) {
             </div>
             <div>
               <p class="text-xs text-slate-400 leading-none">Active days</p>
-              <p class="text-lg font-bold leading-tight" style="color:${cfg.color}">${actualDays}<span class="text-xs font-normal text-slate-400 ml-0.5">/ 30</span></p>
+              <p class="text-lg font-bold leading-tight" style="color:${cfg.color}">${actualDays}<span class="text-xs font-normal text-slate-400 ml-0.5">/ 28</span></p>
             </div>
           </div>
         </div>
@@ -8079,9 +8079,11 @@ async function openWatchRecordModal(ev) {
 
     // Update sync/worn datetime disabled state
     function updateDatetimeFields() {
+      const NO_WATCH_VAL = '__none__';
       const isCurrent = !lostCb.checked && current && watchSel.value === current.id;
-      const syncRequired = !isCurrent;
-      const wornRequired = !isCurrent;
+      const isNoWatch = watchSel.value === NO_WATCH_VAL;
+      const syncRequired = !isCurrent && !isNoWatch;
+      const wornRequired = !isCurrent && !isNoWatch;
       syncInput.disabled = !syncRequired;
       wornInput.disabled = !wornRequired;
       if (!syncRequired) syncInput.value = '';
@@ -8117,12 +8119,14 @@ async function saveWatchRecord() {
 
   if (!newWatch) { setError('wr-error', 'Please select a watch or "No Watch Available".'); return; }
 
-  // Sync and worn datetime required unless keeping current watch
+  // Initialized and worn datetime required unless keeping current watch or no watch available
   const isCurrent = !watchIsLost && newWatch === _wrOldWatch;
-  if (!isCurrent && !syncDt) { setError('wr-error', 'Sync date & time is required when watch is changed.'); return; }
-  if (!isCurrent && !wornDt) { setError('wr-error', 'Worn date & time is required when watch is changed.'); return; }
+  const isNoWatch = newWatch === NO_WATCH;
+  if (!isCurrent && !isNoWatch && !syncDt) { setError('wr-error', 'Initialized date & time is required when watch is changed.'); return; }
+  if (!isCurrent && !isNoWatch && !wornDt) { setError('wr-error', 'Worn date & time is required when watch is changed.'); return; }
 
-  if (!nextDays || parseInt(nextDays) < 1) { setError('wr-error', 'Next follow-up days must be at least 1.'); return; }
+  if (nextDays === '' || nextDays === null) { setError('wr-error', 'Next follow-up days is required.'); return; }
+  if (parseInt(nextDays) < 0) { setError('wr-error', 'Next follow-up days cannot be negative.'); return; }
 
   if (newWatch === NO_WATCH && !notes) {
     setError('wr-error', 'Notes are required when a watch is not assigned — explain why.'); return;
@@ -9267,6 +9271,7 @@ let _drDevices  = [];
 
 async function openDeviceReturnModal(ev) {
   _drEventId = ev.id;
+  _drDevices = [];  // Reset devices array on open
 
   document.getElementById('dr-homer-id').textContent = PATIENT_HOMER_ID;
   const now = new Date();
@@ -9346,12 +9351,17 @@ function _updateDrIssueDateVisibility(i) {
 }
 
 async function saveDeviceReturn() {
+  console.log('saveDeviceReturn() called - Device Return form is being submitted');
   const completionDate = document.getElementById('dr-date').value;
   if (!completionDate) { setError('dr-error', 'Return date/time is required.'); return; }
   const now = new Date();
   if (new Date(completionDate) > now) { setError('dr-error', 'Return date cannot be in the future.'); return; }
 
   // Collect per-device data
+  if (!_drDevices || _drDevices.length === 0) {
+    setError('dr-error', 'No devices available to return.');
+    return;
+  }
   const deviceEntries = [];
   for (let i = 0; i < _drDevices.length; i++) {
     const d         = _drDevices[i];

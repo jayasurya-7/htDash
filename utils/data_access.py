@@ -154,14 +154,23 @@ def get_all_patients(hospital_folder: str) -> list:
 
 
 def find_patient_folder(login_place: str, homer_id: str) -> Optional[str]:
-    """Return the hospital folder that contains homer_id, or None if not found."""
+    """Return the hospital folder that contains homer_id.
+
+    SECURITY: Enforces hospital boundaries.
+    - Regular users (therapist/engineer/admin at a site): can only access their hospital
+    - Global supervisor (login_place='admin'): can search all hospitals
+    """
     folder = get_hospital_folder(login_place)
     if folder:
+        # User is tied to a specific hospital - only search that hospital
         return folder if read_patient_meta(folder, homer_id) else None
-    # Admin: search all hospitals
-    for f in Config.HOSPITALS:
-        if read_patient_meta(f, homer_id):
-            return f
+
+    # login_place is 'admin' (global supervisor/admin)
+    # Only then, search all hospitals
+    if login_place == 'admin':
+        for f in Config.HOSPITALS:
+            if read_patient_meta(f, homer_id):
+                return f
     return None
 
 
