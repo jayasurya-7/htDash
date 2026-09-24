@@ -326,6 +326,8 @@ def events():
             'adverse_event_followup_visit', 'adverse_event_clinical_visit',
             'a1_assessment', 'a2_assessment',
             'schedule_a1_call', 'schedule_a2_call',
+            'device_return',
+            'watch_data_upload',
             'a0_pdf_upload', 'a1_pdf_upload', 'a2_pdf_upload',
         })
         is_paused             = bool(patient.get('trainingPausedDate'))
